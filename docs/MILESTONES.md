@@ -7,7 +7,7 @@
 - [x] Mastra suspension and storage/runtime recreation probe.
 - [x] Native Codex filesystem sandbox probe with harmless sentinel files.
 - [x] Dedicated container API-key authentication recognized by Codex.
-- [ ] Real coding-engine fixture: first live request blocked by API quota.
+- [x] Real Codex coding-engine fixture passed using ChatGPT sign-in on 2026-10-29 (earlier API-key request was blocked by quota).
 - [x] Enabled shell/patch tools and command network isolation probed on native macOS and Docker Linux ARM64.
 
 ## M1 — Foundation (implemented)
@@ -22,7 +22,7 @@
 - [x] Compose, non-root execution, healthcheck, limits and restart smoke test.
 - [x] Native tests and documentation.
 
-## M2 — Single-engine vertical slice (implemented; live acceptance pending)
+## M2 — Single-engine vertical slice (implemented; live fixture verified)
 
 - [x] Worktree creation tested against dirty user checkout.
 - [x] Dedicated Codex login command and setup diagnostics.
@@ -34,7 +34,7 @@
 - [x] Pinned runtime shell/patch and validation containment tested; unsupported tools disabled.
 - [x] Execute/test/independent review/bounded repair/local commit loop.
 - [x] Fake-engine end-to-end tests and opt-in real Codex fixture command.
-- [ ] Authenticated real model fixture passes; attempted 2026-10-29, blocked by API quota before planning.
+- [x] Authenticated real model fixture passed with ChatGPT sign-in: planning, implementation, actual tests, independent review and local commit; original checkout unchanged.
 - [x] Durable execution runs, evidence and worktree reconciliation metadata.
 
 ## Later
@@ -62,10 +62,10 @@ Before the M2 live fixture, configure the dedicated account with `npm run cli --
 
 ## Acceptance commands
 
-- `npm run check`: 46 tests, typecheck and production build.
+- `npm run check`: 47 tests, typecheck and production build.
 - `npm run test:m2`: deterministic planning/implementation/review with real sandboxed validation and a local commit.
 - `npm run test:codex-protocol`: real pinned Codex shell/patch execution and structured events against a loopback model fixture; no account/API calls.
 - `npm run test:docker`: isolated service persistence plus M2 and protocol fixtures under Linux container restrictions.
-- `npm run test:codex-live`: opt-in authenticated native fixture, still pending. See README for the equivalent container command.
+- `npm run test:codex-live`: opt-in authenticated native fixture. The equivalent container command passed with ChatGPT sign-in; native authenticated execution remains unverified. See README.
 
 M2 deliberately supports one work item, serial execution, text changes, exact/subtree path grants and read-only Node/npm validation. Local inference, multiple engines, parallel scheduling, generated build output policies and external actions remain later work.

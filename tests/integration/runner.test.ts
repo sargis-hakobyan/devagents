@@ -106,3 +106,16 @@ test('cancellation at commit finalization returns conflict and preserves accurat
     assert.equal(checked, true); assert.equal(f.store.task(task.id).state, 'completed'); assert.ok(f.store.task(task.id).outcome!.commit);
   } finally { await runner.stop(); await f.cleanup(); }
 });
+
+test('approval with outstanding findings cannot bypass repair or create a commit', async () => {
+  const f = await fixture(); const engine = new FakeEngine({ contradictoryReview: true });
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'contradictory-review');
+    await runner.idle();
+    const done = f.store.task(task.id);
+    assert.equal(done.state, 'failed'); assert.match(done.outcome!.error!, /Repair budget exhausted/);
+    assert.equal(done.outcome!.repairCycles, 1);
+    assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
+  } finally { await runner.stop(); await f.cleanup(); }
+});

@@ -2,7 +2,7 @@
 
 DevAgents is an open-source, local-first AI development-team orchestrator, being built to plan, delegate, implement, test and review changes with configurable agents and replaceable coding engines.
 
-**Current status: M2 single-engine workflow implemented; authenticated model acceptance test pending.** A dynamic Tech Lead plans one work item, a configured developer implements it in an isolated worktree, real sandboxed commands validate it, and a separate reviewer gates a local commit. Approval waits, bounded repairs, cancellation and execution evidence are persisted. Credential-free native and Docker checks are documented in [milestones](docs/MILESTONES.md), [compatibility findings](docs/M0_FINDINGS.md), and [decisions](docs/DECISIONS.md).
+**Current status: M2 single-engine workflow implemented and live Codex fixture verified with ChatGPT sign-in.** A dynamic Tech Lead plans one work item, a configured developer implements it in an isolated worktree, real sandboxed commands validate it, and a separate reviewer gates a local commit. Approval waits, bounded repairs, cancellation and execution evidence are persisted. Credential-free native and Docker checks are documented in [milestones](docs/MILESTONES.md), [compatibility findings](docs/M0_FINDINGS.md), and [decisions](docs/DECISIONS.md).
 
 ## Docker quickstart
 
@@ -137,7 +137,7 @@ docker compose exec devagents node dist/cli/main.js auth codex
 docker compose exec -e OPENAI_API_KEY devagents node dist/cli/main.js auth codex --api-key-env OPENAI_API_KEY
 ```
 
-Never put literal keys in commands, YAML, commits or task requests. Login state stays in the dedicated data directory/volume; host credentials are not copied. Device login may require account/workspace enablement. Dedicated container API-key login is verified. The live model fixture was attempted but is blocked by API quota; ChatGPT device login remains unverified. A missing login fails the task with a setup error before creating a worktree; after login, submit a new task with a new retry key.
+Never put literal keys in commands, YAML, commits or task requests. Login state stays in the dedicated data directory/volume; host credentials are not copied. Device login may require account/workspace enablement. Dedicated container API-key login and ChatGPT device login are verified. The live M2 model fixture passed with ChatGPT sign-in on 2026-10-29; earlier API-key attempts were blocked by API quota. A missing login fails the task with a setup error before creating a worktree; after login, submit a new task with a new retry key.
 
 Anthropic API-key configuration is represented; its adapter is planned for M4. Third-party Claude subscription login needs an officially permitted integration, as explained in [M0 findings](docs/M0_FINDINGS.md). The container does not include Claude.
 

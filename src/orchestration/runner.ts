@@ -13,7 +13,11 @@ import { assertValidationCommand } from '../engines/codex/validator.js';
 
 const PlanningOutput = Plan.extend({ items: z.array(WorkItem.extend({ assignedAgent: z.string() })).length(1) });
 const ImplementationOutput = z.strictObject({ summary: z.string().min(1) });
-const ReviewOutput = z.strictObject({ approved: z.boolean(), summary: z.string().min(1), findings: z.array(z.string()) });
+const ReviewOutput = z.strictObject({
+  approved: z.boolean().describe('True only when requirements and validation pass and findings is empty.'),
+  summary: z.string().min(1).describe('Review rationale, including positive observations and test evidence.'),
+  findings: z.array(z.string().min(1)).describe('Actionable defects requiring repair only. Empty when approved. Do not include positive observations or passed checks.'),
+});
 const jsonSchema = (schema: z.ZodType): Record<string, unknown> => {
   const result = z.toJSONSchema(schema) as Record<string, unknown>;
   const clean = (value: unknown): void => {
@@ -141,7 +145,7 @@ export class TaskRunner {
           this.ensureActive(id, signal); this.move(id, 'reviewing', 'Independent review of the diff and validation evidence');
           for (const file of after.files) await new PolicyEngine().file(reviewer, task.workspace!.path, file, 'read');
           const readOnlyReviewer = { ...reviewer, permissions: { ...reviewer.permissions, writePaths: [], allowCommands: false } };
-          const review = await this.invoke(id, 'review', readOnlyReviewer, `Independently assess this change against the request and acceptance criteria. Do not modify files or execute commands. Approve only if requirements and tests are satisfied.\nRequest: ${task.request}\nUser acceptance criteria: ${JSON.stringify(task.acceptanceCriteria)}\nPlan: ${JSON.stringify(task.plan)}\nDiff and new files:\n${after.diff}\nActual validation evidence:\n${JSON.stringify(evidence).slice(0, 50000)}`, ReviewOutput, signal) as z.infer<typeof ReviewOutput>;
+          const review = await this.invoke(id, 'review', readOnlyReviewer, `Independently assess this change against the request and acceptance criteria. Do not modify files or execute commands. Approve only if requirements and tests are satisfied. The findings array contains only actionable defects requiring repair. Put positive observations and passed checks in summary. For approval return approved=true and findings=[]. For rejection return approved=false and explain the required repairs in findings.\nRequest: ${task.request}\nUser acceptance criteria: ${JSON.stringify(task.acceptanceCriteria)}\nPlan: ${JSON.stringify(task.plan)}\nDiff and new files:\n${after.diff}\nActual validation evidence:\n${JSON.stringify(evidence).slice(0, 50000)}`, ReviewOutput, signal) as z.infer<typeof ReviewOutput>;
           if (review.approved && review.findings.length === 0) {
             this.ensureActive(id, signal);
             const reviewed = await changes(task.workspace!, developer);

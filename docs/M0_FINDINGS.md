@@ -16,7 +16,7 @@ Investigated 2026-10-29. Documentation claims and observed behavior are distingu
 
 The official [non-interactive interface](https://learn.chatgpt.com/docs/non-interactive-mode) provides `codex exec`, JSONL events, schema-constrained final output and resumption. The pinned binary's help confirms those flags. The adapter normalizes vendor events and validates structured final output.
 
-[Authentication](https://learn.chatgpt.com/docs/auth) supports API keys and ChatGPT login, including device-code login when enabled for the account/workspace. DevAgents provides a dedicated profile/login command, without copying host credentials. Dedicated container API-key authentication is confirmed. The live fixture was attempted on 2026-10-29 but the first model request returned a quota/billing error; no live implementation or review completed. ChatGPT device login remains unverified.
+[Authentication](https://learn.chatgpt.com/docs/auth) supports API keys and ChatGPT login, including device-code login when enabled for the account/workspace. DevAgents provides a dedicated profile/login command, without copying host credentials. Dedicated container API-key authentication is confirmed. Earlier API-key fixture attempts on 2026-10-29 returned quota/billing errors before implementation. ChatGPT device login subsequently succeeded, and the full live M2 fixture passed in Docker using that saved login.
 
 [Permission profiles](https://learn.chatgpt.com/docs/permissions) are beta and constrain command filesystem/network access. M2 constrains the enabled shell and patch tools and ignores project/user configuration; the protocol fixture checks these boundaries. The workspace-write preset alone is not evidence for the full permission contract. Model traffic and tool traffic need separate handling.
 
@@ -32,9 +32,9 @@ The local binary version was checked. Claude container login and fixture executi
 
 ## Remaining gates
 
-1. Authenticated Codex fixture: scoped tools, implementation, actual tests, independent review and local commit.
+1. Authenticated native Codex fixture remains unverified; the Linux ARM64 container fixture passed with ChatGPT sign-in. Claude fixture execution remains M4 work.
 2. Re-run the pinned runtime protocol/containment fixtures before any Codex upgrade or additional tool is enabled. Current native and Docker shell/patch/network probes pass.
-3. In-container account/device login with the user's own credentials; credential-free startup already passes.
+3. Broader account/workspace compatibility beyond the verified personal ChatGPT device-login flow.
 4. Linux AMD64 and multi-architecture builds (M5).
 5. Real local-model execution/tool behavior in the follow-up phase. Configuration acceptance is not execution support.
 
@@ -45,8 +45,8 @@ The local binary version was checked. Claude container login and fixture executi
 - Disabling multi-agent feature flags alone did not remove delegation; `agents.enabled=false` did. Tool descriptions are carried in `additional_tools` input entries in this runtime, so inspecting only the legacy top-level `tools` array gives a false empty result.
 - Configuration path keys are supplied as complete TOML inline tables; dotted CLI keys misinterpret paths containing dots. Existing deny targets are enumerated because Linux bubblewrap rejects missing targets. Symlinks and hardlinks discovered before a run are denied; protected changes are also rejected before commit.
 - `OPENSSL_CONF=/dev/null` is needed for the native Node fixture because the scoped sandbox cannot read macOS’s system OpenSSL config.
-- The protocol fixture’s test-only executable wrapper needs an executable temporary mount in Docker. Production Codex is installed in `/usr/local`; its dedicated runtime home lives in the persistent `/data` volume.
-- API-key login is confirmed. A real model planning/coding/review fixture remains blocked by API quota. Credential-free protocol success does not establish model quality or account compatibility.
+- The protocol fixture’s test-only executable wrapper needs an executable temporary mount in Docker. Production Codex is installed in `/usr/local`; its dedicated runtime home lives on `/run/devagents-auth` tmpfs, with encrypted credentials persisted in `/data`.
+- API-key login is confirmed, though its live fixture was blocked by quota. The subsequent ChatGPT-authenticated planning/coding/review fixture passed. This demonstrates the bounded fixture, not arbitrary project or account compatibility.
 
 On Linux, denied parent paths can be hidden behind sandbox-only placeholders: an outside write may succeed inside that namespace without changing the original file. The protocol fixture verifies the original sentinel content after execution instead of relying solely on an error return.
 
@@ -55,3 +55,12 @@ The complete Docker smoke suite passed on Linux ARM64, including the determinist
 ## Live fixture attempt — 2026-10-29
 
 The dedicated container profile reports authenticated after API-key setup. The live fixture failed on its first planning request with “Quota exceeded. Check your plan and billing details.” No implementation, validation, review or task commit occurred. The temporary fixture was cleaned up; the service profile was retained. Retry after the API organization’s billing/quota issue is resolved. No repeated model calls were made after this error.
+
+
+## ChatGPT live acceptance — 2026-10-29
+
+The user completed ChatGPT device-code sign-in through the guided launcher and the optional connection test succeeded. Restarting through the launcher restored the encrypted ChatGPT credentials without another sign-in.
+
+The first full live run planned and implemented the greeting fix and passed the actual sandboxed test, but exhausted its repair budget because the reviewer returned `approved: true` with positive observations in `findings`. The commit gate correctly refused nonempty findings. The review prompt and schema descriptions now reserve findings for actionable defects and put positive observations/test evidence in summary; approval requires an empty findings array. A regression test confirms that contradictory approval with outstanding findings still cannot commit.
+
+After the clarification, `docker compose exec -T devagents node scripts/m2-smoke.mjs --live` passed: live planning and implementation, real sandboxed validation, separate review, and a local Git commit. The original fixture checkout was unchanged. The fixture removed only its temporary repository/data; the service credentials remain encrypted and reusable. No push or merge occurred. This closes the container M2 acceptance gate; it does not establish native authenticated, Claude, AMD64, or multi-agent acceptance.

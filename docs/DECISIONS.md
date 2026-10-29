@@ -55,3 +55,8 @@
 - Status interprets the pinned CLI’s login status without exposing raw output or key fragments. Storage success and verified model access are separate. A failed/mismatched login never falls back to testing the previous method.
 - Optional connection test uses the existing restricted Codex adapter, a fixed prompt, empty disposable workspace, no command/write grants, and a 45-second bound. It checks the saved profile and runtime default model only, not explicit environment-key overrides or all agent models. Failures produce fixed actionable messages and retain credentials; cancellation terminates the model process.
 - No paid/live account request is part of automated tests. Real Codex status and connection-probe protocol are covered by isolated fake-key and loopback fixtures. ChatGPT browser completion and the authenticated M2 fixture still require user participation and available account allowance.
+
+## Live review contract — 2026-10-29
+
+- The ChatGPT-authenticated fixture exposed ambiguity in `findings`: the model used it for positive review observations while approving. Define findings as actionable repair defects in both the prompt and schema descriptions; positive observations belong in summary.
+- Keep the existing fail-closed commit gate: approval with any outstanding findings still requires repair. Do not silently discard findings or trust the approval boolean alone. A regression fixture covers contradictory approval; the subsequent live container fixture passed through local commit.
