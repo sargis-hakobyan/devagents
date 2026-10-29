@@ -19,7 +19,8 @@ export class CodexValidator implements Validator {
     ];
     const env = safeEnvironment(home, temp);
     // The validation child has no access to credentials or the original checkout.
-    const result = await runProcess(this.binary, args, { cwd, env, signal, timeoutMs, maxBytes: 1024 * 1024 });
-    return { ...command, exitCode: result.exitCode, output: `${result.stdout}${result.stderr}` };
+    // Oversized output is truncated (head and tail kept) and recorded as evidence rather than failing the task outright.
+    const result = await runProcess(this.binary, args, { cwd, env, signal, timeoutMs, maxBytes: 1024 * 1024, overflow: 'truncate' });
+    return { ...command, exitCode: result.exitCode, output: `${result.stdout}${result.stderr}`, truncated: result.truncated };
   }
 }

@@ -43,3 +43,8 @@ test('repository checkout filters cannot execute during managed worktree creatio
     await assert.rejects(new WorkspaceManager(f.dataDir).create(f.store.project('fixture'), randomUUID()), /filters requires sandbox/);
   } finally { await f.cleanup(); }
 });
+
+test('oversized Git output is reported as an actionable error rather than a raw buffer failure', async () => {
+  const f = await fixture();
+  try { await assert.rejects(git(f.project, ['log'], true, 16), /git log output exceeded 16 bytes/); } finally { await f.cleanup(); }
+});

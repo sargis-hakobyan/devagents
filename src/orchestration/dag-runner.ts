@@ -13,7 +13,7 @@ import { changes, commitOwned, commitChanges } from '../workspace/changes.js';
 import { integrationSnapshot, integrateItem, assertIntegrationConfig } from '../workspace/integration.js';
 import { hiddenFiles, assertHiddenUnchanged } from '../workspace/hidden.js';
 import { conflictBaselines, unresolvedMarkers } from '../workspace/conflicts.js';
-import { assertValidationCommands } from '../domain/validation.js';
+import { assertValidationCommands, validationFailed, describeValidationFailure } from '../domain/validation.js';
 import { selectImplementer, independentReviewer } from '../domain/roles.js';
 
 type Workspace = NonNullable<Task['workspace']>;
@@ -110,7 +110,7 @@ export async function runDag(h: Hooks): Promise<void> {
         const evidence = await validate(worker.path, item.validation, workerSignal, item.id);
         const after = await changes(worker, developer);
         if (before.digest !== after.digest) throw new AppError('validation_mutated_files', 'Validation changed work item files');
-        if (evidence.some(e => e.exitCode !== 0)) feedback = `Repair failed validation:\n${JSON.stringify(evidence).slice(0, 50000)}`;
+        if (validationFailed(evidence)) feedback = `${describeValidationFailure(evidence)}. Repair failed validation:\n${JSON.stringify(evidence).slice(0, 50000)}`;
         else {
           check(); state(item.id, 'reviewing');
           const assessment = await review(after, evidence, worker.path, item.id, item, workerSignal);
@@ -204,7 +204,7 @@ export async function runDag(h: Hooks): Promise<void> {
       const after = await changes(workspace, integrator);
       if (before.digest !== after.digest) throw new AppError('validation_mutated_files', 'Combined validation changed project files');
       let feedback = '';
-      if (evidence.some(e => e.exitCode !== 0)) feedback = `Combined validation failed:\n${JSON.stringify(evidence).slice(0, 50000)}`;
+      if (validationFailed(evidence)) feedback = `${describeValidationFailure(evidence)}. Combined validation failed:\n${JSON.stringify(evidence).slice(0, 50000)}`;
       else {
         h.active(); h.move('reviewing', 'Independent combined review');
         const assessment = await review(after, evidence, workspace.path, '@integration', plan, signal);

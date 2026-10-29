@@ -12,7 +12,7 @@ import { changes, commitChanges } from '../workspace/changes.js';
 import { hiddenFiles, assertHiddenUnchanged } from '../workspace/hidden.js';
 import { scopeAgent } from '../domain/ownership.js';
 import { runDag } from './dag-runner.js';
-import { assertValidationCommands } from '../domain/validation.js';
+import { assertValidationCommands, validationFailed, describeValidationFailure } from '../domain/validation.js';
 import { selectImplementer, independentReviewer } from '../domain/roles.js';
 import { ImplementationOutput, ReviewOutput, outputJsonSchema } from './outputs.js';
 
@@ -91,7 +91,7 @@ export class TaskRunner {
       }
       if (task.state === 'planning') {
         const allowed: string[] = [];
-        for (const file of (await git(task.workspace!.path, ['ls-files', '-z'], false)).split('\0').filter(Boolean)) {
+        for (const file of (await git(task.workspace!.path, ['ls-files', '-z'], false, 64 * 1024 * 1024)).split('\0').filter(Boolean).slice(0, 20000)) {
           if (protectedPath(file)) continue;
           try { await new PolicyEngine().file(lead, task.workspace!.path, file, 'read'); allowed.push(file); }
           catch (error) { if (!(error instanceof AppError)) throw error; }
@@ -141,7 +141,7 @@ export class TaskRunner {
         }
         const after = await changes(task.workspace!, developer);
         if (before.digest !== after.digest) throw new AppError('validation_mutated_files', 'Validation changed reviewed project files');
-        if (evidence.some(e => e.exitCode !== 0)) feedback = `Validation failed. Repair these failures:\n${JSON.stringify(evidence).slice(0, 50000)}`;
+        if (validationFailed(evidence)) feedback = `${describeValidationFailure(evidence)}. Repair these failures:\n${JSON.stringify(evidence).slice(0, 50000)}`;
         else {
           this.ensureActive(id, signal); this.move(id, 'reviewing', 'Independent review of the diff and validation evidence');
           for (const file of after.files) await new PolicyEngine().file(reviewer, task.workspace!.path, file, 'read');

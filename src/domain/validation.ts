@@ -16,3 +16,12 @@ export function assertValidationCommands(commands: ValidationCommand[], subject:
   if (!commands.length) throw new AppError('missing_validation', `${subject} needs at least one validation command`);
   commands.forEach(assertValidationCommand);
 }
+
+/** A validation passed only when it exited 0 and its complete output was captured as evidence. */
+export function validationFailed(results: { exitCode: number; truncated?: boolean }[]): boolean {
+  return results.some(r => r.exitCode !== 0 || r.truncated === true);
+}
+export function describeValidationFailure(results: { exitCode: number; truncated?: boolean }[]): string {
+  const truncated = results.some(r => r.truncated);
+  return truncated ? 'Validation failed or produced more output than the evidence limit allows (truncated below); make the checks pass and reduce their output' : 'Validation failed';
+}

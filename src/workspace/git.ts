@@ -9,10 +9,16 @@ import { ProjectInput, type Project } from '../domain/schemas.js';
 
 const exec = promisify(execFile);
 export async function git(cwd: string, args: string[], trim = true, maxBuffer = 2 * 1024 * 1024): Promise<string> {
-  const { stdout } = await exec('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'core.attributesFile=/dev/null', '-c', 'submodule.recurse=false', '-c', `safe.directory=${cwd}`, '-c', 'protocol.file.allow=never', ...args], {
-    cwd, timeout: 30000, maxBuffer,
-    env: { PATH: process.env.PATH, HOME: homedir(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_ATTR_NOSYSTEM: '1', GIT_LITERAL_PATHSPECS: '1', GIT_TERMINAL_PROMPT: '0' },
-  });
+  let stdout: string;
+  try {
+    ({ stdout } = await exec('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'core.attributesFile=/dev/null', '-c', 'submodule.recurse=false', '-c', `safe.directory=${cwd}`, '-c', 'protocol.file.allow=never', ...args], {
+      cwd, timeout: 30000, maxBuffer,
+      env: { PATH: process.env.PATH, HOME: homedir(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_ATTR_NOSYSTEM: '1', GIT_LITERAL_PATHSPECS: '1', GIT_TERMINAL_PROMPT: '0' },
+    }));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') throw new AppError('git_output_limit', `git ${args.find(a => !a.startsWith('-') && a !== 'core.hooksPath=/dev/null') ?? ''} output exceeded ${maxBuffer} bytes; the change or repository listing is too large for this version`);
+    throw error;
+  }
   return trim ? stdout.trim() : stdout;
 }
 export async function inspectProject(input: unknown): Promise<Project> {

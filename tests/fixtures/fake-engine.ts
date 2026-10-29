@@ -8,7 +8,7 @@ import { AppError } from '../../src/domain/errors.js';
 export class FakeEngine implements CodingEngine {
   readonly id = 'codex';
   calls: EngineRequest[] = [];
-  constructor(readonly options: { failFirstTest?: boolean; rejectReviews?: boolean; emptyRejection?: boolean; contradictoryReview?: boolean; mutateReview?: boolean; waitForCancel?: boolean } = {}) {}
+  constructor(readonly options: { failFirstTest?: boolean; noisyFirstTest?: boolean; rejectReviews?: boolean; emptyRejection?: boolean; contradictoryReview?: boolean; mutateReview?: boolean; waitForCancel?: boolean } = {}) {}
   async preflight(): Promise<void> {}
   async execute(request: EngineRequest): Promise<EngineResult> {
     this.calls.push(request);
@@ -22,7 +22,8 @@ export class FakeEngine implements CodingEngine {
       });
       const broken = this.options.failFirstTest && this.calls.filter(c => c.phase === 'implementation').length === 1;
       await writeFile(join(request.cwd, 'greeting.cjs'), `module.exports = () => '${broken ? 'broken' : 'hello'}';\n`);
-      await writeFile(join(request.cwd, 'greeting.test.cjs'), "const test = require('node:test'); const assert = require('node:assert/strict'); const greet = require('./greeting.cjs'); test('greeting', () => assert.equal(greet(), 'hello'));\n");
+      const noisy = this.options.noisyFirstTest && this.calls.filter(c => c.phase === 'implementation').length === 1;
+      await writeFile(join(request.cwd, 'greeting.test.cjs'), `${noisy ? "console.log('BEGIN-NOISE'); console.log('n'.repeat(1536 * 1024)); console.log('END-NOISE');\n" : ''}const test = require('node:test'); const assert = require('node:assert/strict'); const greet = require('./greeting.cjs'); test('greeting', () => assert.equal(greet(), 'hello'));\n`);
       return { output: { summary: 'Implemented greeting and tests' } };
     }
     if (this.options.mutateReview) await writeFile(join(request.cwd, 'greeting.cjs'), "module.exports = () => 'tampered';\n");
@@ -33,7 +34,7 @@ export class FakeEngine implements CodingEngine {
 // Only used with the hardcoded fixture above, never exposed to user/model commands.
 export class FixtureValidator implements Validator {
   async execute(cwd: string, command: { executable: string; args: string[] }, signal: AbortSignal, timeoutMs: number) {
-    const result = await runProcess(process.execPath, command.args, { cwd, env: { PATH: process.env.PATH }, signal, timeoutMs });
-    return { ...command, exitCode: result.exitCode, output: result.stdout + result.stderr };
+    const result = await runProcess(process.execPath, command.args, { cwd, env: { PATH: process.env.PATH }, signal, timeoutMs, maxBytes: 1024 * 1024, overflow: 'truncate' });
+    return { ...command, exitCode: result.exitCode, output: result.stdout + result.stderr, truncated: result.truncated };
   }
 }

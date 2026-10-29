@@ -285,3 +285,19 @@ test('a rejection without findings is malformed review output and does not consu
     assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
   } finally { await runner.stop(); await f.cleanup(); }
 });
+
+test('validation output beyond the evidence limit is truncated, recorded, and repaired instead of failing the task', async () => {
+  const f = await fixture(); const engine = new FakeEngine({ noisyFirstTest: true });
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'noisy'); await runner.idle();
+    const done = f.store.task(task.id); assert.equal(done.state, 'completed', JSON.stringify(done.outcome)); assert.equal(done.outcome!.repairCycles, 1);
+    const validations = f.store.evidence(task.id).filter(e => e.kind === 'validation').map(e => e.data as { exitCode: number; truncated?: boolean; output: string });
+    assert.equal(validations.length, 2);
+    assert.equal(validations[0]!.exitCode, 0); assert.equal(validations[0]!.truncated, true);
+    assert.match(validations[0]!.output, /BEGIN-NOISE/); assert.match(validations[0]!.output, /bytes truncated/); assert.match(validations[0]!.output, /END-NOISE/);
+    assert.ok(Buffer.byteLength(validations[0]!.output) < 1024 * 1024);
+    assert.equal(validations[1]!.truncated, false);
+    assert.match(engine.calls.filter(c => c.phase === 'implementation')[1]!.prompt, /more output than the evidence limit allows/);
+  } finally { await runner.stop(); await f.cleanup(); }
+});

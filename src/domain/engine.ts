@@ -13,7 +13,7 @@ export interface CodingEngine {
   preflight(provider: AppConfig['providers'][number]): Promise<void>;
   execute(request: EngineRequest, progress: (event: EngineProgress) => void): Promise<EngineResult>;
 }
-export type ValidationResult = { executable: string; args: string[]; exitCode: number; output: string };
+export type ValidationResult = { executable: string; args: string[]; exitCode: number; output: string; truncated?: boolean };
 export interface Validator {
   execute(cwd: string, command: { executable: string; args: string[] }, signal: AbortSignal, timeoutMs: number): Promise<ValidationResult>;
 }
