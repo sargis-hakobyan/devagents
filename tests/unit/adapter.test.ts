@@ -60,3 +60,41 @@ process.stdin.on('end', () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('planning and review processes never receive write grants beyond temp; the shell tool follows allowCommands', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'adapter-phases-'));
+  const binary = join(root, 'codex'); const cwd = join(root, 'project'); const capture = join(root, 'argv.json'); await mkdir(cwd);
+  await writeFile(join(cwd, 'file.txt'), 'x');
+  const agents = await loadRegistry([builtinDirectory], Config.parse({ schemaVersion: 1 }));
+  const developer = agents.find(a => a.id === 'general-developer')!; const lead = agents.find(a => a.id === 'tech-lead')!; const reviewer = agents.find(a => a.id === 'code-reviewer')!;
+  const adapter = new CodexAdapter(join(root, 'data'), binary);
+  await writeFile(binary, `#!${process.execPath}
+if (process.argv.includes('--version')) { console.log('codex-cli 0.160.1'); process.exit(0); }
+if (process.argv.includes('login')) process.exit(0);
+require('node:fs').writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv));
+process.stdin.resume(); process.stdin.on('end', () => {
+  console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: '{"ok":true}' } }));
+  console.log(JSON.stringify({ type: 'turn.completed', usage: {} }));
+});
+`, { mode: 0o700 });
+  const grants = async (phase: 'planning' | 'implementation' | 'review', agent: typeof developer) => {
+    await adapter.execute({ runId: `phase-${phase}`, phase, cwd, prompt: 'x', agent, provider: { id: 'openai', kind: 'openai', auth: 'login' }, schema: {}, signal: new AbortController().signal, timeoutMs: 5000 }, () => {});
+    const argv = JSON.parse(await readFile(capture, 'utf8')) as string[];
+    const permissions = argv.find(a => a.startsWith('permissions='))!;
+    const writes = [...permissions.matchAll(/"((?:[^"\\]|\\.)*)"="write"/g)].map(m => JSON.parse(`"${m[1]}"`) as string);
+    return { writes, shell: argv.find(a => a.startsWith('features.shell_tool='))! };
+  };
+  try {
+    const implementation = await grants('implementation', developer);
+    assert.ok(implementation.writes.some(w => !w.includes('/tmp')), 'implementation writes the project');
+    assert.equal(implementation.shell, 'features.shell_tool=true');
+    // A writable role used for planning or review still gets a read-only project; only its temp directory is writable.
+    for (const phase of ['planning', 'review'] as const) {
+      const result = await grants(phase, developer);
+      assert.deepEqual(result.writes.filter(w => !w.includes('/tmp')), [], `${phase} must not write the project`);
+    }
+    // The Tech Lead keeps its shell (read-only project, no network) to inspect files; the reviewer has none.
+    assert.equal((await grants('planning', lead)).shell, 'features.shell_tool=true');
+    assert.equal((await grants('review', { ...reviewer, permissions: { ...reviewer.permissions, allowCommands: false } })).shell, 'features.shell_tool=false');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
