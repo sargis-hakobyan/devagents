@@ -4,7 +4,7 @@ import { Store } from '../persistence/store.js';
 import { Mode, TaskInput, type AgentDefinition, type AppConfig, type Task } from '../domain/schemas.js';
 import { terminalStates } from '../domain/lifecycle.js';
 import { AppError } from '../domain/errors.js';
-import { inspectProject } from '../workspace/git.js';
+import { inspectProject, WorkspaceManager } from '../workspace/git.js';
 import { builtinDirectory, loadRegistry } from '../agents/registry.js';
 import { validatePlan } from '../domain/plan.js';
 import { isWithin } from '../workspace/paths.js';
@@ -56,6 +56,24 @@ export class TaskService {
     if (task.state !== 'awaiting_plan_approval') throw new AppError('invalid_transition', 'Task is not awaiting plan approval', 409);
     const updated = this.store.transition(id, version, 'ready', 'user', 'Plan explicitly approved');
     this.runner?.enqueue(id); return updated;
+  }
+  /** Explicit, user-invoked removal of a finished task's managed worktrees and item branches. Never automatic. */
+  async cleanup(id: string): Promise<{ removedWorktrees: string[]; removedBranches: string[]; keptBranches: string[] }> {
+    const task = this.store.task(id);
+    if (!terminalStates.includes(task.state)) throw new AppError('task_active', 'Cleanup requires a completed, failed or cancelled task', 409);
+    const seen = new Set<string>(); const workspaces: { path: string; branch: string }[] = [];
+    const add = (w: unknown) => {
+      const workspace = w as { path?: unknown; branch?: unknown } | undefined;
+      if (typeof workspace?.path !== 'string' || typeof workspace?.branch !== 'string' || seen.has(workspace.path)) return;
+      seen.add(workspace.path); workspaces.push({ path: workspace.path, branch: workspace.branch });
+    };
+    add(task.workspace);
+    for (const event of this.store.evidence(id)) if (event.kind === 'work-item') add((event.data as { workspace?: unknown }).workspace);
+    // A completed task's branch is the deliverable; failed or cancelled tasks leave nothing worth keeping.
+    const keep = new Set(task.state === 'completed' && task.workspace ? [task.workspace.branch] : []);
+    const result = await new WorkspaceManager(this.dataDir).cleanup(this.store.project(task.projectId), id, workspaces, keep);
+    this.store.record(id, 'cleanup', result);
+    return result;
   }
   cancel(id: string): Task {
     const task = this.store.task(id);

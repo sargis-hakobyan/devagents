@@ -262,3 +262,18 @@ for (const unresolved of ['markers', 'separator'] as const) test(`a repair that 
     assert.equal(f.calls.some(c => c.workItemId === 'c'), false);
   } finally { await f.runner.stop(); await f.cleanup(); }
 });
+test('cleanup of a completed DAG task removes every item worktree and item branch but keeps the task branch', async () => {
+  const f = await dagFixture();
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Three modules', mode: 'autonomous' }, 'dag-cleanup'); await f.runner.idle();
+    const done = f.store.task(task.id); assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
+    const before = (await git(f.project, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/'])).split('\n').filter(Boolean);
+    assert.equal(before.filter(b => b.startsWith(`codex/devagents-${task.id}-`)).length, 3);
+    const result = await f.service.cleanup(task.id);
+    assert.equal(result.removedWorktrees.length, 4); assert.equal(result.removedBranches.length, 3); assert.deepEqual(result.keptBranches, [done.workspace!.branch]);
+    const after = (await git(f.project, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/'])).split('\n').filter(Boolean).sort();
+    assert.deepEqual(after, [done.workspace!.branch, 'main']);
+    assert.equal((await git(f.project, ['worktree', 'list', '--porcelain'], false)).split('\n').filter(l => l.startsWith('worktree ')).length, 1);
+    assert.equal(await git(f.project, ['rev-parse', done.workspace!.branch]), done.outcome!.commit);
+  } finally { await f.runner.stop(); await f.cleanup(); }
+});

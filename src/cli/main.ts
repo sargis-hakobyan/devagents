@@ -89,6 +89,7 @@ tasks.command('mode <id> <mode>').action(async (id: string, mode: string) => pri
 tasks.command('plan <id> <file>').description('Store a validated plan from YAML or JSON (manual M1 checkpoint)').action(async (id: string, file: string) => print(await request(`/tasks/${id}/plan`, 'POST', parse(await readFile(file, 'utf8')))));
 tasks.command('approve <id>').requiredOption('--version <version>', 'Version of the plan you reviewed').action(async (id: string, opts: { version: string }) => print(await request(`/tasks/${id}/approve`, 'POST', { version: Number(opts.version) })));
 tasks.command('cancel <id>').action(async (id: string) => print(await request(`/tasks/${id}/cancel`, 'POST', {})));
+tasks.command('cleanup <id>').description('Remove a finished task’s managed worktrees and item branches (keeps a completed task’s branch)').action(async (id: string) => print(await request(`/tasks/${id}/cleanup`, 'POST', {})));
 const auth = cli.command('auth');
 auth.command('vault-exists').description('Report whether encrypted credentials exist').action(async () => {
   const vault = await configuredVault(dataDirectory());

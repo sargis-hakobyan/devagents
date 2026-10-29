@@ -49,7 +49,7 @@ export function createApi(service: TaskService, token: string) {
         const key = z.string().min(1).max(200).parse(req.headers['idempotency-key']);
         return send(res, 201, service.submit(await body(req), key));
       }
-      const match = /^\/tasks\/([a-f0-9-]{36})(?:\/(events|evidence|items|run|mode|plan|approve|cancel))?$/.exec(path);
+      const match = /^\/tasks\/([a-f0-9-]{36})(?:\/(events|evidence|items|run|mode|plan|approve|cancel|cleanup))?$/.exec(path);
       if (match) {
         const id = match[1]!; const action = match[2];
         if (req.method === 'GET' && !action) return send(res, 200, service.store.task(id));
@@ -62,6 +62,7 @@ export function createApi(service: TaskService, token: string) {
           if (action === 'plan') return send(res, 200, await service.proposePlan(id, await body(req)));
           if (action === 'approve') return send(res, 200, service.approve(id, z.strictObject({ version: z.number().int().nonnegative() }).parse(await body(req)).version));
           if (action === 'cancel') return send(res, 200, service.cancel(id));
+          if (action === 'cleanup') return send(res, 200, await service.cleanup(id));
         }
       }
       throw new AppError('not_found', 'Unknown endpoint', 404);

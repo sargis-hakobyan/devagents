@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, realpath, stat } from 'node:fs/promises';
+import { isWithin } from './paths.js';
 import { homedir } from 'node:os';
-import { isAbsolute, join, parse, resolve } from 'node:path';
+import { basename, isAbsolute, join, parse, resolve } from 'node:path';
 import { AppError } from '../domain/errors.js';
 import { ProjectInput, type Project } from '../domain/schemas.js';
 
@@ -33,6 +34,34 @@ export class WorkspaceManager {
   async createItem(project: Project, taskId: string, itemId: string, baseSha: string): Promise<{ path: string; branch: string; baseSha: string }> {
     if (!/^[a-z][a-z0-9-]{0,63}$/.test(itemId) || !/^[a-f0-9]{40}$/.test(baseSha)) throw new AppError('invalid_work_item', 'Invalid work item or base commit');
     return this.createOwned(project, taskId, itemId, baseSha);
+  }
+  /**
+   * Removes the managed worktrees of one task and deletes their branches, except branches named in
+   * `keepBranches` (a completed task's branch holds the reviewed commit). Everything must be provably
+   * ours: a registered worktree whose path sits under this data directory's worktrees folder and whose
+   * name and branch carry the task ID. Anything else is refused rather than skipped.
+   */
+  async cleanup(project: Project, taskId: string, workspaces: { path: string; branch: string }[], keepBranches: ReadonlySet<string> = new Set()): Promise<{ removedWorktrees: string[]; removedBranches: string[]; keptBranches: string[] }> {
+    if (!/^[a-f0-9-]{36}$/.test(taskId)) throw new AppError('invalid_task_id', 'Invalid worktree owner ID');
+    if (await realpath(project.path) !== project.path) throw new AppError('path_denied', 'Registered project path changed');
+    const parent = await realpath(resolve(this.dataDir, 'worktrees')).catch(() => undefined);
+    const registered = new Set((await git(project.path, ['worktree', 'list', '--porcelain'], false)).split('\n').filter(l => l.startsWith('worktree ')).map(l => l.slice('worktree '.length)));
+    const branches = new Set((await git(project.path, ['for-each-ref', '--format=%(refname:short)', `refs/heads/codex/devagents-${taskId}`, `refs/heads/codex/devagents-${taskId}-*`])).split('\n').filter(Boolean));
+    const result = { removedWorktrees: [] as string[], removedBranches: [] as string[], keptBranches: [] as string[] };
+    // Validate every entry before touching anything, so one refused entry leaves the task untouched.
+    for (const workspace of workspaces) {
+      const managed = parent !== undefined && isWithin(parent, workspace.path) && workspace.path !== parent && basename(workspace.path).startsWith(taskId) && workspace.branch.startsWith(`codex/devagents-${taskId}`);
+      if (!managed || workspace.path === project.path || isWithin(workspace.path, project.path)) throw new AppError('path_denied', `Refusing to remove ${workspace.path}: not a managed worktree of task ${taskId}`);
+    }
+    for (const workspace of workspaces) {
+      if (registered.has(workspace.path)) { await git(project.path, ['worktree', 'remove', '--force', workspace.path]); result.removedWorktrees.push(workspace.path); }
+      if (!branches.has(workspace.branch)) continue;
+      if (keepBranches.has(workspace.branch)) result.keptBranches.push(workspace.branch);
+      else { await git(project.path, ['branch', '-D', workspace.branch]); result.removedBranches.push(workspace.branch); }
+    }
+    // Drop stale registrations of worktree directories that no longer exist (crash between intent and creation).
+    await git(project.path, ['worktree', 'prune']);
+    return result;
   }
   private async createOwned(project: Project, taskId: string, itemId?: string, source?: string): Promise<{ path: string; branch: string; baseSha: string }> {
     if (!/^[a-f0-9-]{36}$/.test(taskId)) throw new AppError('invalid_task_id', 'Invalid worktree owner ID');
