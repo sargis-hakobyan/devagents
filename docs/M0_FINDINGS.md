@@ -16,7 +16,7 @@ Investigated 2026-10-29. Documentation claims and observed behavior are distingu
 
 The official [non-interactive interface](https://learn.chatgpt.com/docs/non-interactive-mode) provides `codex exec`, JSONL events, schema-constrained final output and resumption. The pinned binary's help confirms those flags. The adapter normalizes vendor events and validates structured final output.
 
-[Authentication](https://learn.chatgpt.com/docs/auth) supports API keys and ChatGPT login, including device-code login when enabled for the account/workspace. DevAgents provides a dedicated profile/login command, without copying host credentials. An account login and paid fixture run have **not** been performed.
+[Authentication](https://learn.chatgpt.com/docs/auth) supports API keys and ChatGPT login, including device-code login when enabled for the account/workspace. DevAgents provides a dedicated profile/login command, without copying host credentials. Dedicated container API-key authentication is confirmed. The live fixture was attempted on 2026-10-29 but the first model request returned a quota/billing error; no live implementation or review completed. ChatGPT device login remains unverified.
 
 [Permission profiles](https://learn.chatgpt.com/docs/permissions) are beta and constrain command filesystem/network access. M2 constrains the enabled shell and patch tools and ignores project/user configuration; the protocol fixture checks these boundaries. The workspace-write preset alone is not evidence for the full permission contract. Model traffic and tool traffic need separate handling.
 
@@ -46,8 +46,12 @@ The local binary version was checked. Claude container login and fixture executi
 - Configuration path keys are supplied as complete TOML inline tables; dotted CLI keys misinterpret paths containing dots. Existing deny targets are enumerated because Linux bubblewrap rejects missing targets. Symlinks and hardlinks discovered before a run are denied; protected changes are also rejected before commit.
 - `OPENSSL_CONF=/dev/null` is needed for the native Node fixture because the scoped sandbox cannot read macOS’s system OpenSSL config.
 - The protocol fixture’s test-only executable wrapper needs an executable temporary mount in Docker. Production Codex is installed in `/usr/local`; its dedicated runtime home lives in the persistent `/data` volume.
-- Authenticated user login and a real model planning/coding/review fixture remain pending. Credential-free protocol success does not establish model quality or account compatibility.
+- API-key login is confirmed. A real model planning/coding/review fixture remains blocked by API quota. Credential-free protocol success does not establish model quality or account compatibility.
 
 On Linux, denied parent paths can be hidden behind sandbox-only placeholders: an outside write may succeed inside that namespace without changing the original file. The protocol fixture verifies the original sentinel content after execution instead of relying solely on an error return.
 
 The complete Docker smoke suite passed on Linux ARM64, including the deterministic M2 workflow, actual Codex protocol/tool fixture, container startup, task persistence and retry idempotency.
+
+## Live fixture attempt — 2026-10-29
+
+The dedicated container profile reports authenticated after API-key setup. The live fixture failed on its first planning request with “Quota exceeded. Check your plan and billing details.” No implementation, validation, review or task commit occurred. The temporary fixture was cleaned up; the service profile was retained. Retry after the API organization’s billing/quota issue is resolved. No repeated model calls were made after this error.

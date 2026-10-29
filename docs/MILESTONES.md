@@ -6,7 +6,8 @@
 - [x] Installed versions, native platform and Docker ARM64 startup.
 - [x] Mastra suspension and storage/runtime recreation probe.
 - [x] Native Codex filesystem sandbox probe with harmless sentinel files.
-- [ ] Authenticated container login and real coding-engine fixtures.
+- [x] Dedicated container API-key authentication recognized by Codex.
+- [ ] Real coding-engine fixture: first live request blocked by API quota.
 - [x] Enabled shell/patch tools and command network isolation probed on native macOS and Docker Linux ARM64.
 
 ## M1 — Foundation (implemented)
@@ -30,7 +31,7 @@
 - [x] Pinned runtime shell/patch and validation containment tested; unsupported tools disabled.
 - [x] Execute/test/independent review/bounded repair/local commit loop.
 - [x] Fake-engine end-to-end tests and opt-in real Codex fixture command.
-- [ ] Authenticated real model fixture passes with the user’s dedicated login.
+- [ ] Authenticated real model fixture passes; attempted 2026-10-29, blocked by API quota before planning.
 - [x] Durable execution runs, evidence and worktree reconciliation metadata.
 
 ## Later

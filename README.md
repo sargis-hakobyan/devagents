@@ -101,7 +101,7 @@ docker compose exec devagents node dist/cli/main.js auth codex
 docker compose exec -e OPENAI_API_KEY devagents node dist/cli/main.js auth codex --api-key-env OPENAI_API_KEY
 ```
 
-Never put literal keys in commands, YAML, commits or task requests. Login state stays in the dedicated data directory/volume; host credentials are not copied. Device login may require account/workspace enablement. Successful account login and the live model fixture remain unverified acceptance gates. A missing login fails the task with a setup error before creating a worktree; after login, submit a new task with a new retry key.
+Never put literal keys in commands, YAML, commits or task requests. Login state stays in the dedicated data directory/volume; host credentials are not copied. Device login may require account/workspace enablement. Dedicated container API-key login is verified. The live model fixture was attempted but is blocked by API quota; ChatGPT device login remains unverified. A missing login fails the task with a setup error before creating a worktree; after login, submit a new task with a new retry key.
 
 Anthropic API-key configuration is represented; its adapter is planned for M4. Third-party Claude subscription login needs an officially permitted integration, as explained in [M0 findings](docs/M0_FINDINGS.md). The container does not include Claude.
 
