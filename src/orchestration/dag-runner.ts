@@ -28,6 +28,7 @@ type Hooks = {
 export async function runDag(h: Hooks): Promise<void> {
   const { service, task, agents, signal } = h;
   const plan = task.plan!; const workspace = task.workspace!; const project = service.store.project(task.projectId);
+  const originalStatus = await git(project.path, ['status', '--porcelain=v1', '--untracked-files=all']);
   if (!plan.integration) throw new AppError('invalid_plan', 'Multi-item execution requires integration instructions');
   const record = (kind: string, data: unknown) => service.store.record(task.id, kind, data);
   const state = (itemId: string, state: string, data: Record<string, unknown> = {}) => record('work-item', { itemId, state, ...data });
@@ -66,8 +67,20 @@ export async function runDag(h: Hooks): Promise<void> {
   };
   const review = async (current: Awaited<ReturnType<typeof changes>>, evidence: ValidationResult[], cwd: string, itemId: string, criteria: unknown, workerSignal: AbortSignal) => {
     for (const file of current.files) await new PolicyEngine().file(reviewer, cwd, file, 'read');
+    const combined = itemId === '@integration';
+    const sourceStatus = await git(project.path, ['status', '--porcelain=v1', '--untracked-files=all']);
+    const workspaceEvidence = {
+      isolatedWorktree: cwd !== project.path,
+      originalHeadUnchanged: await git(project.path, ['rev-parse', 'HEAD']) === workspace.baseSha,
+      originalGitStatusUnchanged: sourceStatus === originalStatus,
+      originalGitStatusCleanBeforeAndNow: originalStatus === '' && sourceStatus === '',
+    };
+    record('review-context', { workItemId: itemId, stage: combined ? 'combined' : 'item', workspaceEvidence });
+    const stage = combined
+      ? 'FINAL COMBINED GATE: assess the complete request, all user acceptance criteria, the full diff and combined validation. Approval permits the final task commit. Missing combined validation or any actionable defect must block approval.'
+      : 'ITEM INTEGRATION GATE: assess only this item\'s deliverable, owned changes and declared item validation. Approval permits integration of this item, not task completion. Task-wide tests and acceptance checks run at the mandatory final combined gate after all items are integrated. Do not demand combined validation at this item gate or ask the implementer to access the original checkout. Report defects in this item; defer checks explicitly reserved for the combined gate.';
     return await invoke('review', readOnlyReviewer,
-      `Independently review this ${itemId === '@integration' ? 'combined change' : 'work item'} against its acceptance criteria. Do not modify files or execute commands. Findings must contain only actionable defects requiring repair. Positive observations belong in summary. Approve only with approved=true and findings=[].\nUser request: ${task.request}\nUser acceptance criteria: ${JSON.stringify(task.acceptanceCriteria)}\nScope and acceptance criteria: ${JSON.stringify(criteria)}\nDiff:\n${current.diff}\nActual validation:\n${JSON.stringify(evidence).slice(0, 50000)}`,
+      `Independently review this ${combined ? 'combined change' : 'work item'} against its acceptance criteria. ${stage} Do not modify files or execute commands. Findings must contain only actionable defects requiring repair. Positive observations belong in summary. Approve only with approved=true and findings=[].\nOrchestrator workspace evidence: ${JSON.stringify(workspaceEvidence)}. Git-status comparisons do not attest ignored files or the contents of already-dirty/untracked files.\nUser request: ${task.request}\nUser acceptance criteria (task-wide context): ${JSON.stringify(task.acceptanceCriteria)}\nScope and acceptance criteria: ${JSON.stringify(criteria)}\nDiff:\n${current.diff}\nActual validation:\n${JSON.stringify(evidence).slice(0, 50000)}`,
       ReviewOutput, workerSignal, { cwd, workItemId: itemId }) as z.infer<typeof ReviewOutput>;
   };
   const executeItem = async (item: Item, baseSha: string, workerSignal: AbortSignal) => {

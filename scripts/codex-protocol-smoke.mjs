@@ -61,6 +61,28 @@ try {
   assert.equal(await readFile(secret, 'utf8'), 'fake-service-secret');
   const offeredNames = () => requests[0].input.filter(item => item.type === 'additional_tools').flatMap(item => item.tools).flatMap(namespace => namespace.tools.flatMap(tool => [tool.name, ...[...tool.description.matchAll(/### `([^`]+)`/g)].map(match => match[1])]));
   assert.ok(offeredNames().includes('exec_command')); assert.doesNotMatch(offeredNames().join(','), /spawn_agent|web_search|mcp__|image_gen/);
+  // Exercise the narrow write profile used by concurrent M3 workers, not just a
+  // whole-project grant. Sibling files must stay read-only even through patch tools.
+  await mkdir(join(project, 'owned')); await writeFile(join(project, 'owned/result.txt'), 'verified\n');
+  const developer = agents.find(a => a.id === 'general-developer');
+  const scopedDeveloper = { ...developer, permissions: { ...developer.permissions, writePaths: ['project:/owned/**'] } };
+  const scopedCode = "const fs=require('node:fs'),assert=require('node:assert/strict');assert.equal(fs.readFileSync('owned/result.txt','utf8'),'scoped\\n');assert.throws(()=>fs.writeFileSync('result.txt','bad'));fs.writeFileSync('owned/new.txt','allowed');";
+  const scopedCommand = `node -e '${scopedCode.replaceAll("'", "'\\''")}'`;
+  index = 0; requests = []; calls = [
+    patch('*** Begin Patch\n*** Update File: owned/result.txt\n@@\n-verified\n+scoped\n*** End Patch'),
+    patch('*** Begin Patch\n*** Update File: result.txt\n@@\n-patched\n+out-of-scope\n*** End Patch'),
+    `text(await tools.exec_command({cmd:${JSON.stringify(scopedCommand)},max_output_tokens:1000}));`,
+  ];
+  await engine.execute({ ...base, runId: 'scoped-worker', phase: 'implementation', agent: scopedDeveloper }, event => progress.push(event));
+  assert.equal(await readFile(join(project, 'owned/result.txt'), 'utf8'), 'scoped\n');
+  assert.equal(await readFile(join(project, 'owned/new.txt'), 'utf8'), 'allowed');
+  assert.equal(await readFile(join(project, 'result.txt'), 'utf8'), 'patched\n');
+  if (process.platform === 'linux') {
+    const before = requests.length;
+    await assert.rejects(engine.execute({ ...base, runId: 'exact-file', phase: 'implementation', agent: { ...scopedDeveloper, permissions: { ...scopedDeveloper.permissions, writePaths: ['project:/owned/result.txt'] } } }, () => {}), /Exact-file writes cannot be safely executed/);
+    assert.equal(requests.length, before, 'Unsupported exact-file scope must fail before any model call');
+  }
+  console.log('PASS: scoped worker shell/patch writes stay inside its owned directory; siblings remain unchanged.');
   index = 0; requests = []; calls = [patch('*** Begin Patch\n*** Update File: result.txt\n@@\n-patched\n+bad\n*** End Patch')];
   await engine.execute({ ...base, runId: 'review', phase: 'review', agent: agents.find(a => a.id === 'code-reviewer') }, event => progress.push(event));
   assert.equal(await readFile(join(project, 'result.txt'), 'utf8'), 'patched\n');

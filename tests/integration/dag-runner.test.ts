@@ -9,7 +9,7 @@ import { TaskRunner } from '../../src/orchestration/runner.js';
 import { git } from '../../src/workspace/git.js';
 import type { CodingEngine, EngineRequest, EngineResult } from '../../src/domain/engine.js';
 
-type Options = { conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
+type Options = { invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
 async function dagFixture(options: Options = {}) {
   const f = await fixture();
   for (const id of ['a', 'b', 'c']) {
@@ -33,7 +33,7 @@ async function dagFixture(options: Options = {}) {
       calls.push(r);
       if (r.phase === 'planning') {
         const branch = await git(r.cwd, ['branch', '--show-current']);
-        return { output: { summary: 'Build two modules and combine them', risks: [], integration: { assignedAgent: 'general-developer', validation: [{ executable: 'node', args: ['--test', 'a.test.cjs', 'b.test.cjs', 'c.test.cjs'] }] }, items: ['a', 'b', 'c'].map(id => ({
+        return { output: { summary: 'Build two modules and combine them', risks: [], integration: { assignedAgent: 'general-developer', validation: [{ executable: 'node', args: ['--test', 'a.test.cjs', 'b.test.cjs', 'c.test.cjs'] }, ...(options.invalidCombinedCommand ? [{ executable: 'node', args: ['-e', 'throw new Error("Must not execute")'] }] : [])] }, items: ['a', 'b', 'c'].map(id => ({
           id, title: `Module ${id}`, description: `Implement ${id}`, acceptanceCriteria: ['Existing test passes'], dependsOn: id === 'c' ? ['a', 'b'] : [], requiredCapabilities: ['implementation'], assignedAgent: 'module-developer', projectId: 'fixture', branch: `${branch}-${id}`, ownedPaths: [`project:/${options.conflict && id !== 'c' ? 'shared' : id}.cjs`], validation: [{ executable: 'node', args: ['--test', `${id}.test.cjs`] }],
         })) } };
       }
@@ -90,6 +90,18 @@ test('DAG runs parallel config-only specialists, integrates dependencies, review
     assert.equal(f.store.workItems(task.id).every(i => i.state === 'completed'), true);
     assert.equal(f.store.evidence(task.id).filter(e => e.kind === 'item-commit-created').length, 3);
     assert.equal(f.store.evidence(task.id).filter(e => e.kind === 'commit-created').length, 1);
+    const itemReviews = f.calls.filter(c => c.phase === 'review' && c.workItemId !== '@integration');
+    assert.equal(itemReviews.length, 3);
+    for (const review of itemReviews) {
+      assert.match(review.prompt, /ITEM INTEGRATION GATE/);
+      assert.match(review.prompt, /not task completion/);
+      assert.match(review.prompt, /"originalGitStatusUnchanged":true/);
+      assert.match(review.prompt, /"originalGitStatusCleanBeforeAndNow":false/);
+    }
+    const combinedReview = f.calls.find(c => c.phase === 'review' && c.workItemId === '@integration')!;
+    assert.match(combinedReview.prompt, /FINAL COMBINED GATE/);
+    const combinedValidation = JSON.parse(combinedReview.prompt.split('Actual validation:\n')[1]!);
+    assert.ok(combinedValidation.some((v: { args: string[]; exitCode: number }) => v.exitCode === 0 && ['a.test.cjs', 'b.test.cjs', 'c.test.cjs'].every(file => v.args.includes(file))));
   } finally { await f.runner.stop(); await f.cleanup(); }
 });
 test('DAG plan approval pauses every worker and per-role concurrency is honored', async () => {
@@ -168,5 +180,18 @@ test('configured custom merge drivers are rejected before any worker runs', asyn
     const task = f.service.submit({ projectId: 'fixture', request: 'Three modules', mode: 'autonomous' }, 'driver'); await f.runner.idle();
     assert.equal(f.store.task(task.id).state, 'failed'); assert.match(f.store.task(task.id).outcome!.error!, /merge drivers/);
     assert.equal(f.calls.some(c => c.phase === 'implementation'), false);
+  } finally { await f.runner.stop(); await f.cleanup(); }
+});
+
+
+test('unsupported combined validation is rejected before any worker starts', async () => {
+  const f = await dagFixture({ invalidCombinedCommand: true });
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Three modules', mode: 'autonomous' }, 'unsupported-validation');
+    await f.runner.idle();
+    assert.equal(f.store.task(task.id).state, 'failed');
+    assert.match(f.store.task(task.id).outcome!.error!, /Validation supports/);
+    assert.deepEqual(f.calls.map(call => call.phase), ['planning']);
+    assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
   } finally { await f.runner.stop(); await f.cleanup(); }
 });

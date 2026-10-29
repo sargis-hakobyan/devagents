@@ -2,7 +2,7 @@
 
 DevAgents is an open-source, local-first AI development-team orchestrator, being built to plan, delegate, implement, test and review changes with configurable agents and replaceable coding engines.
 
-**Current status: M3 multi-agent execution implemented; live M3 acceptance pending.** A dynamic Tech Lead plans a task DAG and selects configured specialists. Independent items run in isolated worktrees with bounded concurrency; dependency results are integrated before downstream work starts. Real sandboxed checks and independent item/combined review gate the final local commit. Approval waits, bounded repairs, cancellation and execution evidence are persisted. Native and Docker checks are documented in [milestones](docs/MILESTONES.md), [compatibility findings](docs/M0_FINDINGS.md), and [decisions](docs/DECISIONS.md).
+**Current status: M3 multi-agent execution implemented and live container acceptance verified with ChatGPT sign-in.** A dynamic Tech Lead plans a task DAG and selects configured specialists. Independent items run in isolated worktrees with bounded concurrency; dependency results are integrated before downstream work starts. Real sandboxed checks and independent item/combined review gate the final local commit. Approval waits, bounded repairs, cancellation and execution evidence are persisted. Native and Docker checks are documented in [milestones](docs/MILESTONES.md), [compatibility findings](docs/M0_FINDINGS.md), and [decisions](docs/DECISIONS.md).
 
 ## Docker quickstart
 
@@ -84,7 +84,7 @@ Reuse `--key` with identical input to retry submission without duplication. Use 
 
 ## Multi-agent plans and progress
 
-The Tech Lead chooses up to 30 work items from the agent registry. Each item declares an assigned agent, dependencies, validation commands, a unique managed branch, and `ownedPaths` using exact paths or subtree `/**` grants. Ownership can narrow a role’s permissions, never expand them. Multi-item plans also select an integration agent whose existing permissions cover every owned path and include combined validation commands. Single-item plans use their own validation and `integration: null`.
+The Tech Lead chooses up to 30 work items from the agent registry. Each item declares an assigned agent, dependencies, validation commands, a unique managed branch, and `ownedPaths`. On Linux/Docker, use directory subtree grants such as `project:/src/component/**`: the pinned Codex runtime cannot execute exact-file write grants safely, and DevAgents rejects them before calling the model. The domain also supports exact paths for compatible runtimes. Ownership can narrow a role’s permissions, never expand them. Multi-item plans also select an integration agent whose existing permissions cover every owned path and include combined validation commands. Single-item plans use their own validation and `integration: null`.
 
 Use `tasks show TASK_ID` to inspect and approve the plan, `tasks items TASK_ID` for each item’s progress/worktree/commit, and `tasks evidence TASK_ID` for runs, validation, checkpoints and integration decisions. A plan-approval wait stops all implementation workers. For parallel work by one role, set that role’s `concurrency` above 1; different roles can run concurrently at their existing limits.
 
@@ -148,7 +148,7 @@ docker compose exec devagents node dist/cli/main.js auth codex
 docker compose exec -e OPENAI_API_KEY devagents node dist/cli/main.js auth codex --api-key-env OPENAI_API_KEY
 ```
 
-Never put literal keys in commands, YAML, commits or task requests. Login state stays in the dedicated data directory/volume; host credentials are not copied. Device login may require account/workspace enablement. Dedicated container API-key login and ChatGPT device login are verified. The live M2 model fixture passed with ChatGPT sign-in on 2026-10-29; earlier API-key attempts were blocked by API quota. A missing login fails the task with a setup error before creating a worktree; after login, submit a new task with a new retry key.
+Never put literal keys in commands, YAML, commits or task requests. Login state stays in the dedicated data directory/volume; host credentials are not copied. Device login may require account/workspace enablement. Dedicated container API-key login and ChatGPT device login are verified. The live M2 and M3 model fixtures passed with ChatGPT sign-in on 2026-10-29; earlier API-key attempts were blocked by API quota. A missing login fails the task with a setup error before creating a worktree; after login, submit a new task with a new retry key.
 
 Anthropic API-key configuration is represented; its adapter is planned for M4. Third-party Claude subscription login needs an officially permitted integration, as explained in [M0 findings](docs/M0_FINDINGS.md). The container does not include Claude.
 
@@ -158,13 +158,15 @@ The CLI authenticates using `<data-directory>/api-token` (mode `0600`). Keep thi
 
 Endpoints: `GET/POST /projects`, `GET /agents?projectId=...`, `GET/POST /tasks`, `GET /tasks/:id`, `GET /tasks/:id/events`, `GET /tasks/:id/evidence`, `GET /tasks/:id/items`, `POST /tasks/:id/{mode,plan,approve,cancel,run}`. Task creation requires `Idempotency-Key`; bodies use JSON. Approval includes the reviewed `version`.
 
-The adapter pins Codex CLI 0.160.1 and builds a named permission profile from role paths. The adapter supports exact paths and subtree `/**` grants; other glob forms fail closed. Read-only planning/review and writable implementation use separate processes. Shells and patches are sandboxed; tool networking, delegated agents, plugins, hooks, browser tools and web search are disabled. Runtime/user/repository configuration is ignored. Known secret files, Git metadata and existing symlinks/hardlinks are denied. Write permission also implies filesystem read access to that path.
+The adapter pins Codex CLI 0.160.1 and builds a named permission profile from role paths. Read grants support exact paths and subtree `/**` grants. Linux/Docker write grants must use directory subtrees; exact-file writes fail with an actionable error and are never widened automatically. Other glob forms fail closed. Read-only planning/review and writable implementation use separate processes. Shells and patches are sandboxed; tool networking, delegated agents, plugins, hooks, browser tools and web search are disabled. Runtime/user/repository configuration is ignored. Known secret files, Git metadata and existing symlinks/hardlinks are denied. Write permission also implies filesystem read access to that path.
 
 Validation supports `node --test`, `npm test`, and `npm run test/typecheck/lint/build` in a read-only worktree with writable temporary storage. Commands cannot install dependencies over the network or write build output into the project. Install required dependencies into the managed worktree while paused at plan approval; ignored dependencies from the original checkout are not copied. Projects needing generated output directories require a later scoped build policy. This initial slice commits regular text files only and checks permissions, branch identity and diff integrity before commit.
 
 Git helpers disable hooks/fsmonitor and global/system attributes; worktree creation rejects repository filters. Known environment secrets and recognizable credential patterns are redacted from persisted evidence; keep secrets out of task requests. Approval applies to the planned task; the reviewed local commit is an atomic finalization phase, during which cancellation returns a conflict. Interrupted finalization is marked failed for manual inspection and never automatically repeated.
 
 The container is non-root, has a read-only root filesystem, dropped capabilities, resource limits, temporary `/tmp` and a data volume. These service controls alone are not a worker sandbox.
+
+The default two-worker configuration has a 512-process/thread cap, 2 CPUs and 1 GiB of memory. The Docker suite runs two Codex protocol workers concurrently under these limits. Raising agent concurrency requires checking container capacity as well as role permissions.
 
 ## Validation and contribution
 
@@ -207,4 +209,4 @@ docker compose exec -T devagents node scripts/m3-smoke.mjs --live
 
 It creates and removes only a temporary fixture repository and uses the running container’s unlocked credential profile. It does not register or modify your projects.
 
-M3 live acceptance is currently blocked: two ChatGPT-authenticated attempts returned `Incomplete response returned, reason: max_output_tokens` during planning, before any implementation. Native and Docker deterministic M3 fixtures pass. The adapter supplies no output-token cap; the loopback runtime protocol check also passes. The cause of the live truncation is unresolved, so the multi-agent live workflow is not yet verified.
+The live M3 container fixture passed with ChatGPT sign-in on 2026-10-29: three items, two parallel workers, dependency integration, actual tests, independent item/combined reviews and a final local commit. The original checkout stayed unchanged. Earlier failures led to fixes for the planner schema, Linux write-scope compatibility, container process capacity and review-stage context; see [compatibility findings](docs/M0_FINDINGS.md). Native authenticated and AMD64 execution remain unverified.

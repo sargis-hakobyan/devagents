@@ -6,6 +6,7 @@ import { fixture } from '../helpers.js';
 import { FakeEngine, FixtureValidator } from '../fixtures/fake-engine.js';
 import { TaskRunner } from '../../src/orchestration/runner.js';
 import { git } from '../../src/workspace/git.js';
+import { Plan } from '../../src/domain/schemas.js';
 
 test('autonomous task executes real fixture tests, separate review and local commit without touching dirty checkout', async () => {
   const f = await fixture(); const engine = new FakeEngine();
@@ -118,4 +119,29 @@ test('approval with outstanding findings cannot bypass repair or create a commit
     assert.equal(done.outcome!.repairCycles, 1);
     assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
   } finally { await runner.stop(); await f.cleanup(); }
+});
+
+test('invalid or excessive model path ownership fails before implementation despite relaxed generation hints', async () => {
+  for (const path of ['project:/../secret', 'project:/src\\evil', 'project:/bad\0name', '/tmp/escape', 'project:/**']) {
+    const f = await fixture(); const engine = new FakeEngine();
+    const agents = await f.service.agents('fixture');
+    f.service.agents = async () => agents.map(a => a.id === 'general-developer' ? { ...a, permissions: { ...a.permissions, writePaths: ['project:/src/**'] } } : a);
+    const execute = engine.execute.bind(engine);
+    engine.execute = async request => {
+      const result = await execute(request);
+      if (request.phase === 'planning') {
+        const plan = Plan.parse(result.output); plan.items[0]!.ownedPaths = [path]; return { output: plan };
+      }
+      return result;
+    };
+    const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
+    try {
+      const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'unsafe-planned-path');
+      await runner.idle();
+      assert.equal(f.store.task(task.id).state, 'failed', path);
+      assert.deepEqual(engine.calls.map(c => c.phase), ['planning']);
+      assert.equal(f.store.task(task.id).plan, undefined);
+      assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
+    } finally { await runner.stop(); await f.cleanup(); }
+  }
 });

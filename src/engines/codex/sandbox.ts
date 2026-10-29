@@ -30,6 +30,7 @@ export async function sandboxFlags(cwd: string, permissions: AgentDefinition['pe
       const scoped = pattern.slice('project:/'.length);
       const relative = scoped === '**' ? '' : scoped.endsWith('/**') ? scoped.slice(0, -3) : scoped;
       if (/[?*\[\]{}]/.test(relative) || relative.split('/').includes('..') || relative.startsWith('/') || relative.includes('\\')) throw new AppError('unsupported_policy', 'Codex supports exact paths and subtree /** permissions only');
+      if (process.platform === 'linux' && access === 'write' && !pattern.endsWith('/**')) throw new AppError('unsupported_policy', `Codex ${CODEX_VERSION} on Linux requires directory subtree write grants (project:/directory/**). Exact-file writes cannot be safely executed; revise and approve the plan scope instead of expanding it automatically.`);
       filesystem[join(root, relative)] = access;
     }
   }
