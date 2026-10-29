@@ -11,7 +11,8 @@ import { readyWave, AgentSlots } from './dag-scheduler.js';
 import { WorkspaceManager, git } from '../workspace/git.js';
 import { changes, commitOwned, commitChanges } from '../workspace/changes.js';
 import { integrationSnapshot, integrateItem, assertIntegrationConfig } from '../workspace/integration.js';
-import { assertValidationCommand } from '../engines/codex/validator.js';
+import { assertValidationCommands } from '../domain/validation.js';
+import { selectImplementer, independentReviewer } from '../domain/roles.js';
 
 type Workspace = NonNullable<Task['workspace']>;
 type Item = z.infer<typeof WorkItem>;
@@ -33,19 +34,18 @@ export async function runDag(h: Hooks): Promise<void> {
   const record = (kind: string, data: unknown) => service.store.record(task.id, kind, data);
   const state = (itemId: string, state: string, data: Record<string, unknown> = {}) => record('work-item', { itemId, state, ...data });
   const developers = new Map(plan.items.map(item => {
-    const agent = agents.find(a => a.enabled && a.delegation.canReceiveTasks && a.id === item.assignedAgent);
+    const agent = item.assignedAgent ? selectImplementer(agents, item) : undefined;
     if (!agent || !item.ownedPaths) throw new AppError('missing_agent', `No scoped developer for ${item.id}`);
     if (item.branch !== `${workspace.branch}-${item.id}`) throw new AppError('branch_mismatch', `Work item ${item.id} must use branch ${workspace.branch}-${item.id}`);
-    if (!item.validation.length) throw new AppError('missing_validation', `Work item ${item.id} needs validation`);
-    item.validation.forEach(assertValidationCommand);
+    assertValidationCommands(item.validation, `Work item ${item.id}`);
     return [item.id, scopeAgent(agent, item.ownedPaths)];
   }));
   const integrationAgent = agents.find(a => a.id === plan.integration!.assignedAgent && a.enabled && a.delegation.canReceiveTasks);
   if (!integrationAgent) throw new AppError('missing_agent', 'Integration agent is unavailable');
   const integrator = scopeAgent(integrationAgent, [...new Set(plan.items.flatMap(item => item.ownedPaths!))]);
-  plan.integration.validation.forEach(assertValidationCommand);
+  assertValidationCommands(plan.integration.validation, 'Integration');
   const implementers = new Set([...developers.values()].map(a => a.id)); implementers.add(integrator.id);
-  const reviewer = agents.find(a => a.enabled && a.delegation.canReceiveTasks && a.capabilities.includes('review') && !implementers.has(a.id));
+  const reviewer = independentReviewer(agents, implementers);
   if (!reviewer) throw new AppError('missing_agent', 'Multi-item execution needs a reviewer independent of every implementer and integrator');
   const readOnlyReviewer = { ...reviewer, permissions: { ...reviewer.permissions, writePaths: [], allowCommands: false } };
   for (const agent of [...new Map([...developers.values(), integrator, reviewer].map(a => [a.id, a])).values()]) await h.engine.preflight(h.provider(agent));

@@ -2,6 +2,7 @@ import { mkdir, realpath, readdir, lstat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import type { AgentDefinition } from '../../domain/schemas.js';
 import { AppError } from '../../domain/errors.js';
+import { assertSupportedWriteGrant } from '../../domain/ownership.js';
 import { runProcess } from '../process.js';
 import { credentialRuntime } from '../../security/credential-vault.js';
 
@@ -30,7 +31,7 @@ export async function sandboxFlags(cwd: string, permissions: AgentDefinition['pe
       const scoped = pattern.slice('project:/'.length);
       const relative = scoped === '**' ? '' : scoped.endsWith('/**') ? scoped.slice(0, -3) : scoped;
       if (/[?*\[\]{}]/.test(relative) || relative.split('/').includes('..') || relative.startsWith('/') || relative.includes('\\')) throw new AppError('unsupported_policy', 'Codex supports exact paths and subtree /** permissions only');
-      if (process.platform === 'linux' && access === 'write' && !pattern.endsWith('/**')) throw new AppError('unsupported_policy', `Codex ${CODEX_VERSION} on Linux requires directory subtree write grants (project:/directory/**). Exact-file writes cannot be safely executed; revise and approve the plan scope instead of expanding it automatically.`);
+      if (access === 'write') assertSupportedWriteGrant(pattern, process.platform);
       filesystem[join(root, relative)] = access;
     }
   }

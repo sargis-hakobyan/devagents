@@ -24,6 +24,6 @@ export async function fixture() {
 export const validPlan = () => ({
   summary: 'Implement a greeting', risks: [], items: [{
     id: 'greeting', title: 'Greeting', description: 'Add a greeting', acceptanceCriteria: ['Greeting works'],
-    dependsOn: [] as string[], requiredCapabilities: ['implementation'], projectId: 'fixture', branch: 'codex/greeting', validation: [],
+    dependsOn: [] as string[], requiredCapabilities: ['implementation'], projectId: 'fixture', branch: 'codex/greeting', validation: [{ executable: 'node', args: ['--test'] }],
   }],
 });

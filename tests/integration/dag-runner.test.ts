@@ -12,18 +12,20 @@ import type { CodingEngine, EngineRequest, EngineResult } from '../../src/domain
 type Options = { invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
 async function dagFixture(options: Options = {}) {
   const f = await fixture();
+  // Modules live in per-item directories so ownership uses subtree grants, the only write-grant form the Linux runtime accepts.
   for (const id of ['a', 'b', 'c']) {
     const assertion = options.conflict && id !== 'c'
-      ? `assert.ok(require('./shared.cjs')().includes('${id}'));`
-      : `assert.equal(require('./${id}.cjs')(),'${id === 'c' ? 'ab' : id}');`;
+      ? `assert.ok(require('./shared/shared.cjs')().includes('${id}'));`
+      : `assert.equal(require('./${id}/${id}.cjs')(),'${id === 'c' ? 'ab' : id}');`;
     await writeFile(join(f.project, `${id}.test.cjs`), `const test=require('node:test'),assert=require('node:assert/strict');test('${id}',()=>{${assertion}});\n`);
+    await mkdir(join(f.project, id)); await writeFile(join(f.project, id, `${id}.cjs`), "module.exports=()=> 'broken';\n");
   }
-  if (options.conflict) await writeFile(join(f.project, 'shared.cjs'), "module.exports=()=> 'base';\n");
+  if (options.conflict) { await mkdir(join(f.project, 'shared')); await writeFile(join(f.project, 'shared', 'shared.cjs'), "module.exports=()=> 'base';\n"); }
   await git(f.project, ['add', '.']); await git(f.project, ['commit', '-m', 'Fixture tests']);
   const originalHead = await git(f.project, ['rev-parse', 'HEAD']);
   await mkdir(join(f.dataDir, 'agents'), { recursive: true });
   await writeFile(join(f.dataDir, 'agents', 'module-developer.md'), 'Implement only the assigned module.');
-  await writeFile(join(f.dataDir, 'agents', 'module-developer.yaml'), `schemaVersion: 1\nid: module-developer\nname: Module developer\ndescription: Custom module specialist\ncapabilities: [implementation, filesystem-read, filesystem-write]\ninstructionsFile: ./module-developer.md\ndelegation: {canReceiveTasks: true, canDelegate: false}\npermissions:\n  readPaths: ["project:/**"]\n  writePaths: ["project:/a.cjs", "project:/b.cjs", "project:/c.cjs", "project:/shared.cjs"]\n  allowCommands: true\nconcurrency: ${options.roleConcurrency ?? 2}\n`);
+  await writeFile(join(f.dataDir, 'agents', 'module-developer.yaml'), `schemaVersion: 1\nid: module-developer\nname: Module developer\ndescription: Custom module specialist\ncapabilities: [implementation, filesystem-read, filesystem-write]\ninstructionsFile: ./module-developer.md\ndelegation: {canReceiveTasks: true, canDelegate: false}\npermissions:\n  readPaths: ["project:/**"]\n  writePaths: ["project:/a/**", "project:/b/**", "project:/c/**", "project:/shared/**"]\n  allowCommands: true\nconcurrency: ${options.roleConcurrency ?? 2}\n`);
   let active = 0; let maxActive = 0; let reviewActive = 0; let maxReviewActive = 0; let aborted = 0; let combinedReviews = 0;
   let release!: () => void; const twoRunning = new Promise<void>(r => { release = r; });
   const calls: EngineRequest[] = [];
@@ -34,7 +36,7 @@ async function dagFixture(options: Options = {}) {
       if (r.phase === 'planning') {
         const branch = await git(r.cwd, ['branch', '--show-current']);
         return { output: { summary: 'Build two modules and combine them', risks: [], integration: { assignedAgent: 'general-developer', validation: [{ executable: 'node', args: ['--test', 'a.test.cjs', 'b.test.cjs', 'c.test.cjs'] }, ...(options.invalidCombinedCommand ? [{ executable: 'node', args: ['-e', 'throw new Error("Must not execute")'] }] : [])] }, items: ['a', 'b', 'c'].map(id => ({
-          id, title: `Module ${id}`, description: `Implement ${id}`, acceptanceCriteria: ['Existing test passes'], dependsOn: id === 'c' ? ['a', 'b'] : [], requiredCapabilities: ['implementation'], assignedAgent: 'module-developer', projectId: 'fixture', branch: `${branch}-${id}`, ownedPaths: [`project:/${options.conflict && id !== 'c' ? 'shared' : id}.cjs`], validation: [{ executable: 'node', args: ['--test', `${id}.test.cjs`] }],
+          id, title: `Module ${id}`, description: `Implement ${id}`, acceptanceCriteria: ['Existing test passes'], dependsOn: id === 'c' ? ['a', 'b'] : [], requiredCapabilities: ['implementation'], assignedAgent: 'module-developer', projectId: 'fixture', branch: `${branch}-${id}`, ownedPaths: [`project:/${options.conflict && id !== 'c' ? 'shared' : id}/**`], validation: [{ executable: 'node', args: ['--test', `${id}.test.cjs`] }],
         })) } };
       }
       if (r.phase === 'review') {
@@ -50,7 +52,7 @@ async function dagFixture(options: Options = {}) {
         } finally { reviewActive--; }
       }
       if (r.workItemId === '@integration') {
-        if (options.conflict) await writeFile(join(r.cwd, 'shared.cjs'), "module.exports=()=> 'ab';\n");
+        if (options.conflict) await writeFile(join(r.cwd, 'shared', 'shared.cjs'), "module.exports=()=> 'ab';\n");
         return { output: { summary: 'Resolved integration' } };
       }
       active++; maxActive = Math.max(maxActive, active); if (active === 2) release();
@@ -63,10 +65,11 @@ async function dagFixture(options: Options = {}) {
         const id = r.workItemId!;
         if (options.outside && id === 'a') await writeFile(join(r.cwd, 'README.md'), 'Out of owned scope');
         if (id === 'c') {
-          if (options.conflict) assert.match(await readFile(join(r.cwd, 'shared.cjs'), 'utf8'), /ab/);
-          else { assert.match(await readFile(join(r.cwd, 'a.cjs'), 'utf8'), /'a'/); assert.match(await readFile(join(r.cwd, 'b.cjs'), 'utf8'), /'b'/); }
+          if (options.conflict) assert.match(await readFile(join(r.cwd, 'shared', 'shared.cjs'), 'utf8'), /ab/);
+          else { assert.match(await readFile(join(r.cwd, 'a', 'a.cjs'), 'utf8'), /'a'/); assert.match(await readFile(join(r.cwd, 'b', 'b.cjs'), 'utf8'), /'b'/); }
         }
-        await writeFile(join(r.cwd, `${options.conflict && id !== 'c' ? 'shared' : id}.cjs`), `module.exports=()=> '${id === 'c' ? 'ab' : id}';\n`);
+        const module = options.conflict && id !== 'c' ? 'shared' : id;
+        await writeFile(join(r.cwd, module, `${module}.cjs`), `module.exports=()=> '${id === 'c' ? 'ab' : id}';\n`);
         return { output: { summary: `Implemented ${id}` } };
       } finally { active--; }
     },
@@ -84,6 +87,7 @@ test('DAG runs parallel config-only specialists, integrates dependencies, review
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     assert.equal(f.metrics().maxActive, 2); assert.equal(f.metrics().maxReviewActive, 1);
     assert.equal(new Set(f.calls.filter(c => c.phase === 'implementation').map(c => c.cwd)).size, 3);
+    for (const call of f.calls.filter(c => c.phase === 'implementation')) assert.deepEqual(call.agent.permissions.writePaths, [`project:/${call.workItemId}/**`], call.workItemId);
     assert.equal(await readFile(join(f.project, 'README.md'), 'utf8'), 'Uncommitted user work');
     assert.equal(await git(f.project, ['rev-parse', 'HEAD']), f.originalHead);
     assert.equal(await git(done.workspace!.path, ['status', '--porcelain']), '');
@@ -122,7 +126,7 @@ test('overlapping edits create an explicit integration repair and dependents see
     const done = f.store.task(task.id); assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     assert.equal(done.outcome!.repairCycles, 1);
     assert.ok(f.store.evidence(task.id).some(e => e.kind === 'integration-conflict'));
-    assert.match(await readFile(join(done.workspace!.path, 'shared.cjs'), 'utf8'), /ab/);
+    assert.match(await readFile(join(done.workspace!.path, 'shared', 'shared.cjs'), 'utf8'), /ab/);
   } finally { await f.runner.stop(); await f.cleanup(); }
 });
 test('combined review rejection triggers bounded integration repair and full revalidation', async () => {
@@ -191,6 +195,7 @@ test('unsupported combined validation is rejected before any worker starts', asy
     await f.runner.idle();
     assert.equal(f.store.task(task.id).state, 'failed');
     assert.match(f.store.task(task.id).outcome!.error!, /Validation supports/);
+    assert.equal(f.store.task(task.id).plan, undefined);
     assert.deepEqual(f.calls.map(call => call.phase), ['planning']);
     assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
   } finally { await f.runner.stop(); await f.cleanup(); }

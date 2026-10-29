@@ -50,6 +50,7 @@
 - [x] Native and Linux ARM64 Docker deterministic M3 fixtures with actual sandboxed validation.
 - [x] ChatGPT-authenticated three-item M3 fixture: parallel workers, dependency integration, actual tests, independent item/combined reviews and final local commit; original checkout unchanged.
 - [x] Planner schema compatibility, explicit review stages and invalid-path/command regression checks.
+- [x] Pre-M4 review fixes: value-only redaction for model prompts and task data; plan-time executability checks (validation commands, independent reviewer, Linux write grants) shared with execution.
 - [x] Scoped shell/patch containment and two concurrent runtime fixtures under Compose CPU/memory/PID limits; Linux exact-file writes fail before inference.
 
 ## Later
@@ -75,7 +76,7 @@ Before the M2 live fixture, configure the dedicated account with `npm run cli --
 
 ## Acceptance commands
 
-- `npm run check`: 64 tests, typecheck and production build.
+- `npm run check`: 70 tests, typecheck and production build.
 - `npm run test:m2`: deterministic planning/implementation/review with real sandboxed validation and a local commit.
 - `npm run test:m3`: deterministic three-item DAG with isolated branches, dependency integration, actual sandboxed validation and a combined commit.
 - `npm run test:m3-live`: opt-in authenticated three-item fixture; equivalent container command passed with saved ChatGPT sign-in. Native authenticated execution remains unverified.
@@ -83,4 +84,4 @@ Before the M2 live fixture, configure the dedicated account with `npm run cli --
 - `npm run test:docker`: isolated service persistence plus M2, M3 and protocol fixtures under Linux container restrictions.
 - `npm run test:codex-live`: opt-in authenticated native fixture. The equivalent container command passed with ChatGPT sign-in; native authenticated execution remains unverified. See README.
 
-M3 supports one active top-level request with bounded parallel work items, text changes and read-only Node/npm validation. Linux/Docker writes require directory-subtree grants; exact-file writes are rejected before model execution because of a pinned-runtime limitation. Scheduling uses deterministic waves, not immediate dispatch when a slot frees. Local inference, multiple engines, cross-request concurrency, generated build output policies and external actions remain later work.
+M3 supports one active top-level request with bounded parallel work items, text changes and read-only Node/npm validation. Linux/Docker writes require directory-subtree grants; exact-file writes are rejected when the plan is validated, before approval, and again before model execution because of a pinned-runtime limitation. Scheduling uses deterministic waves, not immediate dispatch when a slot frees. Local inference, multiple engines, cross-request concurrency, generated build output policies and external actions remain later work.

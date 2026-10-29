@@ -7,6 +7,7 @@ import { FakeEngine, FixtureValidator } from '../fixtures/fake-engine.js';
 import { TaskRunner } from '../../src/orchestration/runner.js';
 import { git } from '../../src/workspace/git.js';
 import { Plan } from '../../src/domain/schemas.js';
+import { TaskService } from '../../src/orchestration/service.js';
 
 test('autonomous task executes real fixture tests, separate review and local commit without touching dirty checkout', async () => {
   const f = await fixture(); const engine = new FakeEngine();
@@ -176,4 +177,39 @@ test('model prompts keep code syntax from the request, plan, diff and review fin
     assert.doesNotMatch(evidence, /fixture-secret-value/);
     assert.doesNotMatch(JSON.stringify(f.store.events(task.id)), /fixture-secret-value/);
   } finally { await runner.stop(); await f.cleanup(); }
+});
+
+test('plan approval is never requested for a plan that could not execute', async () => {
+  const scenarios: { name: string; pattern: RegExp; platform?: NodeJS.Platform; agents?: (a: Awaited<ReturnType<typeof fixture>>['service']['agents']) => void; plan?: (plan: ReturnType<typeof Plan.parse>) => void }[] = [
+    { name: 'unsupported inline validation command', pattern: /Validation supports/, plan: plan => { plan.items[0]!.validation = [{ executable: 'node', args: ['-e', 'process.exit(0)'] }]; } },
+    { name: 'exact-file write grant on Linux', pattern: /Exact-file writes cannot be safely executed/, platform: 'linux', plan: plan => { plan.items[0]!.ownedPaths = ['project:/greeting.cjs']; } },
+    { name: 'no reviewer independent of the implementer', pattern: /independent of every implementer/ },
+  ];
+  for (const scenario of scenarios) {
+    const f = await fixture(); const engine = new FakeEngine();
+    const service = scenario.platform ? new TaskService(f.store, f.service.config, f.dataDir, scenario.platform) : f.service;
+    if (scenario.name.startsWith('no reviewer')) {
+      const agents = await service.agents('fixture');
+      service.agents = async () => agents.map(a => a.id === 'code-reviewer' ? { ...a, enabled: false } : a.id === 'general-developer' ? { ...a, capabilities: [...a.capabilities, 'review'] } : a);
+    }
+    const execute = engine.execute.bind(engine);
+    engine.execute = async request => {
+      const result = await execute(request);
+      if (request.phase === 'planning' && scenario.plan) { const plan = Plan.parse(result.output); scenario.plan(plan); return { output: plan }; }
+      return result;
+    };
+    const runner = new TaskRunner(service, engine, new FixtureValidator()); service.attachRunner(runner);
+    try {
+      const task = service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'plan-approval' }, `unexecutable-${scenarios.indexOf(scenario)}`);
+      await runner.idle();
+      const done = f.store.task(task.id);
+      assert.equal(done.state, 'failed', scenario.name);
+      assert.match(done.outcome!.error!, scenario.pattern, scenario.name);
+      assert.equal(done.plan, undefined, scenario.name);
+      const states = f.store.events(task.id).map(e => e.state);
+      assert.equal(states.includes('awaiting_plan_approval'), false, scenario.name); assert.equal(states.at(-1), 'failed', scenario.name);
+      assert.deepEqual(engine.calls.map(c => c.phase), ['planning'], scenario.name);
+      if (scenario.platform === 'linux') assert.match(engine.calls[0]!.prompt, /Linux Codex runtime, ownedPaths must use directory subtree grants/);
+    } finally { await runner.stop(); await f.cleanup(); }
+  }
 });
