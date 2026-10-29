@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { z, ZodError } from 'zod';
 import type { TaskService } from '../orchestration/service.js';
 import { AppError } from '../domain/errors.js';
-import { environmentSecrets, redact, log } from '../telemetry/redact.js';
+import { environmentSecrets, redactValues, log } from '../telemetry/redact.js';
 
 export async function accessToken(dataDir: string): Promise<string> {
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
@@ -28,7 +28,8 @@ async function body(req: IncomingMessage): Promise<unknown> {
 }
 function send(res: ServerResponse, code: number, data: unknown): void {
   res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
-  res.end(JSON.stringify(redact(data, environmentSecrets())));
+  // Stored rows are already redacted at rest; responses only strip secret values so plans stay readable.
+  res.end(JSON.stringify(redactValues(data, environmentSecrets())));
 }
 export function createApi(service: TaskService, token: string) {
   const server = createServer(async (req, res) => {

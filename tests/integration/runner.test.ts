@@ -145,3 +145,35 @@ test('invalid or excessive model path ownership fails before implementation desp
     } finally { await runner.stop(); await f.cleanup(); }
   }
 });
+
+test('model prompts keep code syntax from the request, plan, diff and review findings while evidence still redacts secret values', async () => {
+  const f = await fixture(); const engine = new FakeEngine();
+  const code = 'const token: string = session.token; password: string; apiKey = loadKey();';
+  const execute = engine.execute.bind(engine); let reviews = 0;
+  engine.execute = async request => {
+    const result = await execute(request);
+    if (request.phase === 'planning') { const plan = Plan.parse(result.output); plan.items[0]!.description = `Type ${code}`; return { output: plan }; }
+    if (request.phase === 'review' && ++reviews === 1) return { output: { approved: false, summary: 'Needs a type', findings: [`Declare ${code} explicitly`] } };
+    return result;
+  };
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: `Add ${code} without fixture-secret-value`, acceptanceCriteria: [`Keep ${code}`], mode: 'autonomous' }, 'prompt-syntax');
+    await runner.idle();
+    const done = f.store.task(task.id);
+    assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
+    assert.equal(done.request, `Add ${code} without [REDACTED]`);
+    assert.equal(done.plan!.items[0]!.description, `Type ${code}`);
+    assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'review', 'implementation', 'review']);
+    const [, implementation, review, repair] = engine.calls;
+    for (const call of [implementation!, review!, repair!]) {
+      assert.ok(call.prompt.includes(code), `${call.phase} prompt must keep code syntax`);
+      assert.doesNotMatch(call.prompt, /fixture-secret-value/);
+    }
+    assert.ok(repair!.prompt.includes(`Declare ${code} explicitly`), 'review findings reach the repairing implementer unchanged');
+    assert.ok(review!.prompt.includes('greeting.cjs'), 'review prompt includes the diff');
+    const evidence = JSON.stringify(f.store.evidence(task.id));
+    assert.doesNotMatch(evidence, /fixture-secret-value/);
+    assert.doesNotMatch(JSON.stringify(f.store.events(task.id)), /fixture-secret-value/);
+  } finally { await runner.stop(); await f.cleanup(); }
+});

@@ -6,7 +6,7 @@ import type { AppConfig } from '../../domain/schemas.js';
 import { AppError } from '../../domain/errors.js';
 import { runProcess } from '../process.js';
 import { runtimeHome, safeEnvironment, sandboxFlags, verifyCodex } from './sandbox.js';
-import { environmentSecrets, redact } from '../../telemetry/redact.js';
+import { environmentSecrets, redact, redactValues } from '../../telemetry/redact.js';
 import { configuredVault, credentialStore } from '../../security/credential-vault.js';
 
 const disabled = ['apps', 'browser_use', 'browser_use_external', 'computer_use', 'code_mode', 'hooks', 'image_generation', 'multi_agent', 'multi_agent_v2', 'plugins', 'remote_plugin', 'memories', 'skill_search', 'skill_mcp_dependency_install', 'shell_snapshot', 'view_image', 'workspace_dependencies', 'goals', 'tool_suggest'];
@@ -58,7 +58,8 @@ export class CodexAdapter implements CodingEngine {
     let final = ''; let completed = false; let failed = false; let failureText = ''; let usage: unknown;
     try {
       const result = await runProcess(this.binary, args, {
-        cwd: request.cwd, env, input: String(redact(request.prompt, secrets)), signal: request.signal, timeoutMs: request.timeoutMs,
+        // Model input gets value-only redaction so code such as `token: string` survives intact.
+        cwd: request.cwd, env, input: String(redactValues(request.prompt, secrets)), signal: request.signal, timeoutMs: request.timeoutMs,
         onLine(line) {
           let event: Record<string, unknown>;
           try { event = JSON.parse(line) as Record<string, unknown>; }

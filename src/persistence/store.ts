@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { AppError } from '../domain/errors.js';
 import { assertTransition } from '../domain/lifecycle.js';
 import { TaskInput, type Project, type Task, type TaskEvent, type TaskState } from '../domain/schemas.js';
-import { environmentSecrets, redact } from '../telemetry/redact.js';
+import { environmentSecrets, redact, redactValues } from '../telemetry/redact.js';
 
 export class Store {
   private readonly db: DatabaseSync;
@@ -41,6 +41,9 @@ export class Store {
     try { const value = fn(); this.db.exec('COMMIT'); return value; }
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
+  /** Task rows feed model prompts: remove secret values only, never rewrite request or plan text. */
+  private taskJson(value: unknown): string { return JSON.stringify(redactValues(value, this.secrets)); }
+  /** Events and evidence are logs: apply the heuristic credential redaction as well. */
   private json(value: unknown): string { return JSON.stringify(redact(value, this.secrets)); }
   registerProject(project: Project): Project {
     const existing = this.projects().find(p => p.id === project.id || p.path === project.path);
@@ -66,7 +69,7 @@ export class Store {
   createTask(input: unknown, key: string): Task {
     const parsed = TaskInput.parse(input);
     this.project(parsed.projectId);
-    const clean = redact(parsed, this.secrets) as typeof parsed;
+    const clean = redactValues(parsed, this.secrets) as typeof parsed;
     const fingerprint = createHash('sha256').update(JSON.stringify(parsed)).digest('hex');
     return this.transaction(() => {
       const previous = this.db.prepare('SELECT * FROM requests WHERE key=?').get(key);
@@ -76,7 +79,7 @@ export class Store {
       }
       const now = new Date().toISOString();
       const task: Task = { ...clean, id: randomUUID(), runId: randomUUID(), state: clean.mode ? 'planning' : 'awaiting_mode', version: 0, createdAt: now, updatedAt: now };
-      this.db.prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)').run(task.id, task.projectId, task.state, task.version, this.json(task));
+      this.db.prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)').run(task.id, task.projectId, task.state, task.version, this.taskJson(task));
       this.db.prepare('INSERT INTO requests VALUES (?, ?, ?)').run(key, fingerprint, task.id);
       this.append(task, 'user', clean.mode ? 'Task submitted with autonomy mode' : 'Choose autonomous or plan-approval to continue');
       return task;
@@ -88,7 +91,7 @@ export class Store {
       if (task.version !== expectedVersion) throw new AppError('stale_task', 'Task changed; reload before retrying', 409);
       assertTransition(task.state, state);
       const updated: Task = { ...task, ...patch, state, version: task.version + 1, updatedAt: new Date().toISOString() };
-      this.db.prepare('UPDATE tasks SET state=?, version=?, data=? WHERE id=?').run(state, updated.version, this.json(updated), id);
+      this.db.prepare('UPDATE tasks SET state=?, version=?, data=? WHERE id=?').run(state, updated.version, this.taskJson(updated), id);
       this.append(updated, actor, reason);
       return this.task(id);
     });
@@ -98,7 +101,7 @@ export class Store {
       const task = this.task(id);
       if (task.version !== expectedVersion) throw new AppError('stale_task', 'Task changed; reload before retrying', 409);
       const updated = { ...task, ...patch, version: task.version + 1, updatedAt: new Date().toISOString() };
-      this.db.prepare('UPDATE tasks SET version=?,data=? WHERE id=?').run(updated.version, this.json(updated), id);
+      this.db.prepare('UPDATE tasks SET version=?,data=? WHERE id=?').run(updated.version, this.taskJson(updated), id);
       this.append(updated, 'orchestrator', reason);
       return this.task(id);
     });

@@ -14,10 +14,11 @@ test('API is authenticated, rejects browser origins, validates input and support
     assert.equal((await fetch(`${url}/projects`, { headers: { authorization: 'Bearer test-token', origin: 'https://attacker.invalid' } })).status, 403);
     const headers = { authorization: 'Bearer test-token', 'content-type': 'application/json', 'idempotency-key': 'api-test' };
     assert.equal((await fetch(`${url}/tasks`, { method: 'POST', headers, body: '{}' })).status, 400);
-    const response = await fetch(`${url}/tasks`, { method: 'POST', headers, body: JSON.stringify({ projectId: 'fixture', request: 'Write a greeting' }) });
+    const response = await fetch(`${url}/tasks`, { method: 'POST', headers, body: JSON.stringify({ projectId: 'fixture', request: 'Write a greeting with token: string and drop fixture-secret-value' }) });
     assert.equal(response.status, 201);
-    const task = await response.json() as { id: string; state: string };
+    const task = await response.json() as { id: string; state: string; request: string };
     assert.equal(task.state, 'awaiting_mode');
+    assert.equal(task.request, 'Write a greeting with token: string and drop [REDACTED]');
     assert.equal((await fetch(`${url}/tasks/${task.id}/items`)).status, 401);
     assert.deepEqual(await (await fetch(`${url}/tasks/${task.id}/items`, { headers })).json(), []);
     const events = await fetch(`${url}/tasks/${task.id}/events`, { headers });

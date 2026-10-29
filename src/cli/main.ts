@@ -10,7 +10,7 @@ import { Store } from '../persistence/store.js';
 import { TaskService } from '../orchestration/service.js';
 import { createApi, accessToken } from '../api/server.js';
 import { engineHealth } from '../engines/health.js';
-import { environmentSecrets, log, redact } from '../telemetry/redact.js';
+import { environmentSecrets, log, redactValues } from '../telemetry/redact.js';
 import { AppError } from '../domain/errors.js';
 import { CodexAdapter } from '../engines/codex/adapter.js';
 import { CodexValidator } from '../engines/codex/validator.js';
@@ -24,7 +24,7 @@ import type { AuthChoice } from '../domain/auth.js';
 import { readChoice } from './choice-prompt.js';
 import { configuredVault } from '../security/credential-vault.js';
 
-const print = (data: unknown) => console.log(JSON.stringify(redact(data, environmentSecrets()), null, 2));
+const print = (data: unknown) => console.log(JSON.stringify(redactValues(data, environmentSecrets()), null, 2));
 const port = () => z.coerce.number().int().min(1).max(65535).parse(process.env.DEVAGENTS_PORT ?? 4310);
 async function request(path: string, method = 'GET', body?: unknown, key?: string): Promise<unknown> {
   const token = (await readFile(join(dataDirectory(), 'api-token'), 'utf8')).trim();
