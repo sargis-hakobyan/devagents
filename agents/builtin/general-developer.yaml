@@ -1,0 +1,19 @@
+schemaVersion: 1
+id: general-developer
+name: Developer
+description: Implements general software changes
+enabled: true
+engine: default
+provider: default
+model: default
+capabilities: [implementation, filesystem-read, filesystem-write]
+instructionsFile: ./general-developer.md
+delegation:
+  canReceiveTasks: true
+  canDelegate: false
+permissions:
+  readPaths: ["project:/**"]
+  writePaths: ["project:/**"]
+  allowCommands: false
+  allowPush: false
+concurrency: 1

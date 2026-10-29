@@ -1,0 +1,18 @@
+schemaVersion: 1
+defaultEngine: codex
+defaultProvider: openai
+concurrency: 2
+maxRepairCycles: 1
+providers:
+  - id: openai
+    kind: openai
+    auth: login
+  - id: anthropic
+    kind: anthropic
+    auth: api-key
+    apiKeyEnv: ANTHROPIC_API_KEY
+  # Configuration seam only: local execution is a follow-up milestone.
+  - id: local
+    kind: ollama
+    auth: none
+    baseUrl: http://127.0.0.1:11434

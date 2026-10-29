@@ -1,0 +1,87 @@
+#!/usr/bin/env node
+import { Command } from 'commander';
+import { randomUUID } from 'node:crypto';
+import { readFile, mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { parse } from 'yaml';
+import { z } from 'zod';
+import { loadConfig, dataDirectory } from '../config.js';
+import { Store } from '../persistence/store.js';
+import { TaskService } from '../orchestration/service.js';
+import { createApi, accessToken } from '../api/server.js';
+import { engineHealth } from '../engines/health.js';
+import { environmentSecrets, log, redact } from '../telemetry/redact.js';
+import { AppError } from '../domain/errors.js';
+
+const print = (data: unknown) => console.log(JSON.stringify(redact(data, environmentSecrets()), null, 2));
+const port = () => z.coerce.number().int().min(1).max(65535).parse(process.env.DEVAGENTS_PORT ?? 4310);
+async function request(path: string, method = 'GET', body?: unknown, key?: string): Promise<unknown> {
+  const token = (await readFile(join(dataDirectory(), 'api-token'), 'utf8')).trim();
+  const headers: Record<string, string> = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+  if (key) headers['idempotency-key'] = key;
+  const res = await fetch(`http://127.0.0.1:${port()}${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(30000) });
+  const result = await res.json();
+  if (!res.ok) throw new AppError('api_error', JSON.stringify(result), res.status);
+  return result;
+}
+const cli = new Command().name('devagents').description('Local-first configurable development teams').version('0.1.0');
+cli.command('serve').description('Start the local API').action(async () => {
+  const dataDir = dataDirectory(); const config = await loadConfig();
+  const configuredSecrets = config.providers.flatMap(p => p.apiKeyEnv && process.env[p.apiKeyEnv] ? [process.env[p.apiKeyEnv]!] : []);
+  const store = new Store(join(dataDir, 'devagents.db'), [...environmentSecrets(), ...configuredSecrets]);
+  const service = new TaskService(store, config, dataDir);
+  const server = createApi(service, await accessToken(dataDir));
+  // Docker explicitly binds to all container interfaces; Compose exposes only host loopback.
+  const host = process.env.DEVAGENTS_HOST ?? '127.0.0.1';
+  if (!['127.0.0.1', '0.0.0.0'].includes(host)) throw new AppError('invalid_host', 'Unsupported bind address');
+  await service.agents();
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port(), host, resolve); });
+  // Only the process which owns the listening socket may reconcile this service's tasks.
+  const recovered = store.recover();
+  log('service_started', { host, port: port(), recovered, projects: store.projects().length, executionEnabled: false });
+  log('setup', { message: 'Register an existing checkout with projects add. Coding execution is not enabled in M1.' });
+  let closing = false;
+  const shutdown = () => {
+    if (closing) return; closing = true;
+    server.close(() => { store.close(); process.exitCode = 0; });
+    server.closeIdleConnections();
+  };
+  process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
+});
+cli.command('doctor').description('Report configuration and engine setup').action(async () => {
+  const config = await loadConfig();
+  const health = await engineHealth(dataDirectory());
+  print({ node: process.version, platform: `${process.platform}/${process.arch}`, ...health, providers: config.providers.map(p => ({ id: p.id, kind: p.kind, auth: p.auth, apiKeyConfigured: p.apiKeyEnv ? Boolean(process.env[p.apiKeyEnv]) : null, localExecution: ['ollama', 'openai-compatible'].includes(p.kind) ? 'planned-follow-up' : undefined })), next: 'Start with npm run dev; register a project with npm run cli -- projects add <id> <absolute-path>' });
+});
+const projects = cli.command('projects');
+projects.command('list').action(async () => print(await request('/projects')));
+projects.command('add <id> <path>').option('--mode <mode>', 'Optional project autonomy default').action(async (id: string, path: string, opts: { mode?: string }) => print(await request('/projects', 'POST', { id, path, ...(opts.mode ? { defaultMode: opts.mode } : {}) })));
+cli.command('agents').option('--project <id>').action(async (opts: { project?: string }) => print(await request(`/agents${opts.project ? `?projectId=${encodeURIComponent(opts.project)}` : ''}`)));
+const tasks = cli.command('tasks');
+tasks.command('list').action(async () => print(await request('/tasks')));
+tasks.command('submit <project> <request>').option('--mode <mode>').option('--key <key>', 'Retry key; reuse it to avoid duplicate submissions').action(async (projectId: string, text: string, opts: { mode?: string; key?: string }) => {
+  const task = await request('/tasks', 'POST', { projectId, request: text, ...(opts.mode ? { mode: opts.mode } : {}) }, opts.key ?? randomUUID());
+  print(task);
+  if ((task as { state: string }).state === 'awaiting_mode') console.error('Choose a mode: devagents tasks mode <task-id> autonomous|plan-approval');
+});
+tasks.command('show <id>').action(async (id: string) => print(await request(`/tasks/${id}`)));
+tasks.command('events <id>').action(async (id: string) => print(await request(`/tasks/${id}/events`)));
+tasks.command('mode <id> <mode>').action(async (id: string, mode: string) => print(await request(`/tasks/${id}/mode`, 'POST', { mode })));
+tasks.command('plan <id> <file>').description('Store a validated plan from YAML or JSON (manual M1 checkpoint)').action(async (id: string, file: string) => print(await request(`/tasks/${id}/plan`, 'POST', parse(await readFile(file, 'utf8')))));
+tasks.command('approve <id>').requiredOption('--version <version>', 'Version of the plan you reviewed').action(async (id: string, opts: { version: string }) => print(await request(`/tasks/${id}/approve`, 'POST', { version: Number(opts.version) })));
+tasks.command('cancel <id>').action(async (id: string) => print(await request(`/tasks/${id}/cancel`, 'POST', {})));
+const auth = cli.command('auth');
+auth.command('codex').description('Sign in to DevAgents’ dedicated Codex profile').option('--api-key-env <name>', 'Read an API key from this environment variable').action(async (opts: { apiKeyEnv?: string }) => {
+  const home = join(dataDirectory(), 'engines', 'codex'); await mkdir(home, { recursive: true, mode: 0o700 });
+  const key = opts.apiKeyEnv ? process.env[opts.apiKeyEnv] : undefined;
+  if (opts.apiKeyEnv && !key) throw new AppError('missing_key', 'The selected API key environment variable is empty');
+  const child = spawn('codex', ['-c', 'cli_auth_credentials_store="file"', 'login', key ? '--with-api-key' : '--device-auth'], {
+    env: { PATH: process.env.PATH, HOME: home, CODEX_HOME: home }, stdio: key ? ['pipe', 'inherit', 'inherit'] : 'inherit',
+  });
+  if (key) child.stdin!.end(`${key}\n`);
+  const code = await new Promise<number | null>((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
+  if (code !== 0) throw new AppError('login_failed', 'Codex login did not complete');
+});
+try { await cli.parseAsync(); }
+catch (error) { log('error', { message: error instanceof Error ? error.message : String(error) }); process.exitCode = 1; }

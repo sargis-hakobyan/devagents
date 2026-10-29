@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.devagents/
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+coverage/
+.DS_Store
+/compose.override.yaml
+/devagents.yaml

@@ -1,0 +1,14 @@
+summary: Add a greeting function with a test
+risks: []
+items:
+  - id: greeting
+    title: Add greeting
+    description: Implement the greeting requested by the developer
+    acceptanceCriteria: [The greeting test passes]
+    dependsOn: []
+    requiredCapabilities: [implementation]
+    projectId: my-project
+    branch: codex/greeting
+    validation:
+      - executable: node
+        args: [--test]

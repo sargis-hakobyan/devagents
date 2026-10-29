@@ -1,0 +1,19 @@
+schemaVersion: 1
+id: code-reviewer
+name: Code Reviewer
+description: Independently reviews diffs and test evidence
+enabled: true
+engine: default
+provider: default
+model: default
+capabilities: [review, filesystem-read]
+instructionsFile: ./code-reviewer.md
+delegation:
+  canReceiveTasks: true
+  canDelegate: false
+permissions:
+  readPaths: ["project:/**"]
+  writePaths: []
+  allowCommands: false
+  allowPush: false
+concurrency: 1

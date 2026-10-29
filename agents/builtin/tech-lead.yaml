@@ -1,0 +1,19 @@
+schemaVersion: 1
+id: tech-lead
+name: Tech Lead
+description: Plans work and selects suitable agents
+enabled: true
+engine: default
+provider: default
+model: default
+capabilities: [planning, filesystem-read]
+instructionsFile: ./tech-lead.md
+delegation:
+  canReceiveTasks: false
+  canDelegate: true
+permissions:
+  readPaths: ["project:/**"]
+  writePaths: []
+  allowCommands: false
+  allowPush: false
+concurrency: 1
