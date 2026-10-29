@@ -42,7 +42,8 @@ cli.command('serve').description('Start the local API').action(async () => {
   const configuredSecrets = config.providers.flatMap(p => p.apiKeyEnv && process.env[p.apiKeyEnv] ? [process.env[p.apiKeyEnv]!] : []);
   const store = new Store(join(dataDir, 'devagents.db'), [...environmentSecrets(), ...configuredSecrets]);
   const service = new TaskService(store, config, dataDir);
-  const runner = new TaskRunner(service, new CodexAdapter(dataDir), new CodexValidator(dataDir));
+  const sandbox = { scanLimit: config.workspaceScanLimit };
+  const runner = new TaskRunner(service, new CodexAdapter(dataDir, 'codex', sandbox), new CodexValidator(dataDir, 'codex', sandbox));
   service.attachRunner(runner);
   const server = createApi(service, await accessToken(dataDir));
   // Docker explicitly binds to all container interfaces; Compose exposes only host loopback.

@@ -17,7 +17,8 @@ export function toml(value: unknown): string {
   return JSON.stringify(value);
 }
 const flags = (config: Record<string, unknown>) => Object.entries(config).flatMap(([key, value]) => ['-c', `${key}=${toml(value)}`]);
-export async function sandboxFlags(cwd: string, permissions: AgentDefinition['permissions'], temp: string): Promise<string[]> {
+export const DEFAULT_SCAN_LIMIT = 200000;
+export async function sandboxFlags(cwd: string, permissions: AgentDefinition['permissions'], temp: string, scanLimit = DEFAULT_SCAN_LIMIT): Promise<string[]> {
   const root = await realpath(cwd);
   const filesystem: Record<string, string> = { ':minimal': 'read' };
   const config: Record<string, unknown> = {
@@ -35,19 +36,30 @@ export async function sandboxFlags(cwd: string, permissions: AgentDefinition['pe
       filesystem[join(root, relative)] = access;
     }
   }
-  // Explicit denies are enumerated before each run; fixed sensitive directories remain denied.
+  // Explicit denies are enumerated freshly before each run (never cached: a stale scan could miss a
+  // link created since); fixed sensitive directories remain denied. Protected names, symlinks and
+  // hardlinks are each denied. A directory whose every entry is denied is denied as a whole instead
+  // of entry by entry: strictly stricter (its listing is hidden too) and it keeps the generated
+  // profile small for trees such as node_modules/.bin or hardlinked package stores.
   const denied = new Set(deniedSegments.map(segment => join(root, segment)));
   let count = 0;
-  const scan = async (dir: string): Promise<void> => {
-    for (const entry of await readdir(dir, { withFileTypes: true })) {
-      if (++count > 50000) throw new AppError('workspace_limit', 'Workspace exceeds the workspace safety scan limit');
+  const scan = async (dir: string): Promise<string[]> => {
+    const entries = await readdir(dir, { withFileTypes: true });
+    const denies: string[] = []; let everyEntryDenied = entries.length > 0;
+    for (const entry of entries) {
+      if (++count > scanLimit) throw new AppError('workspace_limit', `Workspace exceeds the safety scan limit of ${scanLimit} entries; remove unneeded files from the worktree or raise workspaceScanLimit in the DevAgents configuration`);
       const path = join(dir, entry.name);
-      if (protectedPath(entry.name)) { denied.add(path); continue; }
-      if (entry.isSymbolicLink() || (entry.isFile() && (await lstat(path)).nlink > 1)) { denied.add(path); continue; }
-      if (entry.isDirectory()) await scan(path);
+      if (protectedPath(entry.name) || entry.isSymbolicLink() || (entry.isFile() && (await lstat(path)).nlink > 1)) { denies.push(path); continue; }
+      if (entry.isDirectory()) {
+        const inner = await scan(path);
+        if (inner.length === 1 && inner[0] === path) { denies.push(path); continue; }
+        denies.push(...inner);
+      }
+      everyEntryDenied = false;
     }
+    return everyEntryDenied && dir !== root ? [dir] : denies;
   };
-  await scan(root);
+  for (const path of await scan(root)) denied.add(path);
   for (const path of denied) {
     // Linux bubblewrap cannot mask a nonexistent file as a directory. Existing entries
     // are protected; creation of new runtime/secret paths is also checked before commit.

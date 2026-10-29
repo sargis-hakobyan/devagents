@@ -7,14 +7,14 @@ import { runProcess } from '../process.js';
 import { safeEnvironment, sandboxFlags, verifyCodex } from './sandbox.js';
 
 export class CodexValidator implements Validator {
-  constructor(private readonly dataDir: string, private readonly binary = 'codex') {}
+  constructor(private readonly dataDir: string, private readonly binary = 'codex', private readonly options: { scanLimit?: number } = {}) {}
   async execute(cwd: string, command: { executable: string; args: string[] }, signal: AbortSignal, timeoutMs: number): Promise<ValidationResult> {
     assertValidationCommand(command);
     const home = join(this.dataDir, 'validation', randomUUID()); const temp = join(home, 'tmp');
     await mkdir(temp, { recursive: true, mode: 0o700 });
     await verifyCodex(this.binary, home);
     const args = [
-      ...await sandboxFlags(cwd, { readPaths: ['project:/**'], writePaths: [], allowCommands: true, allowPush: false }, temp),
+      ...await sandboxFlags(cwd, { readPaths: ['project:/**'], writePaths: [], allowCommands: true, allowPush: false }, temp, this.options.scanLimit),
       'sandbox', '-C', cwd, '-P', 'devagents', '--', command.executable === 'node' ? process.execPath : 'npm', ...command.args,
     ];
     const env = safeEnvironment(home, temp);

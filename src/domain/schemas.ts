@@ -28,6 +28,7 @@ export const Config = z.strictObject({
   maxRepairCycles: z.number().int().min(0).max(3).default(1),
   executionTimeoutMs: z.number().int().min(1000).max(3600000).default(600000),
   validationTimeoutMs: z.number().int().min(1000).max(600000).default(120000),
+  workspaceScanLimit: z.number().int().min(1000).max(2000000).default(200000),
 }).superRefine((c, ctx) => {
   if (new Set(c.providers.map(p => p.id)).size !== c.providers.length) ctx.addIssue({ code: 'custom', message: 'Duplicate provider IDs' });
   if (!c.providers.some(p => p.id === c.defaultProvider)) ctx.addIssue({ code: 'custom', message: 'defaultProvider must exist' });

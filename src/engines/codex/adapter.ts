@@ -12,7 +12,7 @@ import { configuredVault, credentialStore } from '../../security/credential-vaul
 const disabled = ['apps', 'browser_use', 'browser_use_external', 'computer_use', 'code_mode', 'hooks', 'image_generation', 'multi_agent', 'multi_agent_v2', 'plugins', 'remote_plugin', 'memories', 'skill_search', 'skill_mcp_dependency_install', 'shell_snapshot', 'view_image', 'workspace_dependencies', 'goals', 'tool_suggest'];
 export class CodexAdapter implements CodingEngine {
   readonly id = 'codex';
-  constructor(private readonly dataDir: string, private readonly binary = 'codex') { this.dataDir = resolve(dataDir); }
+  constructor(private readonly dataDir: string, private readonly binary = 'codex', private readonly options: { scanLimit?: number } = {}) { this.dataDir = resolve(dataDir); }
   async preflight(provider: AppConfig['providers'][number]): Promise<void> {
     await (await configuredVault(this.dataDir))?.assertUnlocked();
     if (provider.kind !== 'openai' || provider.baseUrl) throw new AppError('unsupported_provider', 'Codex supports the official OpenAI provider; other providers follow later');
@@ -38,7 +38,7 @@ export class CodexAdapter implements CodingEngine {
     const args = [
       'exec',
       '-c', `cli_auth_credentials_store="${credentialStore()}"`,
-      ...await sandboxFlags(request.cwd, permissions, temp),
+      ...await sandboxFlags(request.cwd, permissions, temp, this.options.scanLimit),
       '-c', 'agents.enabled=false', '-c', 'agents.max_depth=0',
       '-c', 'web_search="disabled"', '-c', 'project_doc_max_bytes=0',
       '-c', 'shell_environment_policy.inherit="none"',

@@ -6,6 +6,8 @@ concurrency: 1
 maxRepairCycles: 1
 executionTimeoutMs: 600000
 validationTimeoutMs: 120000
+# Upper bound on directory entries scanned per sandbox launch (symlink/hardlink/secret denial). Fail-closed when exceeded.
+workspaceScanLimit: 200000
 providers:
   - id: openai
     kind: openai
