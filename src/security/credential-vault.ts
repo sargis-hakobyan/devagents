@@ -72,10 +72,35 @@ export class CredentialVault {
     const key = await optional(this.master);
     if (!key || key.length !== 32) throw new AppError('vault_locked', 'Credentials are locked. Start DevAgents with ./devagents start to unlock them from your OS keychain.');
   }
-  async seal(): Promise<void> {
+  private sealing: Promise<void> = Promise.resolve();
+  /**
+   * Re-encrypts the runtime credential file. Calls are serialized so concurrent workers finishing
+   * together cannot interleave reads and renames and persist a stale refreshed token, and an
+   * unchanged file is not rewritten.
+   */
+  seal(): Promise<void> {
+    const run = this.sealing.then(() => this.sealNow());
+    this.sealing = run.catch(() => undefined);
+    return run;
+  }
+  private async sealNow(): Promise<void> {
     await this.assertUnlocked();
-    const plain = await optional(this.auth);
-    if (plain) await this.save(plain, await readFile(this.master));
+    // The runtime may be rewriting auth.json while we read it; a partial read is retried briefly rather
+    // than failing an otherwise successful engine run.
+    let plain: Buffer | undefined;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      plain = await optional(this.auth);
+      if (!plain) return;
+      try { JSON.parse(plain.toString('utf8')); break; } catch { plain = undefined; await new Promise(resolve => setTimeout(resolve, 25)); }
+    }
+    if (!plain) throw new AppError('invalid_credentials', 'Runtime credential file stayed unreadable while sealing');
+    const key = await readFile(this.master);
+    const existing = await optional(this.encrypted);
+    if (existing) {
+      try { if (this.decrypt(existing, key).equals(plain)) return; }
+      catch { /* Unreadable envelope: replace it below with a verified one. */ }
+    }
+    await this.save(plain, key);
   }
 }
 export const credentialRuntime = () => process.env.DEVAGENTS_CREDENTIAL_RUNTIME;

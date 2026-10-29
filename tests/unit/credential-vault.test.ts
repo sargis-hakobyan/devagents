@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CredentialVault } from '../../src/security/credential-vault.js';
@@ -21,7 +21,11 @@ test('vault encrypts persistently, uses unique nonces, and restores after runtim
     const first = await readFile(f.vault.encrypted, 'utf8');
     assert.equal(first.includes('sk-fixture-sensitive-value'), false); assert.equal(first.includes(master), false);
     assert.equal((await stat(f.vault.encrypted)).mode & 0o777, 0o600);
+    // Unchanged credentials are not rewritten; changed credentials get a fresh envelope (new nonce).
+    await f.vault.seal(); assert.equal(await readFile(f.vault.encrypted, 'utf8'), first);
+    await writeFile(f.vault.auth, JSON.stringify({ tokens: { access_token: 'fixture-rotated' } }));
     await f.vault.seal(); assert.notEqual(await readFile(f.vault.encrypted, 'utf8'), first);
+    await writeFile(f.vault.auth, plain); await f.vault.seal();
     await rm(f.runtime, { recursive: true }); await assert.rejects(f.vault.assertUnlocked(), /locked/);
     await f.vault.unlock(master); assert.equal(await readFile(f.vault.auth, 'utf8'), plain);
   } finally { await f.cleanup(); }
@@ -57,5 +61,36 @@ test('legacy credentials migrate only after encryption succeeds; refreshed runti
     await writeFile(legacy, plain);
     await assert.rejects(f.vault.unlock(master), /different contents/);
     assert.equal(await readFile(legacy, 'utf8'), plain);
+  } finally { await f.cleanup(); }
+});
+
+test('concurrent seals are serialized and the newest credential content wins', async () => {
+  const f = await fixture();
+  try {
+    await f.vault.unlock(master); await mkdir(join(f.runtime, 'codex'), { recursive: true });
+    await writeFile(f.vault.auth, plain);
+    // Several workers finish together while the runtime rotates its token; no rename may interleave.
+    const seals: Promise<void>[] = [];
+    for (let i = 0; i < 5; i++) {
+      seals.push(f.vault.seal());
+      // Rotate atomically, as a well-behaved runtime does, so the test exercises seal ordering, not torn writes.
+      await writeFile(`${f.vault.auth}.next`, JSON.stringify({ tokens: { access_token: `fixture-rotation-${i}` } })); await rename(`${f.vault.auth}.next`, f.vault.auth);
+    }
+    await Promise.all(seals);
+    await f.vault.seal();
+    await rm(f.runtime, { recursive: true }); await f.vault.unlock(master);
+    assert.equal(await readFile(f.vault.auth, 'utf8'), JSON.stringify({ tokens: { access_token: 'fixture-rotation-4' } }));
+  } finally { await f.cleanup(); }
+});
+
+test('a torn read of the runtime credential file is retried instead of failing the seal', async () => {
+  const f = await fixture();
+  try {
+    await f.vault.unlock(master); await mkdir(join(f.runtime, 'codex'), { recursive: true });
+    await writeFile(f.vault.auth, '{"tokens":{"access_token":"fixtu');
+    setTimeout(() => { void writeFile(f.vault.auth, plain); }, 60);
+    await f.vault.seal();
+    await rm(f.runtime, { recursive: true }); await f.vault.unlock(master);
+    assert.equal(await readFile(f.vault.auth, 'utf8'), plain);
   } finally { await f.cleanup(); }
 });
