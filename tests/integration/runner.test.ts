@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFile, readFile } from 'node:fs/promises';
+import { writeFile, readFile, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fixture } from '../helpers.js';
 import { FakeEngine, FixtureValidator } from '../fixtures/fake-engine.js';
@@ -210,6 +210,44 @@ test('plan approval is never requested for a plan that could not execute', async
       assert.equal(states.includes('awaiting_plan_approval'), false, scenario.name); assert.equal(states.at(-1), 'failed', scenario.name);
       assert.deepEqual(engine.calls.map(c => c.phase), ['planning'], scenario.name);
       if (scenario.platform === 'linux') assert.match(engine.calls[0]!.prompt, /Linux Codex runtime, ownedPaths must use directory subtree grants/);
+    } finally { await runner.stop(); await f.cleanup(); }
+  }
+});
+
+test('implementation cannot create, modify or hide files that review and the commit would not include', async () => {
+  type Scenario = { name: string; implement?: (cwd: string) => Promise<void>; prepare?: (cwd: string) => Promise<void>; expect: 'completed' | RegExp };
+  const scenarios: Scenario[] = [
+    { name: 'new ignored file used by tests', implement: async cwd => { await writeFile(join(cwd, 'helper.local.cjs'), "module.exports = 'hello';\n"); await writeFile(join(cwd, 'greeting.cjs'), "module.exports = () => require('./helper.local.cjs');\n"); }, expect: /created helper\.local\.cjs/ },
+    { name: 'new ignore rule hiding a new file', implement: async cwd => { await writeFile(join(cwd, '.gitignore'), 'node_modules/\n*.local.cjs\nhidden.cjs\n'); await writeFile(join(cwd, 'hidden.cjs'), 'module.exports = 1;\n'); }, expect: /created hidden\.cjs/ },
+    { name: 'existing dependency left untouched', prepare: async cwd => { await mkdir(join(cwd, 'node_modules', 'dep'), { recursive: true }); await writeFile(join(cwd, 'node_modules', 'dep', 'index.cjs'), 'module.exports = 1;\n'); }, expect: 'completed' },
+    { name: 'existing dependency modified', prepare: async cwd => { await mkdir(join(cwd, 'node_modules', 'dep'), { recursive: true }); await writeFile(join(cwd, 'node_modules', 'dep', 'index.cjs'), 'module.exports = 1;\n'); }, implement: async cwd => { await writeFile(join(cwd, 'node_modules', 'dep', 'index.cjs'), 'module.exports = 2;\n'); }, expect: /modified node_modules\/dep\/index\.cjs/ },
+    { name: 'existing dependency removed', prepare: async cwd => { await mkdir(join(cwd, 'node_modules', 'dep'), { recursive: true }); await writeFile(join(cwd, 'node_modules', 'dep', 'index.cjs'), 'module.exports = 1;\n'); }, implement: async cwd => { await rm(join(cwd, 'node_modules', 'dep', 'index.cjs')); }, expect: /removed node_modules\/dep\/index\.cjs/ },
+  ];
+  for (const scenario of scenarios) {
+    const f = await fixture(); const engine = new FakeEngine();
+    await writeFile(join(f.project, '.gitignore'), 'node_modules/\n*.local.cjs\n');
+    await git(f.project, ['add', '.gitignore']); await git(f.project, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'Ignore rules']);
+    const execute = engine.execute.bind(engine);
+    engine.execute = async request => {
+      // The task worktree exists from planning onwards; dependencies installed there precede implementation.
+      if (request.phase === 'planning' && scenario.prepare) await scenario.prepare(request.cwd);
+      const result = await execute(request);
+      if (request.phase === 'implementation' && scenario.implement) await scenario.implement(request.cwd);
+      return result;
+    };
+    const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
+    try {
+      const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'hidden-files');
+      await runner.idle(); const done = f.store.task(task.id);
+      if (scenario.expect === 'completed') {
+        assert.equal(done.state, 'completed', `${scenario.name}: ${JSON.stringify(done.outcome)}`);
+      } else {
+        assert.equal(done.state, 'failed', scenario.name);
+        assert.match(done.outcome!.error!, scenario.expect, scenario.name);
+        assert.match(done.outcome!.error!, /review and the commit would not include/, scenario.name);
+        assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation'], scenario.name);
+        assert.equal(f.store.evidence(task.id).some(e => e.kind === 'validation' || e.kind === 'commit-created'), false, scenario.name);
+      }
     } finally { await runner.stop(); await f.cleanup(); }
   }
 });

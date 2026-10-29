@@ -9,6 +9,7 @@ import { terminalStates } from '../domain/lifecycle.js';
 import type { TaskService } from './service.js';
 import { WorkspaceManager, git } from '../workspace/git.js';
 import { changes, commitChanges } from '../workspace/changes.js';
+import { hiddenFiles, assertHiddenUnchanged } from '../workspace/hidden.js';
 import { scopeAgent } from '../domain/ownership.js';
 import { runDag } from './dag-runner.js';
 import { assertValidationCommands } from '../domain/validation.js';
@@ -125,7 +126,9 @@ export class TaskRunner {
       while (true) {
         this.ensureActive(id, signal);
         this.move(id, 'running', repairs ? `Repair cycle ${repairs}` : 'Implementation started');
-        const result = await this.invoke(id, 'implementation', developer, `Implement this work item in the current worktree. Do not commit or modify Git metadata.\nRequest: ${task.request}\nUser acceptance criteria: ${JSON.stringify(task.acceptanceCriteria)}\nPlan: ${JSON.stringify(item)}\n${feedback}`, ImplementationOutput, signal) as z.infer<typeof ImplementationOutput>;
+        const hiddenBefore = await hiddenFiles(task.workspace!.path);
+        const result = await this.invoke(id, 'implementation', developer, `Implement this work item in the current worktree. Do not commit or modify Git metadata or ignored files.\nRequest: ${task.request}\nUser acceptance criteria: ${JSON.stringify(task.acceptanceCriteria)}\nPlan: ${JSON.stringify(item)}\n${feedback}`, ImplementationOutput, signal) as z.infer<typeof ImplementationOutput>;
+        this.ensureActive(id, signal); assertHiddenUnchanged(hiddenBefore, await hiddenFiles(task.workspace!.path), 'Implementation');
         const before = await changes(task.workspace!, developer);
         if (!before.files.length) throw new AppError('no_changes', 'Implementation produced no reviewable changes');
         this.ensureActive(id, signal); this.move(id, 'validating', 'Running validation in a read-only command sandbox');

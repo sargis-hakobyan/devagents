@@ -9,7 +9,7 @@ import { TaskRunner } from '../../src/orchestration/runner.js';
 import { git } from '../../src/workspace/git.js';
 import type { CodingEngine, EngineRequest, EngineResult } from '../../src/domain/engine.js';
 
-type Options = { invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
+type Options = { hidden?: boolean; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
 async function dagFixture(options: Options = {}) {
   const f = await fixture();
   // Modules live in per-item directories so ownership uses subtree grants, the only write-grant form the Linux runtime accepts.
@@ -21,6 +21,7 @@ async function dagFixture(options: Options = {}) {
     await mkdir(join(f.project, id)); await writeFile(join(f.project, id, `${id}.cjs`), "module.exports=()=> 'broken';\n");
   }
   if (options.conflict) { await mkdir(join(f.project, 'shared')); await writeFile(join(f.project, 'shared', 'shared.cjs'), "module.exports=()=> 'base';\n"); }
+  await writeFile(join(f.project, '.gitignore'), '*.local.cjs\n');
   await git(f.project, ['add', '.']); await git(f.project, ['commit', '-m', 'Fixture tests']);
   const originalHead = await git(f.project, ['rev-parse', 'HEAD']);
   await mkdir(join(f.dataDir, 'agents'), { recursive: true });
@@ -64,6 +65,7 @@ async function dagFixture(options: Options = {}) {
         } else await delay(150, undefined, { signal: r.signal });
         const id = r.workItemId!;
         if (options.outside && id === 'a') await writeFile(join(r.cwd, 'README.md'), 'Out of owned scope');
+        if (options.hidden && id === 'a') await writeFile(join(r.cwd, 'a', 'a.local.cjs'), 'module.exports = 1;\n');
         if (id === 'c') {
           if (options.conflict) assert.match(await readFile(join(r.cwd, 'shared', 'shared.cjs'), 'utf8'), /ab/);
           else { assert.match(await readFile(join(r.cwd, 'a', 'a.cjs'), 'utf8'), /'a'/); assert.match(await readFile(join(r.cwd, 'b', 'b.cjs'), 'utf8'), /'b'/); }
@@ -197,6 +199,18 @@ test('unsupported combined validation is rejected before any worker starts', asy
     assert.match(f.store.task(task.id).outcome!.error!, /Validation supports/);
     assert.equal(f.store.task(task.id).plan, undefined);
     assert.deepEqual(f.calls.map(call => call.phase), ['planning']);
+    assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
+  } finally { await f.runner.stop(); await f.cleanup(); }
+});
+
+test('a worker that writes an ignored file inside its owned directory fails before validation and review', async () => {
+  const f = await dagFixture({ hidden: true });
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Three modules', mode: 'autonomous' }, 'hidden'); await f.runner.idle();
+    const done = f.store.task(task.id); assert.equal(done.state, 'failed');
+    assert.match(done.outcome!.error!, /Work item a changed 1 file\(s\) that review and the commit would not include.*created a\/a\.local\.cjs/);
+    assert.equal(f.store.workItems(task.id).find(i => i.itemId === 'a')!.state, 'failed');
+    assert.equal(f.calls.some(c => c.phase === 'review' && c.workItemId === 'a'), false);
     assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
   } finally { await f.runner.stop(); await f.cleanup(); }
 });
