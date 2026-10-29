@@ -32,6 +32,7 @@ export async function inspectProject(input: unknown): Promise<Project> {
   const baseSha = await git(path, ['rev-parse', '--verify', 'HEAD']);
   return { ...project, path, baseSha, registeredAt: new Date().toISOString() };
 }
+const creating = new Map<string, Promise<unknown>>();
 export class WorkspaceManager {
   constructor(private readonly dataDir: string) {}
   async create(project: Project, taskId: string): Promise<{ path: string; branch: string; baseSha: string }> {
@@ -69,7 +70,14 @@ export class WorkspaceManager {
     await git(project.path, ['worktree', 'prune']);
     return result;
   }
+  /** Worktree creation is serialized per repository: parallel `git worktree add` calls contend on ref and metadata locks. */
   private async createOwned(project: Project, taskId: string, itemId?: string, source?: string): Promise<{ path: string; branch: string; baseSha: string }> {
+    const previous = creating.get(project.path) ?? Promise.resolve();
+    const run = previous.catch(() => undefined).then(() => this.createNow(project, taskId, itemId, source));
+    creating.set(project.path, run);
+    try { return await run; } finally { if (creating.get(project.path) === run) creating.delete(project.path); }
+  }
+  private async createNow(project: Project, taskId: string, itemId?: string, source?: string): Promise<{ path: string; branch: string; baseSha: string }> {
     if (!/^[a-f0-9-]{36}$/.test(taskId)) throw new AppError('invalid_task_id', 'Invalid worktree owner ID');
     // Revalidate registration immediately before accessing the project.
     if (await realpath(project.path) !== project.path) throw new AppError('path_denied', 'Registered project path changed');

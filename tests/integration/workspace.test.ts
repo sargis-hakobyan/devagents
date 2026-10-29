@@ -48,3 +48,17 @@ test('oversized Git output is reported as an actionable error rather than a raw 
   const f = await fixture();
   try { await assert.rejects(git(f.project, ['log'], true, 16), /git log output exceeded 16 bytes/); } finally { await f.cleanup(); }
 });
+
+test('concurrent item worktree creation in one repository is serialized and every worktree is created', async () => {
+  const f = await fixture(); const manager = new WorkspaceManager(f.dataDir); const taskId = randomUUID();
+  try {
+    const base = await git(f.project, ['rev-parse', 'HEAD']);
+    const order: string[] = []; const original = git;
+    const created = await Promise.all(['a', 'b', 'c', 'd', 'e', 'f'].map(async id => { const w = await manager.createItem(f.store.project('fixture'), taskId, id, base); order.push(id); return w; }));
+    void original;
+    assert.equal(new Set(created.map(w => w.path)).size, 6); assert.equal(new Set(created.map(w => w.branch)).size, 6);
+    const registered = (await git(f.project, ['worktree', 'list', '--porcelain'], false)).split('\n').filter(l => l.startsWith('worktree ')).map(l => l.slice(9));
+    for (const w of created) assert.ok(registered.includes(w.path), w.path);
+    assert.deepEqual(order, ['a', 'b', 'c', 'd', 'e', 'f'], 'creation completes in request order because it is serialized per repository');
+  } finally { await f.cleanup(); }
+});
