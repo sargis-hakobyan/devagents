@@ -154,7 +154,7 @@ Anthropic API-key configuration is represented; its adapter is planned for M4. T
 
 ## API and security
 
-The CLI authenticates using `<data-directory>/api-token` (mode `0600`). Keep this directory private. Only `/health` is unauthenticated. Browser-origin requests are rejected; no CORS or browser UI is enabled. This is a single-user local service.
+The CLI authenticates using `<data-directory>/api-token` (mode `0600`). The service sets the data directory itself to mode `0700` on every start, even if it already existed with wider permissions. Keep this directory private. Only `/health` is unauthenticated. Browser-origin requests are rejected; no CORS or browser UI is enabled. This is a single-user local service.
 
 Endpoints: `GET/POST /projects`, `GET /agents?projectId=...`, `GET/POST /tasks`, `GET /tasks/:id`, `GET /tasks/:id/events`, `GET /tasks/:id/evidence`, `GET /tasks/:id/items`, `POST /tasks/:id/{mode,plan,approve,cancel,run,cleanup}`. `GET /tasks` returns summaries (id, project, state, version, mode, branch, item count, commit or error); `GET /tasks/:id` returns the full record including the plan and agent snapshot. Task creation requires `Idempotency-Key`; bodies use JSON. Approval includes the reviewed `version`.
 
