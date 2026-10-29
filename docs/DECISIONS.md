@@ -31,3 +31,10 @@
 - Append-only evidence includes run identity, normalized progress, actual test results, review decisions and worktree/commit intents. Interrupted side effects fail for inspection, never replay automatically.
 - A dedicated SQLite OS lock prevents two services owning the same data directory and releases after crashes. `committing` is a short, non-cancellable finalization boundary; cancellation before it still terminates worker processes.
 - Credential-free acceptance uses deterministic orchestration plus real sandboxed tests/Git, and a local Responses fixture exercising the actual Codex shell/patch tools. This does not substitute for authenticated model acceptance.
+
+## Persistent first-run API-key setup — 2026-10-29
+
+- `./devagents start` builds/starts Compose and prompts only when the dedicated Codex profile lacks credentials. `--replace-key` explicitly replaces the saved login.
+- Reuse Codex’s file credential store in the persistent data volume instead of a second key database. Protect its directory/file with `0700`/`0600`; the file is not encrypted.
+- Hidden terminal input, no command-line/environment key injection, no secret output, and cancellation before saving preserves existing credentials. Noninteractive missing-auth setup fails with an actionable message.
+- Saving credentials checks local persistence, not model access or billing. Existing environment-variable and ChatGPT device-login commands remain supported.

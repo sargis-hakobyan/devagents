@@ -7,11 +7,10 @@ DevAgents is an open-source, local-first AI development-team orchestrator, being
 ## Docker quickstart
 
 ```sh
-docker compose up -d --build
-docker compose exec devagents node dist/cli/main.js doctor
+./devagents start
 ```
 
-No host Node.js or credentials are needed for startup. The initial build downloads dependencies and Codex. The API is at `127.0.0.1:4310`; `/health` reports readiness. The `devagents-data` volume persists state. Home directories and the Docker socket are not mounted.
+The launcher builds and starts Docker, then asks for an OpenAI API key only if no credentials are saved. Paste the key at the hidden prompt and press Enter. Later runs of the same command reuse the saved credentials. No host Node.js is required. The initial build downloads dependencies and Codex. The API is at `127.0.0.1:4310`; `/health` reports readiness. The `devagents-data` volume persists state. Home directories and the Docker socket are not mounted.
 
 For an already-cloned project, copy `examples/compose.project.yaml` to `compose.override.yaml`, set the absolute source path, then:
 
@@ -21,6 +20,16 @@ docker compose exec devagents node dist/cli/main.js projects add my-project /pro
 ```
 
 Registration takes the **container path**. On Linux, the container's non-root UID 1000 needs access to the mount; configure ownership/ACLs rather than running as root. Native/container Git worktree paths are not interchangeable. Keep managed worktrees separate between environments. Dirty changes remain in the original checkout and are not copied into task worktrees.
+
+To replace a saved key:
+
+```sh
+./devagents start --replace-key
+```
+
+The key is stored by Codex in `/data/engines/codex/auth.json`, a file readable/writable only by the container user (`0600`) in the persistent `devagents-data` volume. It is not encrypted. It is never added to project configuration, shell history or the image. Normal restarts and container recreation retain it; deleting the data volume removes it. An existing ChatGPT login is reused too, unless `--replace-key` is supplied. Credential storage does not confirm API credit balance or model access.
+
+For unattended startup with credentials already configured, `docker compose up -d` remains available; it does not prompt.
 
 ## Native quickstart
 
@@ -57,7 +66,7 @@ Reuse `--key` with identical input to retry submission without duplication. Use 
 
 ## Configuration and agents
 
-`DEVAGENTS_DATA_DIR` defaults to `.devagents`, and `DEVAGENTS_PORT` to `4310`. Set `DEVAGENTS_CONFIG` to a YAML file such as `examples/devagents.yaml`. The native process does not automatically load `.env`; `.env.example` documents variables. Compose uses `.env` for substitution only.
+`DEVAGENTS_DATA_DIR` defaults to `.devagents`, and `DEVAGENTS_PORT` to `4310`. Set `DEVAGENTS_CONFIG` to a YAML file such as `examples/devagents.yaml`. The default OpenAI provider uses the saved Codex profile (including a saved API key); an explicitly configured `auth: api-key` with `apiKeyEnv` instead selects the existing environment-variable flow. The native process does not automatically load `.env`; `.env.example` documents variables. Compose uses `.env` for substitution only.
 
 Six built-ins: Tech Lead, Developer, Backend Developer, Frontend Developer, QA Engineer and Code Reviewer. Add YAML and Markdown under `<data-directory>/agents/` or `<project>/.devagents/agents/`. Precedence is project > user > bundled `agents/builtin/`. Duplicate IDs within a directory fail validation. Definitions reload when the registry is requested and are snapshotted when a task creates its worktree.
 
@@ -85,7 +94,15 @@ Inspect with `npm run cli -- agents --project my-project`. Naming an agent does 
 
 ## Authentication
 
-Codex uses a dedicated profile with ChatGPT device login or an OpenAI API key:
+Codex uses a dedicated profile with ChatGPT device login or an OpenAI API key. For native interactive API-key setup (asks once, then reuses the saved profile):
+
+```sh
+npm run cli -- auth setup
+# To replace the saved key:
+npm run cli -- auth setup --replace-key
+```
+
+The existing explicit login methods are also available:
 
 ```sh
 npm run cli -- auth codex

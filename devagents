@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+
+case "${1:-start}" in
+  start) if [ "$#" -gt 0 ]; then shift; fi ;;
+  *) echo 'Usage: ./devagents start [--replace-key]' >&2; exit 2 ;;
+esac
+case "$#:${1:-}" in
+  0:|1:--replace-key) ;;
+  *) echo 'Usage: ./devagents start [--replace-key]' >&2; exit 2 ;;
+esac
+
+docker compose up -d --build --wait
+docker compose exec devagents node dist/cli/main.js auth setup "$@"
+echo 'DevAgents is ready at http://127.0.0.1:4310/health'
