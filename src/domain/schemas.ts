@@ -71,4 +71,5 @@ export type Task = z.infer<typeof TaskInput> & {
   agents?: AgentDefinition[];
   outcome?: { commit?: string; files?: string[]; summary?: string; error?: string; repairCycles: number };
 };
+export type TaskSummary = Pick<Task, 'id' | 'projectId' | 'state' | 'version' | 'createdAt' | 'updatedAt'> & { mode?: Task['mode']; branch?: string; items?: number; commit?: string; error?: string };
 export type TaskEvent = { sequence: number; taskId: string; runId: string; actor: string; reason: string; state: TaskState; timestamp: string };

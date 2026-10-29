@@ -74,7 +74,7 @@ projects.command('list').action(async () => print(await request('/projects')));
 projects.command('add <id> <path>').option('--mode <mode>', 'Optional project autonomy default').action(async (id: string, path: string, opts: { mode?: string }) => print(await request('/projects', 'POST', { id, path, ...(opts.mode ? { defaultMode: opts.mode } : {}) })));
 cli.command('agents').option('--project <id>').action(async (opts: { project?: string }) => print(await request(`/agents${opts.project ? `?projectId=${encodeURIComponent(opts.project)}` : ''}`)));
 const tasks = cli.command('tasks');
-tasks.command('list').action(async () => print(await request('/tasks')));
+tasks.command('list').description('Summaries of all tasks; use tasks show for the full record').action(async () => print(await request('/tasks')));
 tasks.command('submit <project> <request>').option('--mode <mode>').option('--key <key>', 'Retry key; reuse it to avoid duplicate submissions').action(async (projectId: string, text: string, opts: { mode?: string; key?: string }) => {
   const task = await request('/tasks', 'POST', { projectId, request: text, ...(opts.mode ? { mode: opts.mode } : {}) }, opts.key ?? randomUUID());
   print(task);

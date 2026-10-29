@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { AppError } from '../domain/errors.js';
 import { assertTransition } from '../domain/lifecycle.js';
-import { TaskInput, type Project, type Task, type TaskEvent, type TaskState } from '../domain/schemas.js';
+import { TaskInput, type Project, type Task, type TaskEvent, type TaskState, type TaskSummary } from '../domain/schemas.js';
 import { environmentSecrets, redact, redactValues } from '../telemetry/redact.js';
 
 export class Store {
@@ -61,6 +61,14 @@ export class Store {
     return JSON.parse(row.data as string) as Project;
   }
   tasks(): Task[] { return this.db.prepare('SELECT data FROM tasks ORDER BY rowid DESC').all().map(r => JSON.parse(r.data as string) as Task); }
+  /** The list view: no agent snapshots, plans or instructions, which grow to hundreds of kilobytes per task. */
+  summaries(): TaskSummary[] {
+    return this.tasks().map(t => ({
+      id: t.id, projectId: t.projectId, state: t.state, version: t.version, createdAt: t.createdAt, updatedAt: t.updatedAt,
+      ...(t.mode ? { mode: t.mode } : {}), ...(t.workspace ? { branch: t.workspace.branch } : {}), ...(t.plan ? { items: t.plan.items.length } : {}),
+      ...(t.outcome?.commit ? { commit: t.outcome.commit } : {}), ...(t.outcome?.error ? { error: t.outcome.error } : {}),
+    }));
+  }
   task(id: string): Task {
     const row = this.db.prepare('SELECT data FROM tasks WHERE id=?').get(id);
     if (!row) throw new AppError('not_found', 'Unknown task', 404);

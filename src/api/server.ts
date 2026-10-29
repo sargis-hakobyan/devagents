@@ -44,7 +44,7 @@ export function createApi(service: TaskService, token: string) {
       if (req.method === 'GET' && path === '/projects') return send(res, 200, service.store.projects());
       if (req.method === 'POST' && path === '/projects') return send(res, 201, await service.registerProject(await body(req)));
       if (req.method === 'GET' && path === '/agents') return send(res, 200, await service.agents(url.searchParams.get('projectId') ?? undefined));
-      if (req.method === 'GET' && path === '/tasks') return send(res, 200, service.store.tasks());
+      if (req.method === 'GET' && path === '/tasks') return send(res, 200, service.store.summaries());
       if (req.method === 'POST' && path === '/tasks') {
         const key = z.string().min(1).max(200).parse(req.headers['idempotency-key']);
         return send(res, 201, service.submit(await body(req), key));
