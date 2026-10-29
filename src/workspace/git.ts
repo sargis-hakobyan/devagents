@@ -7,12 +7,12 @@ import { AppError } from '../domain/errors.js';
 import { ProjectInput, type Project } from '../domain/schemas.js';
 
 const exec = promisify(execFile);
-export async function git(cwd: string, args: string[]): Promise<string> {
+export async function git(cwd: string, args: string[], trim = true): Promise<string> {
   const { stdout } = await exec('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'submodule.recurse=false', '-c', `safe.directory=${cwd}`, '-c', 'protocol.file.allow=never', ...args], {
     cwd, timeout: 30000, maxBuffer: 2 * 1024 * 1024,
     env: { PATH: process.env.PATH, HOME: homedir(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0' },
   });
-  return stdout.trim();
+  return trim ? stdout.trim() : stdout;
 }
 export async function inspectProject(input: unknown): Promise<Project> {
   const project = ProjectInput.parse(input);

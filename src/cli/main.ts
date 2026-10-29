@@ -13,6 +13,10 @@ import { createApi, accessToken } from '../api/server.js';
 import { engineHealth } from '../engines/health.js';
 import { environmentSecrets, log, redact } from '../telemetry/redact.js';
 import { AppError } from '../domain/errors.js';
+import { CodexAdapter } from '../engines/codex/adapter.js';
+import { CodexValidator } from '../engines/codex/validator.js';
+import { TaskRunner } from '../orchestration/runner.js';
+import { lockService } from '../persistence/service-lock.js';
 
 const print = (data: unknown) => console.log(JSON.stringify(redact(data, environmentSecrets()), null, 2));
 const port = () => z.coerce.number().int().min(1).max(65535).parse(process.env.DEVAGENTS_PORT ?? 4310);
@@ -28,9 +32,12 @@ async function request(path: string, method = 'GET', body?: unknown, key?: strin
 const cli = new Command().name('devagents').description('Local-first configurable development teams').version('0.1.0');
 cli.command('serve').description('Start the local API').action(async () => {
   const dataDir = dataDirectory(); const config = await loadConfig();
+  const unlock = lockService(dataDir);
   const configuredSecrets = config.providers.flatMap(p => p.apiKeyEnv && process.env[p.apiKeyEnv] ? [process.env[p.apiKeyEnv]!] : []);
   const store = new Store(join(dataDir, 'devagents.db'), [...environmentSecrets(), ...configuredSecrets]);
   const service = new TaskService(store, config, dataDir);
+  const runner = new TaskRunner(service, new CodexAdapter(dataDir), new CodexValidator(dataDir));
+  service.attachRunner(runner);
   const server = createApi(service, await accessToken(dataDir));
   // Docker explicitly binds to all container interfaces; Compose exposes only host loopback.
   const host = process.env.DEVAGENTS_HOST ?? '127.0.0.1';
@@ -39,12 +46,13 @@ cli.command('serve').description('Start the local API').action(async () => {
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port(), host, resolve); });
   // Only the process which owns the listening socket may reconcile this service's tasks.
   const recovered = store.recover();
-  log('service_started', { host, port: port(), recovered, projects: store.projects().length, executionEnabled: false });
-  log('setup', { message: 'Register an existing checkout with projects add. Coding execution is not enabled in M1.' });
+  log('service_started', { host, port: port(), recovered, projects: store.projects().length, executionEnabled: true });
+  log('setup', { message: 'Register an existing checkout and authenticate Codex. Use tasks submit, show and evidence to follow work.' });
   let closing = false;
   const shutdown = () => {
     if (closing) return; closing = true;
-    server.close(() => { store.close(); process.exitCode = 0; });
+    void runner.stop();
+    server.close(() => { void runner.stop().then(() => { store.close(); unlock(); process.exitCode = 0; }); });
     server.closeIdleConnections();
   };
   process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
@@ -67,6 +75,8 @@ tasks.command('submit <project> <request>').option('--mode <mode>').option('--ke
 });
 tasks.command('show <id>').action(async (id: string) => print(await request(`/tasks/${id}`)));
 tasks.command('events <id>').action(async (id: string) => print(await request(`/tasks/${id}/events`)));
+tasks.command('evidence <id>').action(async (id: string) => print(await request(`/tasks/${id}/evidence`)));
+tasks.command('run <id>').description('Continue an idle planning/ready checkpoint after restart').action(async (id: string) => print(await request(`/tasks/${id}/run`, 'POST', {})));
 tasks.command('mode <id> <mode>').action(async (id: string, mode: string) => print(await request(`/tasks/${id}/mode`, 'POST', { mode })));
 tasks.command('plan <id> <file>').description('Store a validated plan from YAML or JSON (manual M1 checkpoint)').action(async (id: string, file: string) => print(await request(`/tasks/${id}/plan`, 'POST', parse(await readFile(file, 'utf8')))));
 tasks.command('approve <id>').requiredOption('--version <version>', 'Version of the plan you reviewed').action(async (id: string, opts: { version: string }) => print(await request(`/tasks/${id}/approve`, 'POST', { version: Number(opts.version) })));

@@ -8,7 +8,7 @@ export function redact(value: unknown, secrets: readonly string[] = []): unknown
     return result;
   }
   if (Array.isArray(value)) return value.map(v => redact(v, secrets));
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, secretKey.test(k) ? '[REDACTED]' : redact(v, secrets)]));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, secretKey.test(k) && typeof v !== 'boolean' && v !== null && !(/(?:^|_)tokens$/.test(k) && typeof v === 'number') ? '[REDACTED]' : redact(v, secrets)]));
   return value;
 }
 export function environmentSecrets(env = process.env): string[] {

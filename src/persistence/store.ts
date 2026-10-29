@@ -14,7 +14,7 @@ export class Store {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 1) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
+    if (version > 2) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
     if (version === 0) this.db.exec(`
       BEGIN IMMEDIATE;
       CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, data TEXT NOT NULL);
@@ -24,6 +24,14 @@ export class Store {
       CREATE TRIGGER events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;
       CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;
       PRAGMA user_version=1;
+      COMMIT;
+    `);
+    if (version < 2) this.db.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE evidence (sequence INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id), kind TEXT NOT NULL, data TEXT NOT NULL);
+      CREATE TRIGGER evidence_no_update BEFORE UPDATE ON evidence BEGIN SELECT RAISE(ABORT, 'evidence is append-only'); END;
+      CREATE TRIGGER evidence_no_delete BEFORE DELETE ON evidence BEGIN SELECT RAISE(ABORT, 'evidence is append-only'); END;
+      PRAGMA user_version=2;
       COMMIT;
     `);
   }
@@ -74,7 +82,7 @@ export class Store {
       return task;
     });
   }
-  transition(id: string, expectedVersion: number, state: TaskState, actor: string, reason: string, patch: Partial<Pick<Task, 'mode' | 'plan'>> = {}): Task {
+  transition(id: string, expectedVersion: number, state: TaskState, actor: string, reason: string, patch: Partial<Pick<Task, 'mode' | 'plan' | 'workspace' | 'agents' | 'outcome'>> = {}): Task {
     return this.transaction(() => {
       const task = this.task(id);
       if (task.version !== expectedVersion) throw new AppError('stale_task', 'Task changed; reload before retrying', 409);
@@ -85,6 +93,24 @@ export class Store {
       return this.task(id);
     });
   }
+  checkpoint(id: string, expectedVersion: number, patch: Partial<Pick<Task, 'workspace' | 'agents' | 'outcome'>>, reason: string): Task {
+    return this.transaction(() => {
+      const task = this.task(id);
+      if (task.version !== expectedVersion) throw new AppError('stale_task', 'Task changed; reload before retrying', 409);
+      const updated = { ...task, ...patch, version: task.version + 1, updatedAt: new Date().toISOString() };
+      this.db.prepare('UPDATE tasks SET version=?,data=? WHERE id=?').run(updated.version, this.json(updated), id);
+      this.append(updated, 'orchestrator', reason);
+      return this.task(id);
+    });
+  }
+  record(id: string, kind: string, data: unknown): void {
+    this.task(id);
+    this.db.prepare('INSERT INTO evidence (task_id,kind,data) VALUES (?,?,?)').run(id, kind, this.json({ at: new Date().toISOString(), data }));
+  }
+  evidence(id: string): { sequence: number; kind: string; at: string; data: unknown }[] {
+    this.task(id);
+    return this.db.prepare('SELECT sequence,kind,data FROM evidence WHERE task_id=? ORDER BY sequence').all(id).map(r => ({ sequence: Number(r.sequence), kind: String(r.kind), ...JSON.parse(String(r.data)) }));
+  }
   private append(task: Task, actor: string, reason: string): void {
     this.db.prepare('INSERT INTO events (task_id,data) VALUES (?,?)').run(task.id, this.json({ taskId: task.id, runId: task.runId, actor, reason, state: task.state, timestamp: task.updatedAt }));
   }
@@ -94,7 +120,7 @@ export class Store {
   }
   recover(): string[] {
     // Never replay a worker or external effect after restart. Approval waits survive intact.
-    const interrupted = this.tasks().filter(t => ['running', 'validating', 'reviewing', 'repairing'].includes(t.state));
+    const interrupted = this.tasks().filter(t => ['running', 'validating', 'reviewing', 'committing', 'repairing'].includes(t.state) || (t.state === 'planning' && (t.workspace || this.evidence(t.id).some(e => e.kind === 'worktree-intent'))));
     for (const task of interrupted) this.transition(task.id, task.version, 'failed', 'recovery', 'Process interrupted; inspect preserved worktrees and evidence before submitting a new task');
     return interrupted.map(t => t.id);
   }

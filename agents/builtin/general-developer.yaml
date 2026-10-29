@@ -14,6 +14,6 @@ delegation:
 permissions:
   readPaths: ["project:/**"]
   writePaths: ["project:/**"]
-  allowCommands: false
+  allowCommands: true
   allowPush: false
 concurrency: 1

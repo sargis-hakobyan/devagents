@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const Id = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 export const Mode = z.enum(['autonomous', 'plan-approval']);
-export const State = z.enum(['draft', 'awaiting_mode', 'planning', 'awaiting_plan_approval', 'ready', 'running', 'validating', 'reviewing', 'repairing', 'awaiting_external_approval', 'completed', 'failed', 'cancelled']);
+export const State = z.enum(['draft', 'awaiting_mode', 'planning', 'awaiting_plan_approval', 'ready', 'running', 'validating', 'reviewing', 'committing', 'repairing', 'awaiting_external_approval', 'completed', 'failed', 'cancelled']);
 export type TaskState = z.infer<typeof State>;
 export const Provider = z.strictObject({
   id: Id,
@@ -26,6 +26,8 @@ export const Config = z.strictObject({
   providers: z.array(Provider).default([{ id: 'openai', kind: 'openai', auth: 'login' }]),
   concurrency: z.number().int().min(1).max(8).default(2),
   maxRepairCycles: z.number().int().min(0).max(3).default(1),
+  executionTimeoutMs: z.number().int().min(1000).max(3600000).default(600000),
+  validationTimeoutMs: z.number().int().min(1000).max(600000).default(120000),
 }).superRefine((c, ctx) => {
   if (new Set(c.providers.map(p => p.id)).size !== c.providers.length) ctx.addIssue({ code: 'custom', message: 'Duplicate provider IDs' });
   if (!c.providers.some(p => p.id === c.defaultProvider)) ctx.addIssue({ code: 'custom', message: 'defaultProvider must exist' });
@@ -63,5 +65,8 @@ export const TaskInput = z.strictObject({ projectId: Id, request: z.string().min
 export type Task = z.infer<typeof TaskInput> & {
   id: string; runId: string; state: TaskState; version: number;
   createdAt: string; updatedAt: string; plan?: TaskPlan;
+  workspace?: { path: string; branch: string; baseSha: string };
+  agents?: AgentDefinition[];
+  outcome?: { commit?: string; files?: string[]; summary?: string; error?: string; repairCycles: number };
 };
 export type TaskEvent = { sequence: number; taskId: string; runId: string; actor: string; reason: string; state: TaskState; timestamp: string };

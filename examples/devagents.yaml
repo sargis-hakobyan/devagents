@@ -1,8 +1,11 @@
 schemaVersion: 1
 defaultEngine: codex
 defaultProvider: openai
-concurrency: 2
+# M2 runs serially; higher concurrency is reserved for M3.
+concurrency: 1
 maxRepairCycles: 1
+executionTimeoutMs: 600000
+validationTimeoutMs: 120000
 providers:
   - id: openai
     kind: openai

@@ -34,7 +34,7 @@ export function createApi(service: TaskService, token: string) {
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', 'http://localhost');
-      if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { status: 'ok', milestone: 'M1', executionEnabled: false });
+      if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { status: 'ok', milestone: 'M2', executionEnabled: service.executionEnabled });
       // Prevent browser-origin requests, including cross-site requests to localhost.
       if (req.headers.origin) throw new AppError('forbidden_origin', 'Browser requests are not enabled', 403);
       const supplied = Buffer.from(req.headers.authorization ?? ''); const expected = Buffer.from(`Bearer ${token}`);
@@ -48,12 +48,14 @@ export function createApi(service: TaskService, token: string) {
         const key = z.string().min(1).max(200).parse(req.headers['idempotency-key']);
         return send(res, 201, service.submit(await body(req), key));
       }
-      const match = /^\/tasks\/([a-f0-9-]{36})(?:\/(events|mode|plan|approve|cancel))?$/.exec(path);
+      const match = /^\/tasks\/([a-f0-9-]{36})(?:\/(events|evidence|run|mode|plan|approve|cancel))?$/.exec(path);
       if (match) {
         const id = match[1]!; const action = match[2];
         if (req.method === 'GET' && !action) return send(res, 200, service.store.task(id));
         if (req.method === 'GET' && action === 'events') return send(res, 200, service.store.events(id));
+        if (req.method === 'GET' && action === 'evidence') return send(res, 200, service.store.evidence(id));
         if (req.method === 'POST') {
+          if (action === 'run') return send(res, 202, service.run(id));
           if (action === 'mode') return send(res, 200, service.mode(id, z.strictObject({ mode: z.unknown() }).parse(await body(req)).mode));
           if (action === 'plan') return send(res, 200, await service.proposePlan(id, await body(req)));
           if (action === 'approve') return send(res, 200, service.approve(id, z.strictObject({ version: z.number().int().nonnegative() }).parse(await body(req)).version));

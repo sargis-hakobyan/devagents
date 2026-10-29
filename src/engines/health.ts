@@ -9,7 +9,7 @@ export async function engineHealth(dataDir: string) {
   for (const [id, binary] of [['codex', 'codex'], ['claude-code', 'claude']] as const) {
     try {
       const { stdout } = await exec(binary, ['--version'], { timeout: 5000 });
-      results.push({ id, installed: true, version: stdout.trim(), execution: 'not-enabled' });
+      results.push({ id, installed: true, version: stdout.trim(), execution: id === 'codex' ? 'available-after-auth' : 'not-implemented' });
     } catch { results.push({ id, installed: false, execution: 'not-enabled' }); }
   }
   const home = join(dataDir, 'engines', 'codex');

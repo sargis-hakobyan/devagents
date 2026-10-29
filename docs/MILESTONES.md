@@ -7,7 +7,7 @@
 - [x] Mastra suspension and storage/runtime recreation probe.
 - [x] Native Codex filesystem sandbox probe with harmless sentinel files.
 - [ ] Authenticated container login and real coding-engine fixtures.
-- [ ] All runtime tool boundaries and network isolation verified in both environments.
+- [x] Enabled shell/patch tools and command network isolation probed on native macOS and Docker Linux ARM64.
 
 ## M1 — Foundation (implemented)
 
@@ -21,16 +21,17 @@
 - [x] Compose, non-root execution, healthcheck, limits and restart smoke test.
 - [x] Native tests and documentation.
 
-## M2 — Single-engine vertical slice (next)
+## M2 — Single-engine vertical slice (implemented; live acceptance pending)
 
 - [x] Worktree creation tested against dirty user checkout.
 - [x] Dedicated Codex login command and setup diagnostics.
-- [ ] Codex adapter: normalized streaming, timeout and child cancellation.
-- [ ] Dynamic Tech Lead using registry and scoped project context.
-- [ ] All runtime tools and validation commands enforce policy.
-- [ ] Execute/test/independent review/bounded repair/local commit loop.
-- [ ] Fake-engine end-to-end tests and opt-in real Codex fixture.
-- [ ] Durable execution runs, evidence and worktree reconciliation metadata.
+- [x] Codex adapter: normalized streaming, timeout and child cancellation.
+- [x] Dynamic Tech Lead using registry and scoped project context.
+- [x] Pinned runtime shell/patch and validation containment tested; unsupported tools disabled.
+- [x] Execute/test/independent review/bounded repair/local commit loop.
+- [x] Fake-engine end-to-end tests and opt-in real Codex fixture command.
+- [ ] Authenticated real model fixture passes with the user’s dedicated login.
+- [x] Durable execution runs, evidence and worktree reconciliation metadata.
 
 ## Later
 
@@ -53,4 +54,14 @@ npm run cli -- doctor
 npm run cli -- projects add my-project /absolute/path/to/existing-checkout
 ```
 
-Before the M2 live fixture, configure the dedicated account with `npm run cli -- auth codex`, or use `auth codex --api-key-env OPENAI_API_KEY`. Login alone does not enable coding execution in M1.
+Before the M2 live fixture, configure the dedicated account with `npm run cli -- auth codex`, or use `auth codex --api-key-env OPENAI_API_KEY`. M2 queues planning/execution after explicit mode selection. Use `tasks show` and `tasks evidence` to follow the result.
+
+## Acceptance commands
+
+- `npm run check`: 26 tests, typecheck and production build.
+- `npm run test:m2`: deterministic planning/implementation/review with real sandboxed validation and a local commit.
+- `npm run test:codex-protocol`: real pinned Codex shell/patch execution and structured events against a loopback model fixture; no account/API calls.
+- `npm run test:docker`: isolated service persistence plus M2 and protocol fixtures under Linux container restrictions.
+- `npm run test:codex-live`: opt-in authenticated native fixture, still pending. See README for the equivalent container command.
+
+M2 deliberately supports one work item, serial execution, text changes, exact/subtree path grants and read-only Node/npm validation. Local inference, multiple engines, parallel scheduling, generated build output policies and external actions remain later work.

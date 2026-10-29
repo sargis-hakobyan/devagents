@@ -2,12 +2,12 @@
 
 DevAgents is an open-source, local-first AI development-team orchestrator, being built to plan, delegate, implement, test and review changes with configurable agents and replaceable coding engines.
 
-**Current status: runnable M1 foundation, not yet an autonomous coding system.** Register an existing checkout, configure roles/providers, submit a task, choose autonomy, store/approve a validated plan and inspect durable events. Tasks stop at `ready`. Automatic planning and real execute/test/review/commit workflows are next. See [milestones](docs/MILESTONES.md), [compatibility findings](docs/M0_FINDINGS.md), and [decisions](docs/DECISIONS.md).
+**Current status: M2 single-engine workflow implemented; authenticated model acceptance test pending.** A dynamic Tech Lead plans one work item, a configured developer implements it in an isolated worktree, real sandboxed commands validate it, and a separate reviewer gates a local commit. Approval waits, bounded repairs, cancellation and execution evidence are persisted. Credential-free native and Docker checks are documented in [milestones](docs/MILESTONES.md), [compatibility findings](docs/M0_FINDINGS.md), and [decisions](docs/DECISIONS.md).
 
 ## Docker quickstart
 
 ```sh
-docker compose up -d
+docker compose up -d --build
 docker compose exec devagents node dist/cli/main.js doctor
 ```
 
@@ -43,21 +43,23 @@ The returned task waits for its autonomy choice. Substitute its ID below:
 
 ```sh
 npm run cli -- tasks mode TASK_ID plan-approval
-npm run cli -- tasks plan TASK_ID examples/plan.yaml
+# The Tech Lead now plans automatically. Wait for awaiting_plan_approval:
 npm run cli -- tasks show TASK_ID
-npm run cli -- tasks approve TASK_ID --version 2
+# Replace VERSION with the version from the plan you reviewed:
+npm run cli -- tasks approve TASK_ID --version VERSION
 npm run cli -- tasks events TASK_ID
+npm run cli -- tasks evidence TASK_ID
 ```
 
-Approve the version you actually reviewed. The example plan's project ID is `my-project`; adjust it if needed. `tasks cancel TASK_ID` also rejects a pending plan. Submission with `--mode autonomous` skips the mode prompt and plan approval. Task mode overrides project default (`projects add ... --mode ...`), which overrides the global default. With no default the wait is persisted exactly once.
+Authenticate Codex before selecting a mode. Approve the version you actually reviewed. `tasks cancel TASK_ID` also rejects a pending plan. Submission with `--mode autonomous` skips the mode prompt and plan approval. Task mode overrides project default (`projects add ... --mode ...`), which overrides the global default. With no default the wait is persisted exactly once.
 
-Reuse `--key` with identical input to retry submission without duplication. Plans are supplied manually in M1; the dynamic Tech Lead is not wired yet.
+Reuse `--key` with identical input to retry submission without duplication. Use `tasks show` to find the managed branch, worktree path and final commit. Work runs serially in M2. Only one small implementation item is accepted; split larger requests into separate tasks. Nothing is pushed or merged automatically.
 
 ## Configuration and agents
 
 `DEVAGENTS_DATA_DIR` defaults to `.devagents`, and `DEVAGENTS_PORT` to `4310`. Set `DEVAGENTS_CONFIG` to a YAML file such as `examples/devagents.yaml`. The native process does not automatically load `.env`; `.env.example` documents variables. Compose uses `.env` for substitution only.
 
-Six built-ins: Tech Lead, Developer, Backend Developer, Frontend Developer, QA Engineer and Code Reviewer. Add YAML and Markdown under `<data-directory>/agents/` or `<project>/.devagents/agents/`. Precedence is project > user > bundled `agents/builtin/`. Duplicate IDs within a directory fail validation. Definitions reload when the registry is requested; M2 will snapshot them for running tasks.
+Six built-ins: Tech Lead, Developer, Backend Developer, Frontend Developer, QA Engineer and Code Reviewer. Add YAML and Markdown under `<data-directory>/agents/` or `<project>/.devagents/agents/`. Precedence is project > user > bundled `agents/builtin/`. Duplicate IDs within a directory fail validation. Definitions reload when the registry is requested and are snapshotted when a task creates its worktree.
 
 ```yaml
 schemaVersion: 1
@@ -99,17 +101,21 @@ docker compose exec devagents node dist/cli/main.js auth codex
 docker compose exec -e OPENAI_API_KEY devagents node dist/cli/main.js auth codex --api-key-env OPENAI_API_KEY
 ```
 
-Never put literal keys in commands, YAML, commits or task requests. Login state stays in the dedicated data directory/volume; host credentials are not copied. Device login may require account/workspace enablement. Successful account login is still an unverified M0 gate.
+Never put literal keys in commands, YAML, commits or task requests. Login state stays in the dedicated data directory/volume; host credentials are not copied. Device login may require account/workspace enablement. Successful account login and the live model fixture remain unverified acceptance gates. A missing login fails the task with a setup error before creating a worktree; after login, submit a new task with a new retry key.
 
-Anthropic API-key configuration is represented; its adapter is planned for M4. Third-party Claude subscription login needs an officially permitted integration, as explained in [M0 findings](docs/M0_FINDINGS.md). The M1 container does not include Claude.
+Anthropic API-key configuration is represented; its adapter is planned for M4. Third-party Claude subscription login needs an officially permitted integration, as explained in [M0 findings](docs/M0_FINDINGS.md). The container does not include Claude.
 
 ## API and security
 
 The CLI authenticates using `<data-directory>/api-token` (mode `0600`). Keep this directory private. Only `/health` is unauthenticated. Browser-origin requests are rejected; no CORS or browser UI is enabled. This is a single-user local service.
 
-Endpoints: `GET/POST /projects`, `GET /agents?projectId=...`, `GET/POST /tasks`, `GET /tasks/:id`, `GET /tasks/:id/events`, `POST /tasks/:id/{mode,plan,approve,cancel}`. Task creation requires `Idempotency-Key`; bodies use JSON. Approval includes the reviewed `version`.
+Endpoints: `GET/POST /projects`, `GET /agents?projectId=...`, `GET/POST /tasks`, `GET /tasks/:id`, `GET /tasks/:id/events`, `GET /tasks/:id/evidence`, `POST /tasks/:id/{mode,plan,approve,cancel,run}`. Task creation requires `Idempotency-Key`; bodies use JSON. Approval includes the reviewed `version`.
 
-Scoped paths reject traversal/symlinks. Initial policy helpers deny credential/runtime paths, commands without a verified sandbox, and push/merge/deploy. Git helpers disable hooks/fsmonitor; worktree creation rejects checkout filters. Known environment secrets and recognizable credential patterns are redacted from logs/task payloads; keep secrets out of requests regardless. Full engine-tool enforcement remains an M2 gate, so coding execution is disabled.
+The adapter pins Codex CLI 0.160.1 and builds a named permission profile from role paths. M2 supports exact paths and subtree `/**` grants; other glob forms fail closed. Read-only planning/review and writable implementation use separate processes. Shells and patches are sandboxed; tool networking, delegated agents, plugins, hooks, browser tools and web search are disabled. Runtime/user/repository configuration is ignored. Known secret files, Git metadata and existing symlinks/hardlinks are denied. Write permission also implies filesystem read access to that path.
+
+Validation supports `node --test`, `npm test`, and `npm run test/typecheck/lint/build` in a read-only worktree with writable temporary storage. Commands cannot install dependencies over the network or write build output into the project. Install required dependencies into the managed worktree while paused at plan approval; ignored dependencies from the original checkout are not copied. Projects needing generated output directories require a later scoped build policy. This initial slice commits regular text files only and checks permissions, branch identity and diff integrity before commit.
+
+Git helpers disable hooks/fsmonitor; worktree creation rejects repository filters. Known environment secrets and recognizable credential patterns are redacted from persisted evidence; keep secrets out of task requests. Approval applies to the planned task; the reviewed local commit is an atomic finalization phase, during which cancellation returns a conflict. Interrupted finalization is marked failed for manual inspection and never automatically repeated.
 
 The container is non-root, has a read-only root filesystem, dropped capabilities, resource limits, temporary `/tmp` and a data volume. These service controls alone are not a worker sandbox.
 
@@ -119,7 +125,11 @@ The container is non-root, has a read-only root filesystem, dropped capabilities
 npm run check
 npm run spike:mastra
 node scripts/sandbox-spike.mjs  # Requires Codex; no credentials
-npm run test:docker            # Requires Docker
+npm run test:m2                # Deterministic engine, real sandboxed tests/Git
+npm run test:codex-protocol    # Real runtime/tools against a local model-protocol fixture
+npm run test:docker            # Requires Docker; includes both M2 fixtures
+# Only after authenticating the dedicated native profile:
+npm run test:codex-live        # Real model calls; consumes account/API usage
 ```
 
 Default tests never require paid credentials. The Docker test creates/removes its own unique temporary service, volume and fixture; it does not touch registered projects. Verified on macOS ARM64 and Docker Linux ARM64. AMD64 verification is pending.
@@ -133,5 +143,15 @@ Keep contributions focused, add meaningful tests for behavioral/security boundar
 - Missing authentication: run `doctor` then the dedicated login command. Startup works without credentials.
 - Project registration fails: supply an absolute existing Git root with at least one commit, visible in that environment.
 - Invalid agent: check capabilities, duplicate IDs and relative instruction-file paths.
-- Task remains `planning` or `ready`: expected in M1. Supply a plan manually to exercise approval. Execution is the next increment.
+- Task remains `planning` or `ready` after restart: inspect events/evidence, then explicitly queue it with `tasks run TASK_ID`. Interrupted tasks with worktree intent are marked failed; preserved approval waits require approval as usual.
 - Interrupted work: active execution states are marked failed for inspection; automatic resumption is not implemented.
+
+For a **live container fixture**, after authenticating, mount the script into a one-off Compose service using the existing dedicated data volume:
+
+```sh
+docker compose run --rm --no-deps --entrypoint node \
+  -v "$PWD/scripts/m2-smoke.mjs:/app/scripts/m2-smoke.mjs:ro" \
+  devagents /app/scripts/m2-smoke.mjs --live
+```
+
+It creates and removes only a temporary fixture repository; live runtime logs remain in the dedicated data directory. It does not register or modify your projects.
