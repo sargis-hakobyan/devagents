@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import { homedir } from 'node:os';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import { loadConfig, dataDirectory } from '../config.js';
@@ -18,6 +19,8 @@ import { CodexValidator } from '../engines/codex/validator.js';
 import { TaskRunner } from '../orchestration/runner.js';
 import { lockService } from '../persistence/service-lock.js';
 import { setupCodexAuth } from '../engines/codex/setup.js';
+import { configuredVault, credentialStore } from '../security/credential-vault.js';
+import { runtimeHome } from '../engines/codex/sandbox.js';
 
 const print = (data: unknown) => console.log(JSON.stringify(redact(data, environmentSecrets()), null, 2));
 const port = () => z.coerce.number().int().min(1).max(65535).parse(process.env.DEVAGENTS_PORT ?? 4310);
@@ -83,25 +86,43 @@ tasks.command('plan <id> <file>').description('Store a validated plan from YAML 
 tasks.command('approve <id>').requiredOption('--version <version>', 'Version of the plan you reviewed').action(async (id: string, opts: { version: string }) => print(await request(`/tasks/${id}/approve`, 'POST', { version: Number(opts.version) })));
 tasks.command('cancel <id>').action(async (id: string) => print(await request(`/tasks/${id}/cancel`, 'POST', {})));
 const auth = cli.command('auth');
+auth.command('vault-exists').description('Report whether encrypted credentials exist').action(async () => {
+  const vault = await configuredVault(dataDirectory());
+  if (!vault) throw new AppError('vault_unconfigured', 'Use the Compose launcher for encrypted container storage');
+  console.log(await vault.exists() ? 'yes' : 'no');
+});
+auth.command('unlock').description('Unlock the memory-backed runtime using a key from stdin').action(async () => {
+  const vault = await configuredVault(dataDirectory());
+  if (!vault) throw new AppError('vault_unconfigured', 'Use the Compose launcher for encrypted container storage');
+  let input = '';
+  for await (const chunk of process.stdin) {
+    input += chunk.toString();
+    if (input.length > 128) throw new AppError('invalid_master_key', 'Invalid OS credential-store input');
+  }
+  await vault.unlock(input.trim());
+  console.log('Encrypted credential vault unlocked.');
+});
 auth.command('setup').description('Prompt once for an API key and reuse the saved Codex profile on later starts')
   .option('--replace-key', 'Prompt for a replacement API key even if already signed in')
   .action(async (opts: { replaceKey?: boolean }) => {
     const result = await setupCodexAuth(dataDirectory(), opts);
     console.log(result === 'saved'
-      ? 'API key saved in the private DevAgents data directory. Future starts will reuse it.'
+      ? 'API key saved in encrypted storage. Future starts will reuse it.'
       : 'Using saved Codex credentials; no API key needed.');
     console.log('Saving credentials does not verify billing or model access; those are checked when a task runs.');
   });
 auth.command('codex').description('Sign in to DevAgents’ dedicated Codex profile').option('--api-key-env <name>', 'Read an API key from this environment variable').action(async (opts: { apiKeyEnv?: string }) => {
-  const home = join(dataDirectory(), 'engines', 'codex'); await mkdir(home, { recursive: true, mode: 0o700 });
+  const vault = await configuredVault(dataDirectory()); await vault?.assertUnlocked();
+  const home = runtimeHome(dataDirectory()); await mkdir(home, { recursive: true, mode: 0o700 });
   const key = opts.apiKeyEnv ? process.env[opts.apiKeyEnv] : undefined;
   if (opts.apiKeyEnv && !key) throw new AppError('missing_key', 'The selected API key environment variable is empty');
-  const child = spawn('codex', ['-c', 'cli_auth_credentials_store="file"', 'login', key ? '--with-api-key' : '--device-auth'], {
-    env: { PATH: process.env.PATH, HOME: home, CODEX_HOME: home }, stdio: key ? ['pipe', 'inherit', 'inherit'] : 'inherit',
+  const child = spawn('codex', ['-c', `cli_auth_credentials_store="${credentialStore()}"`, 'login', key ? '--with-api-key' : '--device-auth'], {
+    env: { PATH: process.env.PATH, HOME: credentialStore() === 'keyring' ? homedir() : home, CODEX_HOME: home }, stdio: key ? ['pipe', 'inherit', 'inherit'] : 'inherit',
   });
   if (key) child.stdin!.end(`${key}\n`);
   const code = await new Promise<number | null>((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
   if (code !== 0) throw new AppError('login_failed', 'Codex login did not complete');
+  await vault?.seal();
 });
 try { await cli.parseAsync(); }
 catch (error) { log('error', { message: error instanceof Error ? error.message : String(error) }); process.exitCode = 1; }

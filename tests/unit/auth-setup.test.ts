@@ -21,16 +21,16 @@ fs.writeFileSync(path, JSON.stringify({OPENAI_API_KEY:key.trim()}), {mode:0o644}
     await writeFile(binary, shim, { mode: 0o700 });
     let prompts = 0;
     const readKey = async () => { prompts++; return 'fixture-key-first'; };
-    assert.equal(await setupCodexAuth(root, { binary, readKey }), 'saved');
+    assert.equal(await setupCodexAuth(root, { store: 'file', binary, readKey }), 'saved');
     assert.equal((await stat(credential)).mode & 0o777, 0o600);
     assert.equal((await stat(home)).mode & 0o777, 0o700);
-    assert.equal(await setupCodexAuth(root, { binary, readKey }), 'reused');
+    assert.equal(await setupCodexAuth(root, { store: 'file', binary, readKey }), 'reused');
     assert.equal(prompts, 1);
-    await assert.rejects(setupCodexAuth(root, { binary, replaceKey: true, readKey: async () => { throw new Error('cancelled'); } }), /cancelled/);
+    await assert.rejects(setupCodexAuth(root, { store: 'file', binary, replaceKey: true, readKey: async () => { throw new Error('cancelled'); } }), /cancelled/);
     assert.equal(JSON.parse(await readFile(credential, 'utf8')).OPENAI_API_KEY, 'fixture-key-first');
-    assert.equal(await setupCodexAuth(root, { binary, replaceKey: true, readKey: async () => 'fixture-key-second' }), 'saved');
+    assert.equal(await setupCodexAuth(root, { store: 'file', binary, replaceKey: true, readKey: async () => 'fixture-key-second' }), 'saved');
     assert.equal(JSON.parse(await readFile(credential, 'utf8')).OPENAI_API_KEY, 'fixture-key-second');
     await writeFile(binary, `#!${process.execPath}\nconsole.error('fixture-key-do-not-print');process.exit(1);\n`, { mode: 0o700 });
-    await assert.rejects(setupCodexAuth(root, { binary, replaceKey: true, readKey }), error => error instanceof Error && /could not save/.test(error.message) && !error.message.includes('fixture-key'));
+    await assert.rejects(setupCodexAuth(root, { store: 'file', binary, replaceKey: true, readKey }), error => error instanceof Error && /could not save/.test(error.message) && !error.message.includes('fixture-key'));
   } finally { await rm(root, { recursive: true, force: true }); }
 });

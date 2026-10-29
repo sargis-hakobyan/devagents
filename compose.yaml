@@ -8,8 +8,11 @@ services:
     volumes:
       - devagents-data:/data
     read_only: true
+    environment:
+      DEVAGENTS_CREDENTIAL_RUNTIME: /run/devagents-auth
     tmpfs:
       - /tmp:size=128m,mode=1777
+      - /run/devagents-auth:size=64m,mode=0700,uid=1000,gid=1000,exec
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     cpus: 2

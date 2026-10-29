@@ -15,7 +15,7 @@ The launcher builds and starts Docker, then asks for an OpenAI API key only if n
 For an already-cloned project, copy `examples/compose.project.yaml` to `compose.override.yaml`, set the absolute source path, then:
 
 ```sh
-docker compose up -d
+./devagents start
 docker compose exec devagents node dist/cli/main.js projects add my-project /projects/my-project
 ```
 
@@ -27,9 +27,15 @@ To replace a saved key:
 ./devagents start --replace-key
 ```
 
-The key is stored by Codex in `/data/engines/codex/auth.json`, a file readable/writable only by the container user (`0600`) in the persistent `devagents-data` volume. It is not encrypted. It is never added to project configuration, shell history or the image. Normal restarts and container recreation retain it; deleting the data volume removes it. An existing ChatGPT login is reused too, unless `--replace-key` is supplied. Credential storage does not confirm API credit balance or model access.
+Credentials are encrypted with AES-256-GCM in `/data/credentials/codex.enc` inside the persistent Docker volume. The separate random encryption key lives in **macOS Keychain** (or a Linux desktop Secret Service via `secret-tool`). The launcher retrieves it automatically; a locked OS keychain may require your normal OS unlock. No encryption key is stored beside the encrypted file.
 
-For unattended startup with credentials already configured, `docker compose up -d` remains available; it does not prompt.
+Codex’s decrypted credential file and the encryption key exist only in the container’s private `/run/devagents-auth` tmpfs while it runs. Restarting clears that memory-backed directory; `./devagents start` unlocks it again. Existing Docker `auth.json` credentials migrate automatically: encryption is verified and saved before the old plaintext file is removed. Existing backups/snapshots are not erased by migration.
+
+The API key is never added to project configuration, shell history or the image. Keep both the persistent volume and the OS keychain entry to retain credentials. The keychain entry is scoped to this checkout’s absolute path; moving the checkout or restoring it on another machine requires restoring the matching keychain entry. If that entry is missing while an encrypted vault exists, startup fails without overwriting credentials. An existing ChatGPT login is reused too, unless `--replace-key` is supplied. Credential storage does not confirm API credit balance or model access.
+
+Encryption protects the saved file, not a running service from its own OS account or an administrator who can access its memory. Worker sandboxes explicitly deny the credential runtime directory.
+
+Use `./devagents start` after a restart to unlock saved credentials. Plain `docker compose up -d` starts the API but leaves credentials locked until the launcher runs. Linux requires `openssl`, `secret-tool` and an unlocked desktop secret service; there is no plaintext fallback for headless systems without a credential store.
 
 ## Native quickstart
 
@@ -102,7 +108,7 @@ npm run cli -- auth setup
 npm run cli -- auth setup --replace-key
 ```
 
-The existing explicit login methods are also available:
+Native logins use Codex’s OS keyring backend with a dedicated DevAgents profile; they do not create a new plaintext credential file. A working OS credential store is required. The existing explicit login methods are also available:
 
 ```sh
 npm run cli -- auth codex
@@ -157,18 +163,17 @@ Keep contributions focused, add meaningful tests for behavioral/security boundar
 
 - Connection refused: start the service; inspect `docker compose logs devagents` if using Docker.
 - Missing API token: CLI and server must use the same data directory; run container CLI through `docker compose exec`.
-- Missing authentication: run `doctor` then the dedicated login command. Startup works without credentials.
+- Missing authentication: run `./devagents start` to unlock the vault; use `--replace-key` only to change the saved key. API startup works without credentials.
 - Project registration fails: supply an absolute existing Git root with at least one commit, visible in that environment.
 - Invalid agent: check capabilities, duplicate IDs and relative instruction-file paths.
 - Task remains `planning` or `ready` after restart: inspect events/evidence, then explicitly queue it with `tasks run TASK_ID`. Interrupted tasks with worktree intent are marked failed; preserved approval waits require approval as usual.
 - Interrupted work: active execution states are marked failed for inspection; automatic resumption is not implemented.
 
-For a **live container fixture**, after authenticating, mount the script into a one-off Compose service using the existing dedicated data volume:
+For a **live container fixture**, after starting and unlocking the service:
 
 ```sh
-docker compose run --rm --no-deps --entrypoint node \
-  -v "$PWD/scripts/m2-smoke.mjs:/app/scripts/m2-smoke.mjs:ro" \
-  devagents /app/scripts/m2-smoke.mjs --live
+./devagents start
+docker compose exec -T devagents node scripts/m2-smoke.mjs --live
 ```
 
-It creates and removes only a temporary fixture repository; live runtime logs remain in the dedicated data directory. It does not register or modify your projects.
+It creates and removes only a temporary fixture repository and uses the running container’s unlocked credential profile. It does not register or modify your projects.

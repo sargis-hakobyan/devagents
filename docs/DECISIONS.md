@@ -38,3 +38,11 @@
 - Reuse Codex’s file credential store in the persistent data volume instead of a second key database. Protect its directory/file with `0700`/`0600`; the file is not encrypted.
 - Hidden terminal input, no command-line/environment key injection, no secret output, and cancellation before saving preserves existing credentials. Noninteractive missing-auth setup fails with an actionable message.
 - Saving credentials checks local persistence, not model access or billing. Existing environment-variable and ChatGPT device-login commands remain supported.
+
+## Encrypted credential storage — 2026-10-29
+
+- Supersedes the earlier plaintext credential-file decision. Docker persists AES-256-GCM encrypted credentials only; the separate 256-bit master key lives in macOS Keychain or Linux Secret Service, retrieved by the launcher over pipes without command-line key arguments.
+- Ciphertexts use fresh 96-bit nonces, a 128-bit authentication tag and a versioned authenticated context. Wrong keys/tampering fail closed. Writes are atomic and synced before the legacy plaintext file is removed.
+- Codex requires decrypted credentials at runtime. Store them and the master key in a private verified Linux tmpfs mount, explicitly denied to worker tools. Native logins use Codex’s OS keyring backend instead of file storage; keyring failure never falls back to plaintext.
+- Container restarts lock the vault until `./devagents start` retrieves the OS keychain key. Missing OS keys do not generate replacements for existing vaults. Keys are scoped to the launcher checkout path, and migration does not erase historical backups.
+- This protects persisted data; a compromised owning OS account, host administrator or running application can still access decrypted credentials. Encryption does not resolve API billing limits.

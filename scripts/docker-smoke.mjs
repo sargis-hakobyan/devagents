@@ -28,7 +28,7 @@ try {
   await writeFile(join(fixture, 'README.md'), '# Docker fixture\n');
   await exec('git', ['-C', fixture, 'add', '.']);
   await exec('git', ['-C', fixture, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'Initial fixture']);
-  await writeFile(override, stringify({ services: { devagents: { volumes: [{ type: 'bind', source: fixture, target: '/projects/fixture' }] } } }));
+  await writeFile(override, stringify({ services: { devagents: { volumes: [{ type: 'bind', source: fixture, target: '/projects/fixture' }, { type: 'bind', source: resolve('scripts/vault-smoke.mjs'), target: '/app/scripts/vault-smoke.mjs', read_only: true }] } } }));
   console.log('Building and starting an isolated Docker smoke instance…');
   await docker(['up', '-d', '--build', '--wait', '--wait-timeout', '60']);
   assert.equal((await fetch(`http://127.0.0.1:${port}/health`)).status, 200);
@@ -38,8 +38,10 @@ try {
   await cli('projects', 'add', 'fixture', '/projects/fixture');
   const task = await cli('tasks', 'submit', 'fixture', 'Persist across restart', '--key', 'docker-smoke');
   assert.equal(task.state, 'awaiting_mode');
+  console.log(await docker(['exec', '-T', 'devagents', 'node', 'scripts/vault-smoke.mjs', 'create']));
   await docker(['restart']);
   await docker(['up', '-d', '--wait', '--wait-timeout', '60']);
+  console.log(await docker(['exec', '-T', 'devagents', 'node', 'scripts/vault-smoke.mjs', 'restore']));
   const restored = await cli('tasks', 'show', task.id);
   assert.equal(restored.state, 'awaiting_mode');
   assert.equal((await cli('tasks', 'events', task.id)).length, 1);

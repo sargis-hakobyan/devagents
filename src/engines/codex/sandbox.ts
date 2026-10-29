@@ -3,6 +3,7 @@ import { dirname, join, resolve } from 'node:path';
 import type { AgentDefinition } from '../../domain/schemas.js';
 import { AppError } from '../../domain/errors.js';
 import { runProcess } from '../process.js';
+import { credentialRuntime } from '../../security/credential-vault.js';
 
 export const CODEX_VERSION = '0.160.1';
 export const deniedSegments = ['.git', '.devagents', '.codex', '.claude', '.agents', '.ssh', '.aws', '.env', '.npmrc', '.netrc', '.mcp.json'];
@@ -52,6 +53,8 @@ export async function sandboxFlags(cwd: string, permissions: AgentDefinition['pe
   }
   await mkdir(temp, { recursive: true, mode: 0o700 });
   filesystem[await realpath(temp)] = 'write';
+  const credentials = credentialRuntime();
+  if (credentials) filesystem[await realpath(credentials)] = 'deny';
   // Node may live under nvm on native installations, outside :minimal.
   filesystem[dirname(await realpath(process.execPath))] = 'read';
   const npmRuntime = join(dirname(dirname(await realpath(process.execPath))), 'lib', 'node_modules', 'npm');
@@ -66,4 +69,5 @@ export async function verifyCodex(binary: string, home: string): Promise<void> {
   const result = await runProcess(binary, ['--version'], { cwd: home, env: safeEnvironment(home, home), timeoutMs: 5000 });
   if (result.exitCode !== 0 || result.stdout.trim() !== `codex-cli ${CODEX_VERSION}`) throw new AppError('engine_version', `This adapter requires Codex CLI ${CODEX_VERSION}; run doctor`);
 }
-export const runtimeHome = (dataDir: string) => resolve(dataDir, 'engines', 'codex');
+export const runtimeHome = (dataDir: string) => credentialRuntime()
+  ? resolve(credentialRuntime()!, 'codex') : resolve(dataDir, 'engines', 'codex');

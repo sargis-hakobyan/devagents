@@ -12,5 +12,10 @@ case "$#:${1:-}" in
 esac
 
 docker compose up -d --build --wait
+vault_exists=$(docker compose exec -T devagents node dist/cli/main.js auth vault-exists)
+vault_id="devagents-vault-$(printf '%s' "$PWD" | openssl dgst -sha256 | awk '{print $NF}')"
+master=$(./scripts/vault-key.sh "$vault_id" "$vault_exists")
+printf '%s\n' "$master" | docker compose exec -T devagents node dist/cli/main.js auth unlock
+unset master
 docker compose exec devagents node dist/cli/main.js auth setup "$@"
 echo 'DevAgents is ready at http://127.0.0.1:4310/health'
