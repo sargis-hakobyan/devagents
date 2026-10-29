@@ -8,7 +8,7 @@ import { AppError } from '../../src/domain/errors.js';
 export class FakeEngine implements CodingEngine {
   readonly id = 'codex';
   calls: EngineRequest[] = [];
-  constructor(readonly options: { failFirstTest?: boolean; rejectReviews?: boolean; contradictoryReview?: boolean; mutateReview?: boolean; waitForCancel?: boolean } = {}) {}
+  constructor(readonly options: { failFirstTest?: boolean; rejectReviews?: boolean; emptyRejection?: boolean; contradictoryReview?: boolean; mutateReview?: boolean; waitForCancel?: boolean } = {}) {}
   async preflight(): Promise<void> {}
   async execute(request: EngineRequest): Promise<EngineResult> {
     this.calls.push(request);
@@ -26,6 +26,7 @@ export class FakeEngine implements CodingEngine {
       return { output: { summary: 'Implemented greeting and tests' } };
     }
     if (this.options.mutateReview) await writeFile(join(request.cwd, 'greeting.cjs'), "module.exports = () => 'tampered';\n");
+    if (this.options.emptyRejection) return { output: { approved: false, summary: 'Rejected without saying why', findings: [] } };
     return { output: { approved: !this.options.rejectReviews, summary: 'Independent fixture review', findings: this.options.rejectReviews || this.options.contradictoryReview ? ['Greeting needs work'] : [] } };
   }
 }

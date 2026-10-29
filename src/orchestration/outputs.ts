@@ -23,4 +23,7 @@ export const ReviewOutput = z.strictObject({
   approved: z.boolean().describe('True only when requirements and validation pass and findings is empty.'),
   summary: z.string().min(1).describe('Review rationale, including positive observations and test evidence.'),
   findings: z.array(z.string().min(1)).describe('Actionable defects requiring repair only. Empty when approved. Do not include positive observations or passed checks.'),
+}).superRefine((review, ctx) => {
+  // A rejection with nothing to repair is malformed output, not a repair request worth a cycle.
+  if (!review.approved && review.findings.length === 0) ctx.addIssue({ code: 'custom', path: ['findings'], message: 'A rejection must list at least one actionable finding' });
 });

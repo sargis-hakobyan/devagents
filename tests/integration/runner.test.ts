@@ -271,3 +271,17 @@ test('service shutdown records interrupted execution as failed with a shutdown r
     assert.deepEqual(reopened.recover(), []); assert.equal(reopened.task(task.id).state, 'failed');
   } finally { reopened?.close(); await runner.stop(); await f.cleanup(); }
 });
+
+test('a rejection without findings is malformed review output and does not consume a repair cycle', async () => {
+  const f = await fixture(); const engine = new FakeEngine({ emptyRejection: true });
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'empty-rejection'); await runner.idle();
+    const done = f.store.task(task.id); assert.equal(done.state, 'failed');
+    assert.match(done.outcome!.error!, /at least one actionable finding/);
+    assert.equal(done.outcome!.repairCycles, 0);
+    assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'review']);
+    assert.ok(f.store.evidence(task.id).some(e => e.kind === 'run-failed' && /actionable finding/.test(String((e.data as { error: string }).error))));
+    assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
+  } finally { await runner.stop(); await f.cleanup(); }
+});

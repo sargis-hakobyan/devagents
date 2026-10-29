@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { Command, Id, ScopedPath } from '../../src/domain/schemas.js';
-import { outputJsonSchema } from '../../src/orchestration/outputs.js';
+import { outputJsonSchema, ReviewOutput } from '../../src/orchestration/outputs.js';
 
 test('model schema omits the incompatible path regex without weakening local path validation', () => {
   const schema = z.strictObject({ id: Id, ownedPaths: z.array(ScopedPath).min(1), validation: z.array(Command) });
@@ -23,4 +23,12 @@ test('model schema omits the incompatible path regex without weakening local pat
   assert.equal(ScopedPath.safeParse('project:/../secret').success, false);
   assert.equal(ScopedPath.safeParse('project:/bad\0name').success, false);
   assert.equal(z.toJSONSchema(ScopedPath).pattern, /^project:\/(?:[^\\\0]*)$/.source);
+});
+
+test('review output schema still generates for the model and rejects a rejection without findings locally', () => {
+  const schema = outputJsonSchema(ReviewOutput) as z.core.JSONSchema.ObjectSchema;
+  assert.deepEqual(schema.required, ['approved', 'summary', 'findings']);
+  assert.equal(ReviewOutput.safeParse({ approved: true, summary: 'ok', findings: [] }).success, true);
+  assert.equal(ReviewOutput.safeParse({ approved: false, summary: 'needs work', findings: ['Fix x'] }).success, true);
+  assert.equal(ReviewOutput.safeParse({ approved: false, summary: 'needs work', findings: [] }).success, false);
 });
