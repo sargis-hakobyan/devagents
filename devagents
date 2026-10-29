@@ -2,14 +2,34 @@
 set -eu
 cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
+usage() { echo 'Usage: ./devagents start [--auth chatgpt|api-key|saved] [--test-connection] [--replace-key]'; }
 case "${1:-start}" in
   start) if [ "$#" -gt 0 ]; then shift; fi ;;
-  *) echo 'Usage: ./devagents start [--replace-key]' >&2; exit 2 ;;
+  --help|-h) usage; exit 0 ;;
+  *) usage >&2; exit 2 ;;
 esac
-case "$#:${1:-}" in
-  0:|1:--replace-key) ;;
-  *) echo 'Usage: ./devagents start [--replace-key]' >&2; exit 2 ;;
-esac
+auth=''; test_connection=''; replace_key=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --auth)
+      [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+      case "$2" in chatgpt|api-key|saved) auth=$2 ;; *) usage >&2; exit 2 ;; esac
+      shift 2 ;;
+    --test-connection) test_connection=yes; shift ;;
+    --replace-key) replace_key=yes; shift ;;
+    --help|-h) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+done
+if [ -n "$replace_key" ]; then
+  case "$auth" in ''|api-key) auth=api-key ;; *) echo '--replace-key conflicts with --auth' >&2; exit 2 ;; esac
+fi
+set --
+if [ -n "$auth" ]; then set -- "$@" --auth "$auth"; fi
+if [ -n "$test_connection" ]; then set -- "$@" --test-connection; fi
+
+command -v docker >/dev/null 2>&1 || { echo 'Install Docker with Compose, then run ./devagents start again.' >&2; exit 1; }
+docker info >/dev/null 2>&1 || { echo 'Start Docker, then run ./devagents start again.' >&2; exit 1; }
 
 docker compose up -d --build --wait
 vault_exists=$(docker compose exec -T devagents node dist/cli/main.js auth vault-exists)
@@ -17,5 +37,9 @@ vault_id="devagents-vault-$(printf '%s' "$PWD" | openssl dgst -sha256 | awk '{pr
 master=$(./scripts/vault-key.sh "$vault_id" "$vault_exists")
 printf '%s\n' "$master" | docker compose exec -T devagents node dist/cli/main.js auth unlock
 unset master
-docker compose exec devagents node dist/cli/main.js auth setup "$@"
-echo 'DevAgents is ready at http://127.0.0.1:4310/health'
+if [ -t 0 ]; then
+  docker compose exec devagents node dist/cli/main.js auth setup "$@"
+else
+  docker compose exec -T devagents node dist/cli/main.js auth setup "$@"
+fi
+echo "DevAgents service is running at http://127.0.0.1:${DEVAGENTS_PORT:-4310}/health"

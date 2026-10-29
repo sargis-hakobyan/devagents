@@ -34,3 +34,22 @@ fs.writeFileSync(path, JSON.stringify({OPENAI_API_KEY:key.trim()}), {mode:0o644}
     await assert.rejects(setupCodexAuth(root, { store: 'file', binary, replaceKey: true, readKey }), error => error instanceof Error && /could not save/.test(error.message) && !error.message.includes('fixture-key'));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('login status identifies ChatGPT and API-key methods without returning key fragments', async () => {
+  const { codexAuthStatus } = await import('../../src/engines/codex/setup.js');
+  const root = await mkdtemp(join(tmpdir(), 'auth-status-')); const binary = join(root, 'codex');
+  try {
+    for (const [output, method] of [
+      ['Logged in using ChatGPT', 'chatgpt'],
+      ['Logged in using an API key - sk-fixture-sensitive', 'api-key'],
+      ['New runtime method', 'unknown'],
+    ] as const) {
+      await writeFile(binary, `#!${process.execPath}\nconsole.error(${JSON.stringify(output)});\n`, { mode: 0o700 });
+      const status = await codexAuthStatus(root, { binary, store: 'file' });
+      assert.deepEqual(status, { saved: true, method });
+      assert.ok(!JSON.stringify(status).includes('sensitive'));
+    }
+    await writeFile(binary, `#!${process.execPath}\nprocess.exit(1);\n`, { mode: 0o700 });
+    assert.deepEqual(await codexAuthStatus(root, { binary, store: 'file' }), { saved: false });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

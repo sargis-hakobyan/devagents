@@ -37,3 +37,15 @@ export async function setupCodexAuth(dataDir: string, options: {
   await vault?.seal();
   return 'saved';
 }
+
+/** Interpret status only; never forward runtime output, which may include key fragments. */
+export async function codexAuthStatus(dataDir: string, options: { binary?: string; store?: 'file' | 'keyring' } = {}): Promise<import('../../domain/auth.js').AuthStatus> {
+  await (await configuredVault(dataDir))?.assertUnlocked();
+  const home = runtimeHome(dataDir); await mkdir(home, { recursive: true, mode: 0o700 });
+  const store = options.store ?? credentialStore(); const env = safeEnvironment(home, home);
+  if (store === 'keyring') env.HOME = homedir();
+  const result = await runProcess(options.binary ?? 'codex', ['-c', `cli_auth_credentials_store="${store}"`, 'login', 'status'], { cwd: home, env, timeoutMs: 15000 });
+  if (result.exitCode !== 0) return { saved: false };
+  const text = `${result.stdout}\n${result.stderr}`;
+  return { saved: true, method: /using an? API key/i.test(text) ? 'api-key' : /using ChatGPT/i.test(text) ? 'chatgpt' : 'unknown' };
+}

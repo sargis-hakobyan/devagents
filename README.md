@@ -10,7 +10,7 @@ DevAgents is an open-source, local-first AI development-team orchestrator, being
 ./devagents start
 ```
 
-The launcher builds and starts Docker, then asks for an OpenAI API key only if no credentials are saved. Paste the key at the hidden prompt and press Enter. Later runs of the same command reuse the saved credentials. No host Node.js is required. The initial build downloads dependencies and Codex. The API is at `127.0.0.1:4310`; `/health` reports readiness. The `devagents-data` volume persists state. Home directories and the Docker socket are not mounted.
+The launcher builds and starts Docker, unlocks encrypted credentials, and offers **ChatGPT account**, **OpenAI API key**, or **Continue with saved login** (Enter on later starts). ChatGPT sign-in uses your plan’s Codex allowance; API keys use separate API billing. Keys are entered at a hidden prompt. For ChatGPT, the wizard explains device-code enablement and the official runtime prints the login link and one-time code. No host Node.js is required. The initial build downloads dependencies and Codex. The API is at `127.0.0.1:4310`; `/health` reports readiness. The `devagents-data` volume persists state. Home directories and the Docker socket are not mounted.
 
 For an already-cloned project, copy `examples/compose.project.yaml` to `compose.override.yaml`, set the absolute source path, then:
 
@@ -21,17 +21,28 @@ docker compose exec devagents node dist/cli/main.js projects add my-project /pro
 
 Registration takes the **container path**. On Linux, the container's non-root UID 1000 needs access to the mount; configure ownership/ACLs rather than running as root. Native/container Git worktree paths are not interchangeable. Keep managed worktrees separate between environments. Dirty changes remain in the original checkout and are not copied into task worktrees.
 
-To replace a saved key:
+You can select a method directly:
 
 ```sh
-./devagents start --replace-key
+./devagents start --auth chatgpt        # Guided ChatGPT device login
+./devagents start --auth api-key        # Hidden API-key prompt (also replaces a saved key)
+./devagents start --auth saved          # Reuse without the method menu
+./devagents start --replace-key         # Compatibility alias for --auth api-key
 ```
+
+After sign-in, setup offers a small **optional connection test**, skipped by default. It sends a fixed prompt to the default Codex model from an empty temporary directory with no project access or command permission. It consumes the selected plan’s allowance or API credits. A saved login is not reported as verified model access until this request succeeds. Results explain authentication, quota, rate-limit, connectivity, and runtime problems without printing raw provider errors. It does not test every configured agent/model or replace the full M2 fixture.
+
+```sh
+./devagents start --auth saved --test-connection
+```
+
+Noninteractive starts reuse saved credentials and skip the test unless explicitly requested; missing credentials fail with instructions to use a terminal. A failed connection check exits nonzero while keeping the service and saved credentials available. No automatic switch between billing methods occurs. Ctrl+C cancels setup or the running connection test.
 
 Credentials are encrypted with AES-256-GCM in `/data/credentials/codex.enc` inside the persistent Docker volume. The separate random encryption key lives in **macOS Keychain** (or a Linux desktop Secret Service via `secret-tool`). The launcher retrieves it automatically; a locked OS keychain may require your normal OS unlock. No encryption key is stored beside the encrypted file.
 
 Codex’s decrypted credential file and the encryption key exist only in the container’s private `/run/devagents-auth` tmpfs while it runs. Restarting clears that memory-backed directory; `./devagents start` unlocks it again. Existing Docker `auth.json` credentials migrate automatically: encryption is verified and saved before the old plaintext file is removed. Existing backups/snapshots are not erased by migration.
 
-The API key is never added to project configuration, shell history or the image. Keep both the persistent volume and the OS keychain entry to retain credentials. The keychain entry is scoped to this checkout’s absolute path; moving the checkout or restoring it on another machine requires restoring the matching keychain entry. If that entry is missing while an encrypted vault exists, startup fails without overwriting credentials. An existing ChatGPT login is reused too, unless `--replace-key` is supplied. Credential storage does not confirm API credit balance or model access.
+The API key is never added to project configuration, shell history or the image. Keep both the persistent volume and the OS keychain entry to retain credentials. The keychain entry is scoped to this checkout’s absolute path; moving the checkout or restoring it on another machine requires restoring the matching keychain entry. If that entry is missing while an encrypted vault exists, startup fails without overwriting credentials. Both ChatGPT and API-key logins can be reused or changed through the menu. Credential storage does not confirm API credit balance or model access.
 
 Encryption protects the saved file, not a running service from its own OS account or an administrator who can access its memory. Worker sandboxes explicitly deny the credential runtime directory.
 
@@ -100,12 +111,14 @@ Inspect with `npm run cli -- agents --project my-project`. Naming an agent does 
 
 ## Authentication
 
-Codex uses a dedicated profile with ChatGPT device login or an OpenAI API key. For native interactive API-key setup (asks once, then reuses the saved profile):
+Codex uses a dedicated profile with ChatGPT device login or an OpenAI API key. For the same guided setup on native Node.js:
 
 ```sh
 npm run cli -- auth setup
-# To replace the saved key:
-npm run cli -- auth setup --replace-key
+# Or select ChatGPT directly:
+npm run cli -- auth setup --auth chatgpt
+# Reuse credentials and explicitly test model access:
+npm run cli -- auth setup --auth saved --test-connection
 ```
 
 Native logins use Codex’s OS keyring backend with a dedicated DevAgents profile; they do not create a new plaintext credential file. A working OS credential store is required. The existing explicit login methods are also available:
@@ -163,7 +176,10 @@ Keep contributions focused, add meaningful tests for behavioral/security boundar
 
 - Connection refused: start the service; inspect `docker compose logs devagents` if using Docker.
 - Missing API token: CLI and server must use the same data directory; run container CLI through `docker compose exec`.
-- Missing authentication: run `./devagents start` to unlock the vault; use `--replace-key` only to change the saved key. API startup works without credentials.
+- Missing authentication: run `./devagents start` to unlock the vault and choose a sign-in method. API startup works without credentials.
+- Device code sign-in disabled: enable it at https://chatgpt.com/#settings/Security; managed workspaces may require an administrator. Run `./devagents start --auth chatgpt` again. See [official authentication guidance](https://learn.chatgpt.com/docs/auth).
+- API quota exceeded: check the API organization’s credits/limits or explicitly switch to ChatGPT sign-in. Replacing a key does not create quota. ChatGPT sign-in has its own Codex allowance and limits.
+- Connection test passes but a task fails: the probe checks the saved profile and default model only. Explicit provider environment-key overrides or per-agent models may differ.
 - Project registration fails: supply an absolute existing Git root with at least one commit, visible in that environment.
 - Invalid agent: check capabilities, duplicate IDs and relative instruction-file paths.
 - Task remains `planning` or `ready` after restart: inspect events/evidence, then explicitly queue it with `tasks run TASK_ID`. Interrupted tasks with worktree intent are marked failed; preserved approval waits require approval as usual.

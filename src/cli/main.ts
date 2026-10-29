@@ -1,10 +1,8 @@
 #!/usr/bin/env node
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { randomUUID } from 'node:crypto';
-import { readFile, mkdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
-import { homedir } from 'node:os';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import { loadConfig, dataDirectory } from '../config.js';
@@ -18,9 +16,13 @@ import { CodexAdapter } from '../engines/codex/adapter.js';
 import { CodexValidator } from '../engines/codex/validator.js';
 import { TaskRunner } from '../orchestration/runner.js';
 import { lockService } from '../persistence/service-lock.js';
-import { setupCodexAuth } from '../engines/codex/setup.js';
-import { configuredVault, credentialStore } from '../security/credential-vault.js';
-import { runtimeHome } from '../engines/codex/sandbox.js';
+import { setupCodexAuth, codexAuthStatus } from '../engines/codex/setup.js';
+import { loginWithChatGPT } from '../engines/codex/device-login.js';
+import { testCodexConnection } from '../engines/codex/connection-test.js';
+import { onboard } from './onboarding.js';
+import type { AuthChoice } from '../domain/auth.js';
+import { readChoice } from './choice-prompt.js';
+import { configuredVault } from '../security/credential-vault.js';
 
 const print = (data: unknown) => console.log(JSON.stringify(redact(data, environmentSecrets()), null, 2));
 const port = () => z.coerce.number().int().min(1).max(65535).parse(process.env.DEVAGENTS_PORT ?? 4310);
@@ -102,27 +104,37 @@ auth.command('unlock').description('Unlock the memory-backed runtime using a key
   await vault.unlock(input.trim());
   console.log('Encrypted credential vault unlocked.');
 });
-auth.command('setup').description('Prompt once for an API key and reuse the saved Codex profile on later starts')
+auth.command('setup').description('Choose ChatGPT, an API key, or a saved login; optionally test model access')
+  .addOption(new Option('--auth <method>', 'Sign-in method').choices(['chatgpt', 'api-key', 'saved']))
+  .option('--test-connection', 'Send a small model request using your selected allowance or API credits')
   .option('--replace-key', 'Prompt for a replacement API key even if already signed in')
-  .action(async (opts: { replaceKey?: boolean }) => {
-    const result = await setupCodexAuth(dataDirectory(), opts);
-    console.log(result === 'saved'
-      ? 'API key saved in encrypted storage. Future starts will reuse it.'
-      : 'Using saved Codex credentials; no API key needed.');
-    console.log('Saving credentials does not verify billing or model access; those are checked when a task runs.');
+  .action(async (opts: { replaceKey?: boolean; auth?: AuthChoice; testConnection?: boolean }) => {
+    if (opts.replaceKey && opts.auth && opts.auth !== 'api-key') throw new AppError('invalid_options', '--replace-key cannot be combined with another sign-in method');
+    try {
+      const dataDir = dataDirectory();
+      const passed = await onboard({
+        status: () => codexAuthStatus(dataDir),
+        login: async method => {
+          if (method === 'chatgpt') await loginWithChatGPT(dataDir);
+          else await setupCodexAuth(dataDir, { replaceKey: true });
+        },
+        test: method => testCodexConnection(dataDir, method),
+      }, { interactive: Boolean(process.stdin.isTTY), write: message => console.log(message), ask: readChoice }, {
+        ...((opts.replaceKey || opts.auth) ? { auth: opts.replaceKey ? 'api-key' : opts.auth! } : {}),
+        ...(opts.testConnection ? { testConnection: true } : {}),
+      });
+      if (!passed) process.exitCode = 1;
+    } catch (error) {
+      console.error(error instanceof AppError ? error.message : 'Setup could not finish. Check Docker and your OS credential store, then run ./devagents start again.');
+      process.exitCode = 1;
+    }
   });
 auth.command('codex').description('Sign in to DevAgents’ dedicated Codex profile').option('--api-key-env <name>', 'Read an API key from this environment variable').action(async (opts: { apiKeyEnv?: string }) => {
-  const vault = await configuredVault(dataDirectory()); await vault?.assertUnlocked();
-  const home = runtimeHome(dataDirectory()); await mkdir(home, { recursive: true, mode: 0o700 });
-  const key = opts.apiKeyEnv ? process.env[opts.apiKeyEnv] : undefined;
-  if (opts.apiKeyEnv && !key) throw new AppError('missing_key', 'The selected API key environment variable is empty');
-  const child = spawn('codex', ['-c', `cli_auth_credentials_store="${credentialStore()}"`, 'login', key ? '--with-api-key' : '--device-auth'], {
-    env: { PATH: process.env.PATH, HOME: credentialStore() === 'keyring' ? homedir() : home, CODEX_HOME: home }, stdio: key ? ['pipe', 'inherit', 'inherit'] : 'inherit',
-  });
-  if (key) child.stdin!.end(`${key}\n`);
-  const code = await new Promise<number | null>((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
-  if (code !== 0) throw new AppError('login_failed', 'Codex login did not complete');
-  await vault?.seal();
+  if (!opts.apiKeyEnv) { await loginWithChatGPT(dataDirectory()); return; }
+  const key = process.env[opts.apiKeyEnv];
+  if (!key) throw new AppError('missing_key', 'The selected API key environment variable is empty');
+  await setupCodexAuth(dataDirectory(), { replaceKey: true, readKey: async () => key });
+  console.log('API key saved securely. Model access has not been checked.');
 });
 try { await cli.parseAsync(); }
 catch (error) { log('error', { message: error instanceof Error ? error.message : String(error) }); process.exitCode = 1; }

@@ -6,11 +6,13 @@ import { join } from 'node:path';
 import { CodexAdapter } from '../dist/engines/codex/adapter.js';
 import { loadRegistry, builtinDirectory } from '../dist/agents/registry.js';
 import { Config } from '../dist/domain/schemas.js';
+import { testCodexConnection } from '../dist/engines/codex/connection-test.js';
 
 // Real pinned Codex runtime, deterministic loopback model responses, no paid credentials.
 const root = await mkdtemp(join(tmpdir(), 'devagents-protocol-'));
 const project = join(root, 'project');
 let calls = []; let requests = []; let index = 0; const progress = [];
+let finalOutput = { summary: 'Protocol fixture completed' };
 const server = createServer(async (req, res) => {
   const chunks = []; for await (const chunk of req) chunks.push(chunk);
   if (!req.url.endsWith('/responses')) { res.writeHead(404); res.end('{}'); return; }
@@ -20,7 +22,7 @@ const server = createServer(async (req, res) => {
   const input = calls[index++];
   const item = input ? { id: `call_${index}`, call_id: `call_${index}`, type: 'custom_tool_call', name: 'exec', namespace: 'functions', input } : {
     id: 'msg_fixture', type: 'message', role: 'assistant', status: 'completed',
-    content: [{ type: 'output_text', text: JSON.stringify({ summary: 'Protocol fixture completed' }), annotations: [] }],
+    content: [{ type: 'output_text', text: JSON.stringify(finalOutput), annotations: [] }],
   };
   const response = { id: `resp_${index}`, object: 'response', created_at: 1, status: 'completed', model: body.model, output: [item], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } };
   res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -63,6 +65,15 @@ try {
   await engine.execute({ ...base, runId: 'review', phase: 'review', agent: agents.find(a => a.id === 'code-reviewer') }, event => progress.push(event));
   assert.equal(await readFile(join(project, 'result.txt'), 'utf8'), 'patched\n');
   assert.doesNotMatch(offeredNames().join(','), /exec_command|spawn_agent/);
+  index = 0; requests = []; calls = []; finalOutput = { connected: true };
+  const connection = await testCodexConnection(join(root, 'data'), 'api-key', { engine: {
+    id: 'codex', preflight: provider => engine.preflight(provider),
+    execute: (request, callback) => engine.execute({ ...request, provider: base.provider }, callback),
+  } });
+  assert.equal(connection.ok, true, connection.message);
+  assert.equal(requests.length, 1);
+  assert.doesNotMatch(offeredNames().join(','), /exec_command|spawn_agent|web_search/);
+  console.log('PASS: opt-in connection check through the real Codex runtime against a loopback fixture; no paid request.');
   console.log('PASS: real Codex JSONL/structured output, scoped shell and patch execution, outside/secret/Git denials, blocked command networking, no delegated/network tools, and read-only review.');
 } catch (error) {
   console.error('Runtime fixture diagnostics:', JSON.stringify(progress).slice(-12000));

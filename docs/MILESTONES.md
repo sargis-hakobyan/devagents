@@ -26,7 +26,8 @@
 
 - [x] Worktree creation tested against dirty user checkout.
 - [x] Dedicated Codex login command and setup diagnostics.
-- [x] One-command Docker startup with hidden first-run API-key prompt and encrypted persistent reuse.
+- [x] One-command Docker startup with guided ChatGPT/API-key selection, hidden key entry and encrypted persistent reuse.
+- [x] Saved-login status, optional bounded connection test, actionable failures and noninteractive reuse.
 - [x] OS keychain master key, authenticated encryption, legacy migration, tmpfs runtime and restart-unlock tests.
 - [x] Codex adapter: normalized streaming, timeout and child cancellation.
 - [x] Dynamic Tech Lead using registry and scoped project context.
@@ -61,7 +62,7 @@ Before the M2 live fixture, configure the dedicated account with `npm run cli --
 
 ## Acceptance commands
 
-- `npm run check`: 33 tests, typecheck and production build.
+- `npm run check`: 46 tests, typecheck and production build.
 - `npm run test:m2`: deterministic planning/implementation/review with real sandboxed validation and a local commit.
 - `npm run test:codex-protocol`: real pinned Codex shell/patch execution and structured events against a loopback model fixture; no account/API calls.
 - `npm run test:docker`: isolated service persistence plus M2 and protocol fixtures under Linux container restrictions.

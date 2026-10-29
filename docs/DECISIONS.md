@@ -46,3 +46,12 @@
 - Codex requires decrypted credentials at runtime. Store them and the master key in a private verified Linux tmpfs mount, explicitly denied to worker tools. Native logins use Codex’s OS keyring backend instead of file storage; keyring failure never falls back to plaintext.
 - Container restarts lock the vault until `./devagents start` retrieves the OS keychain key. Missing OS keys do not generate replacements for existing vaults. Keys are scoped to the launcher checkout path, and migration does not erase historical backups.
 - This protects persisted data; a compromised owning OS account, host administrator or running application can still access decrypted credentials. Encryption does not resolve API billing limits.
+
+
+## Guided authentication — 2026-10-29
+
+- Supersedes the API-key-only first-run prompt. Startup offers ChatGPT device sign-in, hidden API-key input, and saved-login reuse, with billing/allowance explained before selection. Authentication contracts are separate from provider/model configuration for future adapters.
+- `--auth chatgpt|api-key|saved` supports direct selection; `--replace-key` remains compatible. Noninteractive startup never asks for secrets or consumes model usage unless `--test-connection` is explicitly supplied.
+- Status interprets the pinned CLI’s login status without exposing raw output or key fragments. Storage success and verified model access are separate. A failed/mismatched login never falls back to testing the previous method.
+- Optional connection test uses the existing restricted Codex adapter, a fixed prompt, empty disposable workspace, no command/write grants, and a 45-second bound. It checks the saved profile and runtime default model only, not explicit environment-key overrides or all agent models. Failures produce fixed actionable messages and retain credentials; cancellation terminates the model process.
+- No paid/live account request is part of automated tests. Real Codex status and connection-probe protocol are covered by isolated fake-key and loopback fixtures. ChatGPT browser completion and the authenticated M2 fixture still require user participation and available account allowance.
