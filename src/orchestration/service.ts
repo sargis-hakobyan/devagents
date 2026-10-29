@@ -48,6 +48,7 @@ export class TaskService {
     const task = this.store.task(id);
     if (task.state !== 'planning') throw new AppError('invalid_transition', 'Task is not awaiting a plan', 409);
     const plan = validatePlan(input, task.projectId, snapshot ?? task.agents ?? await this.agents(task.projectId));
+    if (task.workspace && plan.items.some(item => item.branch !== (plan.items.length === 1 ? task.workspace!.branch : `${task.workspace!.branch}-${item.id}`))) throw new AppError('branch_mismatch', 'Plan branches must match their managed task/work-item branches');
     return this.store.transition(id, task.version, task.mode === 'plan-approval' ? 'awaiting_plan_approval' : 'ready', 'planner', 'Validated plan stored', { plan });
   }
   approve(id: string, version: number): Task {

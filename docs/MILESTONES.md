@@ -37,9 +37,20 @@
 - [x] Authenticated real model fixture passed with ChatGPT sign-in: planning, implementation, actual tests, independent review and local commit; original checkout unchanged.
 - [x] Durable execution runs, evidence and worktree reconciliation metadata.
 
-## Later
+## M3 — Dynamic multi-agent (implemented; live acceptance blocked)
 
-- [ ] M3: DAG scheduler, parallel worktrees, integration/conflicts.
+- [x] Tech Lead produces a bounded DAG with role assignments, owned paths and explicit integration validation.
+- [x] Deterministic ready waves respect dependencies, global concurrency and per-role limits.
+- [x] Config-only custom specialist exercised end-to-end in parallel worktrees.
+- [x] Private dependency checkpoints and isolated item branches; original dirty checkout preserved.
+- [x] Item validation/review, serial three-way integration, explicit bounded conflict repair.
+- [x] Combined validation/review/repair gate the final local commit; original HEAD divergence blocks completion.
+- [x] Append-only item/run/worktree/commit evidence, CLI/API item progress, safe interruption recovery.
+- [x] Sibling cancellation/drain, blocked dependents, ownership checks and custom merge-driver refusal.
+- [x] Native and Linux ARM64 Docker deterministic M3 fixtures with actual sandboxed validation.
+- [ ] ChatGPT-authenticated three-item M3 fixture: two attempts stopped during planning with `Incomplete response returned, reason: max_output_tokens`; no implementation or final commit occurred.
+
+## Later
 - [ ] M4: Claude adapter, per-agent routing, shared engine fixtures.
 - [ ] M5: authorized GitHub integration, recovery hardening, multi-arch CI/release.
 - [ ] Follow-up: local inference and a validated tool harness.
@@ -62,10 +73,12 @@ Before the M2 live fixture, configure the dedicated account with `npm run cli --
 
 ## Acceptance commands
 
-- `npm run check`: 47 tests, typecheck and production build.
+- `npm run check`: 61 tests, typecheck and production build.
 - `npm run test:m2`: deterministic planning/implementation/review with real sandboxed validation and a local commit.
+- `npm run test:m3`: deterministic three-item DAG with isolated branches, dependency integration, actual sandboxed validation and a combined commit.
+- `npm run test:m3-live`: opt-in authenticated three-item fixture; container acceptance blocked by repeated model response truncation during planning. See compatibility findings before retrying.
 - `npm run test:codex-protocol`: real pinned Codex shell/patch execution and structured events against a loopback model fixture; no account/API calls.
-- `npm run test:docker`: isolated service persistence plus M2 and protocol fixtures under Linux container restrictions.
+- `npm run test:docker`: isolated service persistence plus M2, M3 and protocol fixtures under Linux container restrictions.
 - `npm run test:codex-live`: opt-in authenticated native fixture. The equivalent container command passed with ChatGPT sign-in; native authenticated execution remains unverified. See README.
 
-M2 deliberately supports one work item, serial execution, text changes, exact/subtree path grants and read-only Node/npm validation. Local inference, multiple engines, parallel scheduling, generated build output policies and external actions remain later work.
+M3 supports one active top-level request with bounded parallel work items, text changes, exact/subtree path grants and read-only Node/npm validation. Scheduling uses deterministic waves, not immediate dispatch when a slot frees. Local inference, multiple engines, cross-request concurrency, generated build output policies and external actions remain later work.

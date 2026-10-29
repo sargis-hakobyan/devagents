@@ -11,7 +11,7 @@ export function assertValidationCommand(command: { executable: string; args: str
   const ok = (command.executable === 'node' && command.args[0] === '--test') ||
     (command.executable === 'npm' && command.args[0] === 'test') ||
     (command.executable === 'npm' && command.args[0] === 'run' && ['test', 'typecheck', 'lint', 'build'].includes(command.args[1] ?? ''));
-  if (!ok || command.args.some(a => a.includes('\0'))) throw new AppError('command_denied', 'M2 validation supports node --test, npm test, and npm run test/typecheck/lint/build');
+  if (!ok || command.args.some(a => a.includes('\0'))) throw new AppError('command_denied', 'Validation supports node --test, npm test, and npm run test/typecheck/lint/build');
 }
 export class CodexValidator implements Validator {
   constructor(private readonly dataDir: string, private readonly binary = 'codex') {}

@@ -60,3 +60,13 @@
 
 - The ChatGPT-authenticated fixture exposed ambiguity in `findings`: the model used it for positive review observations while approving. Define findings as actionable repair defects in both the prompt and schema descriptions; positive observations belong in summary.
 - Keep the existing fail-closed commit gate: approval with any outstanding findings still requires repair. Do not silently discard findings or trust the approval boolean alone. A regression fixture covers contradictory approval; the subsequent live container fixture passed through local commit.
+
+
+## M3 DAG execution — 2026-10-29
+
+- Keep the established framework-independent runner and SQLite evidence store. Admit one top-level request at a time; execute ready work items in deterministic waves capped by global and per-role concurrency. Reviewer calls also respect role limits. Immediate slot-refill scheduling and cross-request concurrency are deferred.
+- Plans assign agents, dependencies, unique owned branches, scoped writable paths, and an integration agent/combined validation. Ownership is a subset of registry grants and is passed into the runtime sandbox. Custom roles work through the existing config registry.
+- Snapshot the integration index with Git write-tree/commit-tree for dependency baselines without advancing the task branch. Workers produce private reviewed item commits; three-way patch application combines their changes serially into the task worktree. No original-checkout merge or external push occurs.
+- Explicit integration repairs resolve conflicts within the union of approved owned paths and the integration role's existing permissions. All item checks plus combined checks and independent full-diff review run before the final task commit. Custom repository merge drivers, filters, hooks, global/system attributes and pathspec magic cannot be used to execute arbitrary integration hooks.
+- Persist item states, workspace/checkpoint identities, run correlation and integration intents/results as append-only evidence. CLI/API project the latest item states. Restart recovery never replays half-completed Git work; task failure/cancellation preserves private worktrees and marks unfinished items interrupted/blocked/cancelled. Final task commit remains a non-cancellable lifecycle boundary; private checkpoint writes may finish during cancellation.
+- Failed workers abort and drain siblings before releasing the request slot. Per-item repair budgets and a shared integration repair budget are bounded. Read-only Node/npm validation and bounded text-only changes remain unchanged.

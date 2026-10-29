@@ -33,7 +33,7 @@ export const Config = z.strictObject({
   if (!c.providers.some(p => p.id === c.defaultProvider)) ctx.addIssue({ code: 'custom', message: 'defaultProvider must exist' });
 });
 export type AppConfig = z.infer<typeof Config>;
-const ScopedPath = z.string().regex(/^project:\/(?:[^\\\0]*)$/).refine(p => !p.split('/').some(s => s === '..' || s === '.'), 'Path traversal is forbidden');
+export const ScopedPath = z.string().regex(/^project:\/(?:[^\\\0]*)$/).refine(p => !p.split('/').some(s => s === '..' || s === '.'), 'Path traversal is forbidden');
 export const Permissions = z.strictObject({
   readPaths: z.array(ScopedPath).default(['project:/**']),
   writePaths: z.array(ScopedPath).default([]),
@@ -55,9 +55,10 @@ export const WorkItem = z.strictObject({
   acceptanceCriteria: z.array(z.string().min(1)).min(1), dependsOn: z.array(Id),
   requiredCapabilities: z.array(Id).min(1), projectId: Id,
   branch: z.string().regex(/^codex\/[a-z0-9][a-z0-9/-]*$/),
-  validation: z.array(Command), assignedAgent: Id.optional(),
+  validation: z.array(Command), assignedAgent: Id.optional(), ownedPaths: z.array(ScopedPath).min(1).optional(),
 });
-export const Plan = z.strictObject({ summary: z.string().min(1), risks: z.array(z.string()), items: z.array(WorkItem).min(1).max(30) });
+export const Integration = z.strictObject({ assignedAgent: Id, validation: z.array(Command).min(1) });
+export const Plan = z.strictObject({ summary: z.string().min(1), risks: z.array(z.string()), items: z.array(WorkItem).min(1).max(30), integration: Integration.nullable().optional() });
 export type TaskPlan = z.infer<typeof Plan>;
 export const ProjectInput = z.strictObject({ id: Id, path: z.string().min(1), defaultMode: Mode.optional() });
 export type Project = z.infer<typeof ProjectInput> & { baseSha: string; registeredAt: string };

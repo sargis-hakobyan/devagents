@@ -3,7 +3,7 @@ import type { AgentDefinition, AppConfig } from './schemas.js';
 export type EnginePhase = 'planning' | 'implementation' | 'review';
 export type EngineProgress = { kind: 'started' | 'message' | 'command' | 'file-change' | 'usage'; text?: string; data?: unknown };
 export type EngineRequest = {
-  runId: string; phase: EnginePhase; cwd: string; prompt: string;
+  runId: string; workItemId?: string; phase: EnginePhase; cwd: string; prompt: string;
   agent: AgentDefinition; provider: AppConfig['providers'][number];
   schema: Record<string, unknown>; signal: AbortSignal; timeoutMs: number;
 };

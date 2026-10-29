@@ -82,6 +82,7 @@ tasks.command('submit <project> <request>').option('--mode <mode>').option('--ke
 tasks.command('show <id>').action(async (id: string) => print(await request(`/tasks/${id}`)));
 tasks.command('events <id>').action(async (id: string) => print(await request(`/tasks/${id}/events`)));
 tasks.command('evidence <id>').action(async (id: string) => print(await request(`/tasks/${id}/evidence`)));
+tasks.command('items <id>').description('Show work-item progress, branches and dependency state').action(async (id: string) => print(await request(`/tasks/${id}/items`)));
 tasks.command('run <id>').description('Continue an idle planning/ready checkpoint after restart').action(async (id: string) => print(await request(`/tasks/${id}/run`, 'POST', {})));
 tasks.command('mode <id> <mode>').action(async (id: string, mode: string) => print(await request(`/tasks/${id}/mode`, 'POST', { mode })));
 tasks.command('plan <id> <file>').description('Store a validated plan from YAML or JSON (manual M1 checkpoint)').action(async (id: string, file: string) => print(await request(`/tasks/${id}/plan`, 'POST', parse(await readFile(file, 'utf8')))));

@@ -15,7 +15,7 @@ export class CodexAdapter implements CodingEngine {
   constructor(private readonly dataDir: string, private readonly binary = 'codex') { this.dataDir = resolve(dataDir); }
   async preflight(provider: AppConfig['providers'][number]): Promise<void> {
     await (await configuredVault(this.dataDir))?.assertUnlocked();
-    if (provider.kind !== 'openai' || provider.baseUrl) throw new AppError('unsupported_provider', 'M2 Codex supports the official OpenAI provider; other providers follow later');
+    if (provider.kind !== 'openai' || provider.baseUrl) throw new AppError('unsupported_provider', 'Codex supports the official OpenAI provider; other providers follow later');
     const home = runtimeHome(this.dataDir); await verifyCodex(this.binary, home);
     if (provider.auth === 'api-key') {
       if (!provider.apiKeyEnv || !process.env[provider.apiKeyEnv]) throw new AppError('missing_auth', 'Set the configured API key environment variable for the service');

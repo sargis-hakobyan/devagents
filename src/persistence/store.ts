@@ -111,6 +111,22 @@ export class Store {
     this.task(id);
     return this.db.prepare('SELECT sequence,kind,data FROM evidence WHERE task_id=? ORDER BY sequence').all(id).map(r => ({ sequence: Number(r.sequence), kind: String(r.kind), ...JSON.parse(String(r.data)) }));
   }
+  workItems(id: string): Record<string, unknown>[] {
+    const task = this.task(id);
+    const items = new Map<string, Record<string, unknown>>((task.plan?.items ?? []).map(i => [i.id, { itemId: i.id, state: 'pending', agentId: i.assignedAgent, branch: i.branch, dependsOn: i.dependsOn, ownedPaths: i.ownedPaths }]));
+    let recorded = false;
+    for (const event of this.evidence(id)) {
+      if (event.kind !== 'work-item') continue;
+      recorded = true;
+      const data = event.data as Record<string, unknown>;
+      if (typeof data.itemId === 'string' && items.has(data.itemId)) items.set(data.itemId, { ...items.get(data.itemId), ...data, updatedAt: event.at });
+    }
+    if (!recorded && task.plan?.items.length === 1) for (const item of items.values()) item.state = task.state;
+    if (['failed', 'cancelled'].includes(task.state)) for (const item of items.values()) {
+      if (!['completed', 'failed', 'cancelled', 'blocked'].includes(String(item.state))) item.state = task.state === 'cancelled' ? 'cancelled' : item.state === 'pending' ? 'blocked' : 'interrupted';
+    }
+    return [...items.values()];
+  }
   private append(task: Task, actor: string, reason: string): void {
     this.db.prepare('INSERT INTO events (task_id,data) VALUES (?,?)').run(task.id, this.json({ taskId: task.id, runId: task.runId, actor, reason, state: task.state, timestamp: task.updatedAt }));
   }

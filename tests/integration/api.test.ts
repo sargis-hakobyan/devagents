@@ -18,6 +18,8 @@ test('API is authenticated, rejects browser origins, validates input and support
     assert.equal(response.status, 201);
     const task = await response.json() as { id: string; state: string };
     assert.equal(task.state, 'awaiting_mode');
+    assert.equal((await fetch(`${url}/tasks/${task.id}/items`)).status, 401);
+    assert.deepEqual(await (await fetch(`${url}/tasks/${task.id}/items`, { headers })).json(), []);
     const events = await fetch(`${url}/tasks/${task.id}/events`, { headers });
     assert.equal((await events.json() as unknown[]).length, 1);
   } finally {

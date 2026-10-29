@@ -8,9 +8,9 @@ import { ProjectInput, type Project } from '../domain/schemas.js';
 
 const exec = promisify(execFile);
 export async function git(cwd: string, args: string[], trim = true): Promise<string> {
-  const { stdout } = await exec('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'submodule.recurse=false', '-c', `safe.directory=${cwd}`, '-c', 'protocol.file.allow=never', ...args], {
+  const { stdout } = await exec('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'core.attributesFile=/dev/null', '-c', 'submodule.recurse=false', '-c', `safe.directory=${cwd}`, '-c', 'protocol.file.allow=never', ...args], {
     cwd, timeout: 30000, maxBuffer: 2 * 1024 * 1024,
-    env: { PATH: process.env.PATH, HOME: homedir(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0' },
+    env: { PATH: process.env.PATH, HOME: homedir(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_ATTR_NOSYSTEM: '1', GIT_LITERAL_PATHSPECS: '1', GIT_TERMINAL_PROMPT: '0' },
   });
   return trim ? stdout.trim() : stdout;
 }
@@ -28,16 +28,24 @@ export async function inspectProject(input: unknown): Promise<Project> {
 export class WorkspaceManager {
   constructor(private readonly dataDir: string) {}
   async create(project: Project, taskId: string): Promise<{ path: string; branch: string; baseSha: string }> {
+    return this.createOwned(project, taskId);
+  }
+  async createItem(project: Project, taskId: string, itemId: string, baseSha: string): Promise<{ path: string; branch: string; baseSha: string }> {
+    if (!/^[a-z][a-z0-9-]{0,63}$/.test(itemId) || !/^[a-f0-9]{40}$/.test(baseSha)) throw new AppError('invalid_work_item', 'Invalid work item or base commit');
+    return this.createOwned(project, taskId, itemId, baseSha);
+  }
+  private async createOwned(project: Project, taskId: string, itemId?: string, source?: string): Promise<{ path: string; branch: string; baseSha: string }> {
     if (!/^[a-f0-9-]{36}$/.test(taskId)) throw new AppError('invalid_task_id', 'Invalid worktree owner ID');
     // Revalidate registration immediately before accessing the project.
     if (await realpath(project.path) !== project.path) throw new AppError('path_denied', 'Registered project path changed');
-    const configuration = await git(project.path, ['config', '--local', '--name-only', '--list']);
+    const configuration = await git(project.path, ['config', '--local', '--includes', '--name-only', '--list']);
     if (configuration.split('\n').some(key => key.startsWith('filter.'))) throw new AppError('unsafe_git_config', 'Worktree checkout with repository-defined filters requires sandbox support');
     const parent = resolve(this.dataDir, 'worktrees');
     await mkdir(parent, { recursive: true, mode: 0o700 });
-    const path = join(await realpath(parent), taskId);
-    const branch = `codex/devagents-${taskId}`;
-    const baseSha = await git(project.path, ['rev-parse', '--verify', 'HEAD']);
+    const owner = itemId ? `${taskId}-${itemId}` : taskId;
+    const path = join(await realpath(parent), owner);
+    const branch = `codex/devagents-${owner}`;
+    const baseSha = source ?? await git(project.path, ['rev-parse', '--verify', 'HEAD']);
     await git(project.path, ['worktree', 'add', '-b', branch, path, baseSha]);
     return { path, branch, baseSha };
   }

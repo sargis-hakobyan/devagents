@@ -32,7 +32,7 @@ try {
   const engine = live ? new CodexAdapter(process.env.DEVAGENTS_DATA_DIR ?? '.devagents') : {
     id: 'codex', async preflight() {},
     async execute(request) {
-      if (request.phase === 'planning') return { output: { summary: 'Fix greeting', risks: [], items: [{ id: 'fix', title: 'Fix greeting', description: 'Return hello', acceptanceCriteria: ['Existing test passes'], dependsOn: [], requiredCapabilities: ['implementation'], assignedAgent: 'general-developer', projectId: 'fixture', branch: await git(request.cwd, ['branch', '--show-current']), validation: [{ executable: 'node', args: ['--test', 'greeting.test.cjs'] }] }] } };
+      if (request.phase === 'planning') return { output: { summary: 'Fix greeting', risks: [], integration: null, items: [{ id: 'fix', ownedPaths: ['project:/**'], title: 'Fix greeting', description: 'Return hello', acceptanceCriteria: ['Existing test passes'], dependsOn: [], requiredCapabilities: ['implementation'], assignedAgent: 'general-developer', projectId: 'fixture', branch: await git(request.cwd, ['branch', '--show-current']), validation: [{ executable: 'node', args: ['--test', 'greeting.test.cjs'] }] }] } };
       if (request.phase === 'implementation') { await writeFile(join(request.cwd, 'greeting.cjs'), "module.exports = () => 'hello';\n"); return { output: { summary: 'Fixed greeting' } }; }
       return { output: { approved: true, summary: 'Fixture reviewed', findings: [] } };
     },

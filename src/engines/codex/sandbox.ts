@@ -29,7 +29,7 @@ export async function sandboxFlags(cwd: string, permissions: AgentDefinition['pe
     for (const pattern of paths) {
       const scoped = pattern.slice('project:/'.length);
       const relative = scoped === '**' ? '' : scoped.endsWith('/**') ? scoped.slice(0, -3) : scoped;
-      if (/[?*\[\]{}]/.test(relative) || relative.split('/').includes('..') || relative.startsWith('/') || relative.includes('\\')) throw new AppError('unsupported_policy', 'Codex M2 supports exact paths and subtree /** permissions only');
+      if (/[?*\[\]{}]/.test(relative) || relative.split('/').includes('..') || relative.startsWith('/') || relative.includes('\\')) throw new AppError('unsupported_policy', 'Codex supports exact paths and subtree /** permissions only');
       filesystem[join(root, relative)] = access;
     }
   }
@@ -38,7 +38,7 @@ export async function sandboxFlags(cwd: string, permissions: AgentDefinition['pe
   let count = 0;
   const scan = async (dir: string): Promise<void> => {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
-      if (++count > 50000) throw new AppError('workspace_limit', 'Workspace exceeds the M2 safety scan limit');
+      if (++count > 50000) throw new AppError('workspace_limit', 'Workspace exceeds the workspace safety scan limit');
       const path = join(dir, entry.name);
       if (protectedPath(entry.name)) { denied.add(path); continue; }
       if (entry.isSymbolicLink() || (entry.isFile() && (await lstat(path)).nlink > 1)) { denied.add(path); continue; }

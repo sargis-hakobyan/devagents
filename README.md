@@ -2,7 +2,7 @@
 
 DevAgents is an open-source, local-first AI development-team orchestrator, being built to plan, delegate, implement, test and review changes with configurable agents and replaceable coding engines.
 
-**Current status: M2 single-engine workflow implemented and live Codex fixture verified with ChatGPT sign-in.** A dynamic Tech Lead plans one work item, a configured developer implements it in an isolated worktree, real sandboxed commands validate it, and a separate reviewer gates a local commit. Approval waits, bounded repairs, cancellation and execution evidence are persisted. Credential-free native and Docker checks are documented in [milestones](docs/MILESTONES.md), [compatibility findings](docs/M0_FINDINGS.md), and [decisions](docs/DECISIONS.md).
+**Current status: M3 multi-agent execution implemented; live M3 acceptance pending.** A dynamic Tech Lead plans a task DAG and selects configured specialists. Independent items run in isolated worktrees with bounded concurrency; dependency results are integrated before downstream work starts. Real sandboxed checks and independent item/combined review gate the final local commit. Approval waits, bounded repairs, cancellation and execution evidence are persisted. Native and Docker checks are documented in [milestones](docs/MILESTONES.md), [compatibility findings](docs/M0_FINDINGS.md), and [decisions](docs/DECISIONS.md).
 
 ## Docker quickstart
 
@@ -30,7 +30,7 @@ You can select a method directly:
 ./devagents start --replace-key         # Compatibility alias for --auth api-key
 ```
 
-After sign-in, setup offers a small **optional connection test**, skipped by default. It sends a fixed prompt to the default Codex model from an empty temporary directory with no project access or command permission. It consumes the selected plan’s allowance or API credits. A saved login is not reported as verified model access until this request succeeds. Results explain authentication, quota, rate-limit, connectivity, and runtime problems without printing raw provider errors. It does not test every configured agent/model or replace the full M2 fixture.
+After sign-in, setup offers a small **optional connection test**, skipped by default. It sends a fixed prompt to the default Codex model from an empty temporary directory with no project access or command permission. It consumes the selected plan’s allowance or API credits. A saved login is not reported as verified model access until this request succeeds. Results explain authentication, quota, rate-limit, connectivity, and runtime problems without printing raw provider errors. It does not test every configured agent/model or replace a full workflow fixture.
 
 ```sh
 ./devagents start --auth saved --test-connection
@@ -75,11 +75,22 @@ npm run cli -- tasks show TASK_ID
 npm run cli -- tasks approve TASK_ID --version VERSION
 npm run cli -- tasks events TASK_ID
 npm run cli -- tasks evidence TASK_ID
+npm run cli -- tasks items TASK_ID
 ```
 
 Authenticate Codex before selecting a mode. Approve the version you actually reviewed. `tasks cancel TASK_ID` also rejects a pending plan. Submission with `--mode autonomous` skips the mode prompt and plan approval. Task mode overrides project default (`projects add ... --mode ...`), which overrides the global default. With no default the wait is persisted exactly once.
 
-Reuse `--key` with identical input to retry submission without duplication. Use `tasks show` to find the managed branch, worktree path and final commit. Work runs serially in M2. Only one small implementation item is accepted; split larger requests into separate tasks. Nothing is pushed or merged automatically.
+Reuse `--key` with identical input to retry submission without duplication. Use `tasks show` to find the managed branch, worktree path and final commit. One top-level request runs at a time. Within it, ready items run in deterministic waves bounded by global `concurrency` and each role’s `concurrency`. Integration is serial and dependent items start only after prior waves are integrated. Nothing is pushed or merged into the original checkout automatically.
+
+## Multi-agent plans and progress
+
+The Tech Lead chooses up to 30 work items from the agent registry. Each item declares an assigned agent, dependencies, validation commands, a unique managed branch, and `ownedPaths` using exact paths or subtree `/**` grants. Ownership can narrow a role’s permissions, never expand them. Multi-item plans also select an integration agent whose existing permissions cover every owned path and include combined validation commands. Single-item plans use their own validation and `integration: null`.
+
+Use `tasks show TASK_ID` to inspect and approve the plan, `tasks items TASK_ID` for each item’s progress/worktree/commit, and `tasks evidence TASK_ID` for runs, validation, checkpoints and integration decisions. A plan-approval wait stops all implementation workers. For parallel work by one role, set that role’s `concurrency` above 1; different roles can run concurrently at their existing limits.
+
+Each worker branches from a private snapshot of results already integrated into the task worktree. Successful item validation and independent review produce a private work-item commit. These commits and dependency checkpoints are intermediate evidence, not final task approval. Changes are combined with three-way patch application in the task worktree. Conflicts become an explicit integration-agent repair bounded by `maxRepairCycles`; unresolved conflicts stop the task and preserve its worktrees. Repository-defined filters and custom merge drivers are refused.
+
+After integration, all item checks and the combined checks run again. A reviewer distinct from all implementers and the integration agent must approve the complete diff before one final commit is created on the task branch. Per-item repair budgets and a separate shared integration repair budget are bounded. Cancellation or failure drains sibling workers and blocks unstarted dependents. A private checkpoint may already exist when cancellation arrives; a cancelled task never advances to the final combined commit. Restart recovery preserves paths/evidence and marks interrupted tasks failed rather than replaying them automatically.
 
 ## Configuration and agents
 
@@ -145,13 +156,13 @@ Anthropic API-key configuration is represented; its adapter is planned for M4. T
 
 The CLI authenticates using `<data-directory>/api-token` (mode `0600`). Keep this directory private. Only `/health` is unauthenticated. Browser-origin requests are rejected; no CORS or browser UI is enabled. This is a single-user local service.
 
-Endpoints: `GET/POST /projects`, `GET /agents?projectId=...`, `GET/POST /tasks`, `GET /tasks/:id`, `GET /tasks/:id/events`, `GET /tasks/:id/evidence`, `POST /tasks/:id/{mode,plan,approve,cancel,run}`. Task creation requires `Idempotency-Key`; bodies use JSON. Approval includes the reviewed `version`.
+Endpoints: `GET/POST /projects`, `GET /agents?projectId=...`, `GET/POST /tasks`, `GET /tasks/:id`, `GET /tasks/:id/events`, `GET /tasks/:id/evidence`, `GET /tasks/:id/items`, `POST /tasks/:id/{mode,plan,approve,cancel,run}`. Task creation requires `Idempotency-Key`; bodies use JSON. Approval includes the reviewed `version`.
 
-The adapter pins Codex CLI 0.160.1 and builds a named permission profile from role paths. M2 supports exact paths and subtree `/**` grants; other glob forms fail closed. Read-only planning/review and writable implementation use separate processes. Shells and patches are sandboxed; tool networking, delegated agents, plugins, hooks, browser tools and web search are disabled. Runtime/user/repository configuration is ignored. Known secret files, Git metadata and existing symlinks/hardlinks are denied. Write permission also implies filesystem read access to that path.
+The adapter pins Codex CLI 0.160.1 and builds a named permission profile from role paths. The adapter supports exact paths and subtree `/**` grants; other glob forms fail closed. Read-only planning/review and writable implementation use separate processes. Shells and patches are sandboxed; tool networking, delegated agents, plugins, hooks, browser tools and web search are disabled. Runtime/user/repository configuration is ignored. Known secret files, Git metadata and existing symlinks/hardlinks are denied. Write permission also implies filesystem read access to that path.
 
 Validation supports `node --test`, `npm test`, and `npm run test/typecheck/lint/build` in a read-only worktree with writable temporary storage. Commands cannot install dependencies over the network or write build output into the project. Install required dependencies into the managed worktree while paused at plan approval; ignored dependencies from the original checkout are not copied. Projects needing generated output directories require a later scoped build policy. This initial slice commits regular text files only and checks permissions, branch identity and diff integrity before commit.
 
-Git helpers disable hooks/fsmonitor; worktree creation rejects repository filters. Known environment secrets and recognizable credential patterns are redacted from persisted evidence; keep secrets out of task requests. Approval applies to the planned task; the reviewed local commit is an atomic finalization phase, during which cancellation returns a conflict. Interrupted finalization is marked failed for manual inspection and never automatically repeated.
+Git helpers disable hooks/fsmonitor and global/system attributes; worktree creation rejects repository filters. Known environment secrets and recognizable credential patterns are redacted from persisted evidence; keep secrets out of task requests. Approval applies to the planned task; the reviewed local commit is an atomic finalization phase, during which cancellation returns a conflict. Interrupted finalization is marked failed for manual inspection and never automatically repeated.
 
 The container is non-root, has a read-only root filesystem, dropped capabilities, resource limits, temporary `/tmp` and a data volume. These service controls alone are not a worker sandbox.
 
@@ -161,11 +172,13 @@ The container is non-root, has a read-only root filesystem, dropped capabilities
 npm run check
 npm run spike:mastra
 node scripts/sandbox-spike.mjs  # Requires Codex; no credentials
-npm run test:m2                # Deterministic engine, real sandboxed tests/Git
+npm run test:m2                # Single-item fixture with real sandboxed tests/Git
+npm run test:m3                # Three-item DAG, dependencies and combined review
 npm run test:codex-protocol    # Real runtime/tools against a local model-protocol fixture
-npm run test:docker            # Requires Docker; includes both M2 fixtures
+npm run test:docker            # Requires Docker; includes M2, M3 and runtime fixtures
 # Only after authenticating the dedicated native profile:
-npm run test:codex-live        # Real model calls; consumes account/API usage
+npm run test:codex-live        # Single-item live model fixture
+npm run test:m3-live           # Three-item live model fixture; consumes account/API usage
 ```
 
 Default tests never require paid credentials. The Docker test creates/removes its own unique temporary service, volume and fixture; it does not touch registered projects. Verified on macOS ARM64 and Docker Linux ARM64. AMD64 verification is pending.
@@ -189,7 +202,9 @@ For a **live container fixture**, after starting and unlocking the service:
 
 ```sh
 ./devagents start
-docker compose exec -T devagents node scripts/m2-smoke.mjs --live
+docker compose exec -T devagents node scripts/m3-smoke.mjs --live
 ```
 
 It creates and removes only a temporary fixture repository and uses the running container’s unlocked credential profile. It does not register or modify your projects.
+
+M3 live acceptance is currently blocked: two ChatGPT-authenticated attempts returned `Incomplete response returned, reason: max_output_tokens` during planning, before any implementation. Native and Docker deterministic M3 fixtures pass. The adapter supplies no output-token cap; the loopback runtime protocol check also passes. The cause of the live truncation is unresolved, so the multi-agent live workflow is not yet verified.

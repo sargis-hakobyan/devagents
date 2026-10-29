@@ -20,22 +20,26 @@ export async function changes(workspace: NonNullable<Task['workspace']>, agent: 
     const info = await lstat(path).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
     if (info && (!info.isFile() || info.nlink > 1 || info.size > 512 * 1024)) throw new AppError('unsupported_change', `Only regular text files up to 512KB can be committed: ${file}`);
     const content = info ? await readFile(path) : Buffer.from('[deleted]');
-    if (content.includes(0)) throw new AppError('unsupported_change', 'Binary changes are not supported in M2');
+    if (content.includes(0)) throw new AppError('unsupported_change', 'Binary changes are not supported in this version');
     digest.update(file).update('\0').update(String(info?.mode)).update('\0').update(content);
     if (untracked.includes(file)) previews.push(`New file ${file}:\n${content.toString('utf8')}`);
   }
   const diff = await git(workspace.path, ['diff', '--no-ext-diff', '--no-textconv', '--no-color', 'HEAD', '--'], false);
   const review = `${diff}\n${previews.join('\n')}`;
-  if (review.length > 250000) throw new AppError('diff_limit', 'Diff exceeds M2 review limit');
+  if (review.length > 250000) throw new AppError('diff_limit', 'Diff exceeds review limit');
   return { files, digest: digest.digest('hex'), diff: review };
 }
 export async function commitChanges(project: Project, workspace: NonNullable<Task['workspace']>, files: string[]): Promise<string> {
   if (await git(project.path, ['rev-parse', 'HEAD']) !== workspace.baseSha) throw new AppError('base_diverged', 'Original project HEAD changed; inspect the worktree before integrating');
+  return commitOwned(workspace, files, 'Implement reviewed DevAgents task');
+}
+export async function commitOwned(workspace: NonNullable<Task['workspace']>, files: string[], message: string): Promise<string> {
   if (!workspace.branch.startsWith('codex/devagents-')) throw new AppError('branch_denied', 'Commit is not on an owned branch');
-  const config = await git(workspace.path, ['config', '--local', '--name-only', '--list']);
+  if (await git(workspace.path, ['rev-parse', 'HEAD']) !== workspace.baseSha || await git(workspace.path, ['branch', '--show-current']) !== workspace.branch) throw new AppError('worktree_changed', 'Worktree changed before commit');
+  const config = await git(workspace.path, ['config', '--local', '--includes', '--name-only', '--list']);
   if (config.split('\n').some(k => k.startsWith('filter.'))) throw new AppError('unsafe_git_config', 'Git filters require additional isolation');
   if (files.length === 0) throw new AppError('no_changes', 'No changes to commit');
   await git(workspace.path, ['add', '--', ...files]);
-  await git(workspace.path, ['-c', 'user.name=DevAgents', '-c', 'user.email=devagents@localhost', '-c', 'commit.gpgsign=false', 'commit', '-m', 'Implement reviewed DevAgents task']);
+  await git(workspace.path, ['-c', 'user.name=DevAgents', '-c', 'user.email=devagents@localhost', '-c', 'commit.gpgsign=false', 'commit', '-m', message]);
   return git(workspace.path, ['rev-parse', 'HEAD']);
 }

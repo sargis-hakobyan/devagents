@@ -20,7 +20,9 @@
     "test:docker": "node scripts/docker-smoke.mjs",
     "test:m2": "npm run build && node scripts/m2-smoke.mjs",
     "test:codex-protocol": "npm run build && node scripts/codex-protocol-smoke.mjs",
-    "test:codex-live": "npm run build && node scripts/m2-smoke.mjs --live"
+    "test:codex-live": "npm run build && node scripts/m2-smoke.mjs --live",
+    "test:m3": "npm run build && node scripts/m3-smoke.mjs",
+    "test:m3-live": "npm run build && node scripts/m3-smoke.mjs --live"
   },
   "dependencies": {
     "commander": "15.0.0",
