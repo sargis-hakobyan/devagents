@@ -12,6 +12,7 @@ import { WorkspaceManager, git } from '../workspace/git.js';
 import { changes, commitOwned, commitChanges } from '../workspace/changes.js';
 import { integrationSnapshot, integrateItem, assertIntegrationConfig } from '../workspace/integration.js';
 import { hiddenFiles, assertHiddenUnchanged } from '../workspace/hidden.js';
+import { conflictBaselines, unresolvedMarkers } from '../workspace/conflicts.js';
 import { assertValidationCommands } from '../domain/validation.js';
 import { selectImplementer, independentReviewer } from '../domain/roles.js';
 
@@ -162,6 +163,9 @@ export async function runDag(h: Hooks): Promise<void> {
         const conflicts = await integrateItem(workspace, completed.workspace, completed.commit, integrator);
         if (conflicts.length) {
           record('integration-conflict', { workItemId: completed.item.id, files: conflicts, agentId: integrator.id });
+          // Read both sides from the unmerged index now: staging the repair later discards them, and a
+          // bare "=======" is only a leftover divider when neither side had that many underlines.
+          const baselines = await conflictBaselines(workspace.path, conflicts);
           let resolved = false;
           while (!resolved) {
             h.active();
@@ -174,11 +178,15 @@ export async function runDag(h: Hooks): Promise<void> {
             for (const file of conflicts) {
               const path = await new PolicyEngine().file(integrator, workspace.path, file, 'write');
               const text = await readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error; });
-              if (/^(<{7} |={7}$|>{7} )/m.test(text)) resolved = false;
+              const problem = unresolvedMarkers(text, baselines.get(file) ?? 0);
+              if (problem) { resolved = false; record('integration-unresolved', { workItemId: completed.item.id, file, problem, repairCycles: integrationRepairs }); }
             }
             if (resolved) {
               await assertIntegrationConfig(workspace.path);
               await git(workspace.path, ['add', '--', ...conflicts]);
+              // Content was checked above; staging alone proves nothing, so also confirm Git sees no unmerged entry.
+              const unmerged = (await git(workspace.path, ['diff', '--name-only', '--diff-filter=U', '-z'], false)).split('\0').filter(Boolean);
+              if (unmerged.length) throw new AppError('integration_conflict', `Unmerged entries remain after repair: ${unmerged.join(', ')}`);
               record('integration-resolved', { workItemId: completed.item.id, files: conflicts, repairCycles: integrationRepairs });
             }
           }

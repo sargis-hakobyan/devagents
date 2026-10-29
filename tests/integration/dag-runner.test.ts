@@ -9,7 +9,7 @@ import { TaskRunner } from '../../src/orchestration/runner.js';
 import { git } from '../../src/workspace/git.js';
 import type { CodingEngine, EngineRequest, EngineResult } from '../../src/domain/engine.js';
 
-type Options = { hidden?: boolean; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
+type Options = { hidden?: boolean; markdown?: boolean; unresolved?: 'markers' | 'separator'; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
 async function dagFixture(options: Options = {}) {
   const f = await fixture();
   // Modules live in per-item directories so ownership uses subtree grants, the only write-grant form the Linux runtime accepts.
@@ -21,6 +21,8 @@ async function dagFixture(options: Options = {}) {
     await mkdir(join(f.project, id)); await writeFile(join(f.project, id, `${id}.cjs`), "module.exports=()=> 'broken';\n");
   }
   if (options.conflict) { await mkdir(join(f.project, 'shared')); await writeFile(join(f.project, 'shared', 'shared.cjs'), "module.exports=()=> 'base';\n"); }
+  // A Markdown file with a setext heading underline that both conflicting items edit.
+  if (options.markdown) await writeFile(join(f.project, 'shared', 'NOTES.md'), 'Notes\n=======\nbase\n');
   await writeFile(join(f.project, '.gitignore'), '*.local.cjs\n');
   await git(f.project, ['add', '.']); await git(f.project, ['commit', '-m', 'Fixture tests']);
   const originalHead = await git(f.project, ['rev-parse', 'HEAD']);
@@ -54,6 +56,7 @@ async function dagFixture(options: Options = {}) {
       }
       if (r.workItemId === '@integration') {
         if (options.conflict) await writeFile(join(r.cwd, 'shared', 'shared.cjs'), "module.exports=()=> 'ab';\n");
+        if (options.markdown) await writeFile(join(r.cwd, 'shared', 'NOTES.md'), options.unresolved === 'markers' ? 'Notes\n=======\n<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n' : options.unresolved === 'separator' ? 'Notes\n=======\na\n=======\nb\n' : 'Notes\n=======\nab\n');
         return { output: { summary: 'Resolved integration' } };
       }
       active++; maxActive = Math.max(maxActive, active); if (active === 2) release();
@@ -72,6 +75,7 @@ async function dagFixture(options: Options = {}) {
         }
         const module = options.conflict && id !== 'c' ? 'shared' : id;
         await writeFile(join(r.cwd, module, `${module}.cjs`), `module.exports=()=> '${id === 'c' ? 'ab' : id}';\n`);
+        if (options.markdown && id !== 'c') await writeFile(join(r.cwd, 'shared', 'NOTES.md'), `Notes\n=======\n${id}\n`);
         return { output: { summary: `Implemented ${id}` } };
       } finally { active--; }
     },
@@ -229,5 +233,32 @@ test('a worker that writes an ignored file inside its owned directory fails befo
     assert.equal(f.store.workItems(task.id).find(i => i.itemId === 'a')!.state, 'failed');
     assert.equal(f.calls.some(c => c.phase === 'review' && c.workItemId === 'a'), false);
     assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
+  } finally { await f.runner.stop(); await f.cleanup(); }
+});
+
+test('a conflicting Markdown file keeps its heading underline after repair and the task completes', async () => {
+  const f = await dagFixture({ conflict: true, markdown: true });
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Combine notes', mode: 'autonomous' }, 'markdown-conflict'); await f.runner.idle();
+    const done = f.store.task(task.id); assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
+    const conflict = f.store.evidence(task.id).find(e => e.kind === 'integration-conflict')!.data as { files: string[] };
+    assert.ok(conflict.files.includes('shared/NOTES.md'));
+    assert.equal(f.store.evidence(task.id).some(e => e.kind === 'integration-unresolved'), false);
+    assert.equal(await readFile(join(done.workspace!.path, 'shared', 'NOTES.md'), 'utf8'), 'Notes\n=======\nab\n');
+    assert.ok(done.outcome!.files!.includes('shared/NOTES.md'));
+  } finally { await f.runner.stop(); await f.cleanup(); }
+});
+for (const unresolved of ['markers', 'separator'] as const) test(`a repair that leaves ${unresolved === 'markers' ? 'conflict markers' : 'an extra conflict separator'} is not accepted as resolved`, async () => {
+  const f = await dagFixture({ conflict: true, markdown: true, unresolved });
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Combine notes', mode: 'autonomous' }, `unresolved-${unresolved}`); await f.runner.idle();
+    const done = f.store.task(task.id); assert.equal(done.state, 'failed');
+    assert.match(done.outcome!.error!, /Integration conflict exhausted the repair budget/);
+    const problems = f.store.evidence(task.id).filter(e => e.kind === 'integration-unresolved').map(e => e.data as { file: string; problem: string });
+    assert.ok(problems.length >= 1);
+    assert.equal(problems[0]!.file, 'shared/NOTES.md');
+    assert.match(problems[0]!.problem, unresolved === 'markers' ? /^conflict marker$/ : /conflict separator \(2 "=======" lines, at most 1/);
+    assert.equal(f.store.evidence(task.id).some(e => e.kind === 'integration-resolved' || e.kind === 'commit-created'), false);
+    assert.equal(f.calls.some(c => c.workItemId === 'c'), false);
   } finally { await f.runner.stop(); await f.cleanup(); }
 });
