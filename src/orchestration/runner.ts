@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { CodingEngine, EnginePhase, Validator } from '../domain/engine.js';
 import { PolicyEngine } from '../domain/policy.js';
-import { protectedPath } from '../engines/codex/sandbox.js';
+import { protectedPath } from '../domain/protected-paths.js';
 import { Plan, WorkItem, Integration, ScopedPath, type AgentDefinition, type Task } from '../domain/schemas.js';
 import { AppError } from '../domain/errors.js';
 import { terminalStates } from '../domain/lifecycle.js';

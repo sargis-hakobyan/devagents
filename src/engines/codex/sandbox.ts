@@ -3,14 +3,12 @@ import { dirname, join, resolve } from 'node:path';
 import type { AgentDefinition } from '../../domain/schemas.js';
 import { AppError } from '../../domain/errors.js';
 import { assertSupportedWriteGrant } from '../../domain/ownership.js';
+import { deniedSegments, protectedPath } from '../../domain/protected-paths.js';
 import { runProcess } from '../process.js';
 import { credentialRuntime } from '../../security/credential-vault.js';
 
 export const CODEX_VERSION = '0.160.1';
-export const deniedSegments = ['.git', '.devagents', '.codex', '.claude', '.agents', '.ssh', '.aws', '.env', '.npmrc', '.netrc', '.mcp.json'];
-export function protectedPath(path: string): boolean {
-  return path.split('/').some(p => deniedSegments.includes(p) || p.startsWith('.env.')) || /\.(pem|key)$/i.test(path);
-}
+export { deniedSegments, protectedPath };
 export function toml(value: unknown): string {
   if (value && typeof value === 'object' && !Array.isArray(value)) return `{${Object.entries(value).map(([k,v]) => `${JSON.stringify(k)}=${toml(v)}`).join(',')}}`;
   if (Array.isArray(value)) return `[${value.map(toml).join(',')}]`;

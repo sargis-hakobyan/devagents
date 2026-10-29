@@ -12,7 +12,8 @@ test('reviewer cannot write; secret access, arbitrary commands and external effe
     const reviewer = agents.find(a => a.id === 'code-reviewer')!;
     await policy.file(reviewer, f.project, 'README.md', 'read');
     await assert.rejects(policy.file(reviewer, f.project, 'README.md', 'write'), /cannot write/);
-    await assert.rejects(policy.file(reviewer, f.project, '.env', 'read'), /Secret/);
+    for (const path of ['.env', '.env.local', 'config/.npmrc', '.netrc', 'keys/server.pem', 'deploy/id.key', '.mcp.json', '.agents/role.yaml']) await assert.rejects(policy.file(reviewer, f.project, path, 'read'), /Secret/, path);
+    await policy.file(reviewer, f.project, 'src/environment.ts', 'read');
     assert.throws(() => policy.command(), /verified execution sandbox/);
     for (const action of ['push', 'merge', 'deploy'] as const) assert.throws(() => policy.external(action), /not enabled/);
   } finally { await f.cleanup(); }

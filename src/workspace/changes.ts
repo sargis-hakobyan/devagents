@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { git } from './git.js';
 import { PolicyEngine } from '../domain/policy.js';
-import { protectedPath } from '../engines/codex/sandbox.js';
+import { protectedPath } from '../domain/protected-paths.js';
 import { AppError } from '../domain/errors.js';
 import type { AgentDefinition, Project, Task } from '../domain/schemas.js';
 
