@@ -146,7 +146,24 @@ test('failed work item aborts siblings, blocks dependents, and prevents the fina
     assert.equal(f.store.task(task.id).state, 'failed'); assert.match(f.store.task(task.id).outcome!.error!, /Intentional item failure/);
     assert.equal(f.metrics().active, 0); assert.equal(f.metrics().aborted, 1);
     assert.equal(f.calls.some(c => c.workItemId === 'c'), false);
-    assert.equal(f.store.workItems(task.id).find(i => i.itemId === 'c')!.state, 'blocked');
+    const items = Object.fromEntries(f.store.workItems(task.id).map(i => [i.itemId as string, i]));
+    assert.equal(items.a!.state, 'failed'); assert.equal(items.c!.state, 'blocked');
+    assert.equal(items.b!.state, 'aborted'); assert.match(String(items.b!.reason), /sibling work item failed/);
+    assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
+  } finally { await f.runner.stop(); await f.cleanup(); }
+});
+test('service shutdown during a wave marks running workers interrupted and unstarted dependents blocked', async () => {
+  const f = await dagFixture({ wait: true });
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Three modules', mode: 'autonomous' }, 'shutdown');
+    await f.twoRunning; await f.runner.stop();
+    const done = f.store.task(task.id);
+    assert.equal(done.state, 'failed'); assert.match(done.outcome!.error!, /Service shutdown interrupted execution/);
+    assert.equal(f.metrics().active, 0);
+    const items = Object.fromEntries(f.store.workItems(task.id).map(i => [i.itemId as string, i]));
+    for (const id of ['a', 'b']) { assert.equal(items[id]!.state, 'interrupted', id); assert.match(String(items[id]!.reason), /Service shutdown/, id); }
+    assert.equal(items.c!.state, 'blocked'); assert.match(String(items.c!.reason), /Service shutdown/);
+    assert.equal(f.store.workItems(task.id).some(i => i.state === 'cancelled'), false);
     assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
   } finally { await f.runner.stop(); await f.cleanup(); }
 });

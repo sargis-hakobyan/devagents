@@ -126,7 +126,7 @@ export class Store {
     }
     if (!recorded && task.plan?.items.length === 1) for (const item of items.values()) item.state = task.state;
     if (['failed', 'cancelled'].includes(task.state)) for (const item of items.values()) {
-      if (!['completed', 'failed', 'cancelled', 'blocked'].includes(String(item.state))) item.state = task.state === 'cancelled' ? 'cancelled' : item.state === 'pending' ? 'blocked' : 'interrupted';
+      if (!['completed', 'failed', 'cancelled', 'blocked', 'aborted', 'interrupted'].includes(String(item.state))) item.state = task.state === 'cancelled' ? 'cancelled' : item.state === 'pending' ? 'blocked' : 'interrupted';
     }
     return [...items.values()];
   }

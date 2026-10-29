@@ -16,6 +16,7 @@ import { assertValidationCommands } from '../domain/validation.js';
 import { selectImplementer, independentReviewer } from '../domain/roles.js';
 import { ImplementationOutput, ReviewOutput, outputJsonSchema } from './outputs.js';
 
+export const SHUTDOWN_REASON = 'Service shutdown interrupted execution; inspect preserved worktrees and evidence before submitting a new task';
 const PlanningOutput = Plan.extend({ items: z.array(WorkItem.extend({ assignedAgent: z.string(), ownedPaths: z.array(ScopedPath).min(1) })).min(1).max(30), integration: Integration.nullable() });
 
 export class TaskRunner {
@@ -107,7 +108,7 @@ export class TaskRunner {
         await runDag({ service: this.service, engine: this.engine, validator: this.validator, task, agents, signal,
           active: () => this.ensureActive(id, signal), move: (state, reason, patch) => this.move(id, state, reason, patch),
           invoke: (phase, agent, prompt, schema, workerSignal, context) => this.invoke(id, phase, agent, prompt, schema, workerSignal, context),
-          provider: agent => this.provider(agent), onRepair: () => ++repairs,
+          provider: agent => this.provider(agent), onRepair: () => ++repairs, stopping: () => this.stopping,
         });
         return;
       }
@@ -168,8 +169,11 @@ export class TaskRunner {
     } catch (error) {
       const task = this.service.store.task(id);
       if (terminalStates.includes(task.state)) return;
-      const reason = error instanceof Error ? error.message : String(error);
-      this.move(id, signal.aborted && task.state !== 'committing' ? 'cancelled' : 'failed', reason, { outcome: { error: reason, repairCycles: repairs } });
+      const detail = error instanceof Error ? error.message : String(error);
+      // A service shutdown is not a user decision: record it as failed with an explicit reason so
+      // recovery and the event history show interrupted work rather than a cancellation.
+      const reason = this.stopping ? `${SHUTDOWN_REASON} (${detail})` : detail;
+      this.move(id, signal.aborted && !this.stopping && task.state !== 'committing' ? 'cancelled' : 'failed', reason, { outcome: { error: reason, repairCycles: repairs } });
     }
   }
 }

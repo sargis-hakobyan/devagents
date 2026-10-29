@@ -8,6 +8,7 @@ import { TaskRunner } from '../../src/orchestration/runner.js';
 import { git } from '../../src/workspace/git.js';
 import { Plan } from '../../src/domain/schemas.js';
 import { TaskService } from '../../src/orchestration/service.js';
+import { Store } from '../../src/persistence/store.js';
 
 test('autonomous task executes real fixture tests, separate review and local commit without touching dirty checkout', async () => {
   const f = await fixture(); const engine = new FakeEngine();
@@ -250,4 +251,23 @@ test('implementation cannot create, modify or hide files that review and the com
       }
     } finally { await runner.stop(); await f.cleanup(); }
   }
+});
+
+test('service shutdown records interrupted execution as failed with a shutdown reason, not as a cancellation', async () => {
+  const f = await fixture(); const engine = new FakeEngine({ waitForCancel: true });
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
+  let reopened: Store | undefined;
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'shutdown');
+    const deadline = Date.now() + 10000;
+    while (!engine.calls.some(c => c.phase === 'implementation')) { if (Date.now() > deadline) throw new Error('Worker did not start'); await new Promise(r => setTimeout(r, 10)); }
+    await runner.stop();
+    const done = f.store.task(task.id);
+    assert.equal(done.state, 'failed'); assert.match(done.outcome!.error!, /Service shutdown interrupted execution/);
+    const last = f.store.events(task.id).at(-1)!;
+    assert.equal(last.state, 'failed'); assert.equal(last.actor, 'orchestrator'); assert.match(last.reason, /Service shutdown interrupted execution/);
+    assert.equal(f.store.events(task.id).some(e => e.state === 'cancelled'), false);
+    reopened = new Store(join(f.dataDir, 'test.db'));
+    assert.deepEqual(reopened.recover(), []); assert.equal(reopened.task(task.id).state, 'failed');
+  } finally { reopened?.close(); await runner.stop(); await f.cleanup(); }
 });

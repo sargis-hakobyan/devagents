@@ -25,6 +25,7 @@ type Hooks = {
   provider(agent: AgentDefinition): AppConfig['providers'][number];
   invoke(phase: EnginePhase, agent: AgentDefinition, prompt: string, schema: z.ZodType, signal: AbortSignal, context: Context): Promise<unknown>;
   onRepair(): number;
+  stopping(): boolean;
 };
 
 export async function runDag(h: Hooks): Promise<void> {
@@ -129,7 +130,10 @@ export async function runDag(h: Hooks): Promise<void> {
         localRepairs++; repair(); state(item.id, 'repairing', { repairCycles: localRepairs });
       }
     } catch (error) {
-      state(item.id, workerSignal.aborted ? 'cancelled' : 'failed', { error: error instanceof Error ? error.message : String(error), repairCycles: localRepairs });
+      // Distinguish why a worker stopped: its own failure, a user cancellation, a service shutdown,
+      // or a sibling's failure draining the wave.
+      const cause = !workerSignal.aborted ? 'failed' : h.stopping() ? 'interrupted' : signal.aborted ? 'cancelled' : 'aborted';
+      state(item.id, cause, { error: error instanceof Error ? error.message : String(error), repairCycles: localRepairs, ...(cause === 'aborted' ? { reason: 'A sibling work item failed; this worker was drained' } : cause === 'interrupted' ? { reason: 'Service shutdown interrupted this worker' } : {}) });
       throw error;
     }
   };
@@ -215,7 +219,7 @@ export async function runDag(h: Hooks): Promise<void> {
       await implement(integrator, `Repair the combined result within the plan's owned paths. Do not commit or modify Git metadata or ignored files.\nRequest: ${task.request}\nPlan: ${JSON.stringify(plan)}\n${feedback}`, signal, { cwd: workspace.path, workItemId: '@integration' });
     }
   } catch (error) {
-    for (const item of plan.items) if (!done.has(item.id) && !started.has(item.id)) state(item.id, signal.aborted ? 'cancelled' : 'blocked', { reason: 'Task stopped before dependencies completed' });
+    for (const item of plan.items) if (!done.has(item.id) && !started.has(item.id)) state(item.id, signal.aborted && !h.stopping() ? 'cancelled' : 'blocked', { reason: h.stopping() ? 'Service shutdown stopped the task before this item started' : 'Task stopped before dependencies completed' });
     throw error;
   }
 }

@@ -90,7 +90,7 @@ Use `tasks show TASK_ID` to inspect and approve the plan, `tasks items TASK_ID` 
 
 Each worker branches from a private snapshot of results already integrated into the task worktree. Successful item validation and independent review produce a private work-item commit. These commits and dependency checkpoints are intermediate evidence, not final task approval. Changes are combined with three-way patch application in the task worktree. Conflicts become an explicit integration-agent repair bounded by `maxRepairCycles`; unresolved conflicts stop the task and preserve its worktrees. Repository-defined filters and custom merge drivers are refused.
 
-After integration, all item checks and the combined checks run again. A reviewer distinct from all implementers and the integration agent must approve the complete diff before one final commit is created on the task branch. Per-item repair budgets and a separate shared integration repair budget are bounded. Cancellation or failure drains sibling workers and blocks unstarted dependents. A private checkpoint may already exist when cancellation arrives; a cancelled task never advances to the final combined commit. Restart recovery preserves paths/evidence and marks interrupted tasks failed rather than replaying them automatically.
+After integration, all item checks and the combined checks run again. A reviewer distinct from all implementers and the integration agent must approve the complete diff before one final commit is created on the task branch. Per-item repair budgets and a separate shared integration repair budget are bounded. Cancellation or failure drains sibling workers and blocks unstarted dependents; item evidence records why each worker stopped (`failed`, `aborted` by a sibling failure, `cancelled` by the user, or `interrupted` by a service shutdown). A private checkpoint may already exist when cancellation arrives; a cancelled task never advances to the final combined commit. Restart recovery preserves paths/evidence and marks interrupted tasks failed rather than replaying them automatically.
 
 ## Configuration and agents
 
@@ -198,7 +198,7 @@ Keep contributions focused, add meaningful tests for behavioral/security boundar
 - Project registration fails: supply an absolute existing Git root with at least one commit, visible in that environment.
 - Invalid agent: check capabilities, duplicate IDs and relative instruction-file paths.
 - Task remains `planning` or `ready` after restart: inspect events/evidence, then explicitly queue it with `tasks run TASK_ID`. Interrupted tasks with worktree intent are marked failed; preserved approval waits require approval as usual.
-- Interrupted work: active execution states are marked failed for inspection; automatic resumption is not implemented.
+- Interrupted work: a service shutdown (`SIGTERM`, `docker compose stop/restart`) marks the running task `failed` with the reason "Service shutdown interrupted execution"; a crash leaves it in its execution state and the next start marks it failed during recovery. Only an explicit `tasks cancel` produces `cancelled`. Automatic resumption is not implemented.
 
 For a **live container fixture**, after starting and unlocking the service:
 
