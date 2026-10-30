@@ -74,19 +74,28 @@ export function TeamEditorPage({ id }: { id: string }) {
   const [check, setCheck] = useState<{ readiness?: Readiness; invalid?: string; pending?: boolean }>({});
   const [saving, setSaving] = useState(false); const [saveError, setSaveError] = useState<string | undefined>(); const [conflict, setConflict] = useState<Conflict | undefined>();
   const [notice, setNotice] = useState<string | undefined>();
+  // Every draft check carries a generation; a response for an older draft (or one finishing after
+  // discard, save or reload) is ignored so it can never overwrite the verdict for the current draft.
+  const checkGeneration = useRef(0);
+  const settle = (next: typeof check) => { checkGeneration.current++; setCheck(next); };
   const load = async () => {
-    try { const t = await api<TeamDetail>(`/teams/${id}`); setLoaded(t); setDraft(toDraft(t)); setDirty(false); setSelected(s => s !== undefined && s < t.members.length ? s : t.members.length ? 0 : undefined); setCheck({ readiness: t.readiness }); setLoadError(undefined); }
+    try { const t = await api<TeamDetail>(`/teams/${id}`); setLoaded(t); setDraft(toDraft(t)); setDirty(false); setSelected(s => s !== undefined && s < t.members.length ? s : t.members.length ? 0 : undefined); settle({ readiness: t.readiness }); setLoadError(undefined); }
     catch (e) { setLoadError(message(e)); }
   };
   useEffect(() => {
     setConflict(undefined); setSaveError(undefined); setNotice(undefined);
-    if (isNew) { setLoaded(undefined); setDraft(emptyDraft()); setDirty(false); setSelected(undefined); setCheck({}); } else void load();
+    if (isNew) { setLoaded(undefined); setDraft(emptyDraft()); setDirty(false); setSelected(undefined); settle({}); } else void load();
   }, [id]);
   // Readiness is the server's verdict; the draft is checked while it changes, never computed here.
   useEffect(() => {
     if (!dirty) return;
+    const generation = ++checkGeneration.current;
     setCheck(c => ({ ...c, pending: true }));
-    const t = setTimeout(() => { api<{ readiness: Readiness }>('/teams/check', { method: 'POST', body: draft }).then(r => setCheck({ readiness: r.readiness }), e => setCheck(c => ({ ...(c.readiness ? { readiness: c.readiness } : {}), invalid: message(e) }))); }, 400);
+    const t = setTimeout(() => {
+      api<{ readiness: Readiness }>('/teams/check', { method: 'POST', body: draft }).then(
+        r => { if (generation === checkGeneration.current) setCheck({ readiness: r.readiness }); },
+        e => { if (generation === checkGeneration.current) setCheck(c => ({ ...(c.readiness ? { readiness: c.readiness } : {}), invalid: message(e) })); });
+    }, 400);
     return () => clearTimeout(t);
   }, [draft, dirty]);
   const update = (fn: (d: TeamDraft) => TeamDraft) => { setDraft(fn); setDirty(true); setNotice(undefined); };
@@ -98,7 +107,7 @@ export function TeamEditorPage({ id }: { id: string }) {
     try {
       if (isNew) { const created = await api<TeamDetail>('/teams', { method: 'POST', body: draft }); route(`/ui/teams/${created.id}`); return; }
       const saved = await api<TeamDetail>(`/teams/${id}`, { method: 'PUT', body: { expectedRevision: expectedRevision ?? loaded!.revision, team: draft } });
-      setLoaded(saved); setDraft(toDraft(saved)); setDirty(false); setCheck({ readiness: saved.readiness }); setNotice(`Saved revision ${saved.revision}. Future submissions use it; queued and active tasks keep their snapshot.`);
+      setLoaded(saved); setDraft(toDraft(saved)); setDirty(false); settle({ readiness: saved.readiness }); setNotice(`Saved revision ${saved.revision}. Future submissions use it; queued and active tasks keep their snapshot.`);
     } catch (e) {
       if (e instanceof ApiError && e.code === 'stale_team') { try { setConflict({ latest: await api<TeamDetail>(`/teams/${id}`) }); } catch (inner) { setSaveError(message(inner)); } }
       else setSaveError(message(e));
@@ -145,7 +154,7 @@ export function TeamEditorPage({ id }: { id: string }) {
         {archived && <div class="note info" style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}><span><b>Archived.</b> This team cannot be edited or chosen for new tasks; tasks that already froze it are unaffected.</span><button type="button" class="btn small" disabled={saving} onClick={() => void archive(false)} style={{ pointerEvents: 'auto' }}>Restore</button></div>}
         {conflict && <div class="note warn" role="alert"><b>Saved elsewhere as revision {conflict.latest.revision}</b> ({formatTime(conflict.latest.updatedAt)}: {conflict.latest.revisions[conflict.latest.revisions.length - 1]?.reason ?? 'changed'}). Your edits are still here and nothing was overwritten.
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
-            <button type="button" class="btn small" onClick={() => { setLoaded(conflict.latest); setDraft(toDraft(conflict.latest)); setDirty(false); setCheck({ readiness: conflict.latest.readiness }); setConflict(undefined); }}>Reload revision {conflict.latest.revision} and discard my edits</button>
+            <button type="button" class="btn small" onClick={() => { setLoaded(conflict.latest); setDraft(toDraft(conflict.latest)); setDirty(false); settle({ readiness: conflict.latest.readiness }); setConflict(undefined); }}>Reload revision {conflict.latest.revision} and discard my edits</button>
             <button type="button" class="btn small" onClick={() => void save(conflict.latest.revision)}>Save my edits as revision {conflict.latest.revision + 1}</button>
           </div></div>}
         {saveError && <div class="note bad" role="alert"><b>Could not save.</b> {saveError}</div>}
@@ -168,7 +177,7 @@ export function TeamEditorPage({ id }: { id: string }) {
     {!archived && <div class="card save-bar">
       <span class="muted" style={{ fontSize: '13px' }}>{isNew ? 'Saving creates revision 1.' : `Saving creates revision ${loaded!.revision + 1}.`} Queued and active tasks keep their frozen snapshot; only future submissions use it.{readiness && !readiness.ready ? ' Drafts can be saved but cannot receive work until every error is resolved.' : ''}</span>
       <span style={{ display: 'flex', gap: '8px' }}>
-        <button type="button" class="btn" disabled={!dirty || saving} onClick={() => { if (isNew) route('/ui/teams'); else { setDraft(toDraft(loaded!)); setDirty(false); setCheck({ readiness: loaded!.readiness }); setConflict(undefined); setSaveError(undefined); } }}>Discard</button>
+        <button type="button" class="btn" disabled={!dirty || saving} onClick={() => { if (isNew) route('/ui/teams'); else { setDraft(toDraft(loaded!)); setDirty(false); settle({ readiness: loaded!.readiness }); setConflict(undefined); setSaveError(undefined); } }}>Discard</button>
         <button type="button" class="btn primary" disabled={!canSave} onClick={() => void save()}>{saving ? 'Saving…' : readiness && !readiness.ready ? 'Save as draft' : 'Save team'}</button>
       </span>
     </div>}

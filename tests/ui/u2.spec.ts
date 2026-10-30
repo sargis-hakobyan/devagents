@@ -211,3 +211,24 @@ test('multiple scope grants can be typed line by line and survive save and reloa
   await page.getByRole('button', { name: 'Discard' }).click();
   await expect(page.getByLabel(/^Write scope/)).toHaveValue('project:/**\nproject:/docs/**');
 });
+
+test('a late readiness response never overrides the verdict for the current draft (F2)', async ({ page }) => {
+  await signIn(page);
+  const website = await teamNamed('Website team');
+  // Hold the service's 400 for the empty-name draft so it arrives after the valid draft's check.
+  await page.route('**/teams/check', async route => { if ((route.request().postDataJSON() as { name: string }).name === '') await new Promise(r => setTimeout(r, 2500)); await route.continue(); });
+  await page.goto(`${base}/ui/teams/${website.id}`);
+  const name = page.getByLabel('Team name'); const save = page.getByRole('button', { name: 'Save team' });
+  await name.fill(''); await page.waitForTimeout(600);
+  await name.fill('Valid current name');
+  await expect(save).toBeEnabled();
+  await page.waitForTimeout(3000);
+  await expect(save).toBeEnabled(); await expect(page.locator('.note.bad')).toHaveCount(0);
+  // A check still in flight when the draft is discarded cannot mark the restored team invalid or edited.
+  await name.fill(''); await page.waitForTimeout(600);
+  await page.getByRole('button', { name: 'Discard' }).click();
+  await expect(name).toHaveValue('Website team');
+  await page.waitForTimeout(3000);
+  await expect(page.locator('.note.bad')).toHaveCount(0); await expect(page.getByText('✓ Ready')).toBeVisible();
+  await expect(save).toBeDisabled(); await expect(page.locator('body')).not.toContainText('· edited');
+});
