@@ -8,26 +8,51 @@ export type ProcessOptions = {
   overflow?: 'fail' | 'truncate';
 };
 export type ProcessResult = { stdout: string; stderr: string; exitCode: number; truncated: boolean };
-/** Keeps the first `headLimit` and last `tailLimit` bytes of a stream so memory stays bounded. */
+/** Cut a string at a byte budget without splitting a UTF-8 code point. */
+function firstBytes(text: string, limit: number): string {
+  const bytes = Buffer.from(text, 'utf8'); if (bytes.length <= limit) return text;
+  let cut = limit; while (cut > 0 && (bytes[cut]! & 0xc0) === 0x80) cut--;
+  return bytes.subarray(0, cut).toString('utf8');
+}
+function lastBytes(text: string, limit: number): string {
+  const bytes = Buffer.from(text, 'utf8'); if (bytes.length <= limit) return text;
+  let start = bytes.length - limit; while (start < bytes.length && (bytes[start]! & 0xc0) === 0x80) start++;
+  return bytes.subarray(start).toString('utf8');
+}
+/**
+ * Retains a stream in full while the shared output budget holds. Once the budget is exceeded the
+ * stream keeps a head and a tail (both cut on code-point boundaries) and reports exactly how many
+ * bytes were discarded. Memory stays bounded by headLimit + tailLimit plus one chunk.
+ */
 class Capture {
-  private head = ''; private tail = ''; dropped = 0;
+  private full = ''; private head = ''; private tail = ''; private total = 0; private truncating = false;
   constructor(private readonly headLimit: number, private readonly tailLimit: number) {}
   push(chunk: string): void {
-    const room = this.headLimit - Buffer.byteLength(this.head);
-    if (room >= Buffer.byteLength(chunk)) { this.head += chunk; return; }
-    const kept = room > 0 ? chunk.slice(0, room) : '';
-    this.head += kept; const rest = chunk.slice(kept.length);
-    this.dropped += Buffer.byteLength(rest);
-    this.tail = (this.tail + rest).slice(-this.tailLimit);
+    this.total += Buffer.byteLength(chunk);
+    if (this.truncating) { this.tail = lastBytes(this.tail + chunk, this.tailLimit); return; }
+    this.full += chunk;
   }
-  text(): string { return this.dropped ? `${this.head}\n…[${this.dropped - Buffer.byteLength(this.tail)} bytes truncated]…\n${this.tail}` : this.head; }
+  /** Switch to head/tail retention; the full text seen so far is split without loss of accounting. */
+  truncate(): void {
+    if (this.truncating) return; this.truncating = true;
+    this.head = firstBytes(this.full, this.headLimit);
+    this.tail = lastBytes(this.full.slice(this.head.length), this.tailLimit);
+    this.full = '';
+  }
+  get dropped(): number { return this.truncating ? this.total - Buffer.byteLength(this.head) - Buffer.byteLength(this.tail) : 0; }
+  text(): string {
+    if (!this.truncating) return this.full;
+    return this.dropped ? `${this.head}\n…[${this.dropped} bytes truncated]…\n${this.tail}` : `${this.head}${this.tail}`;
+  }
 }
 export async function runProcess(binary: string, args: string[], options: ProcessOptions): Promise<ProcessResult> {
   if (options.signal?.aborted) throw new AppError('cancelled', 'Execution cancelled');
   const limit = options.maxBytes ?? 2 * 1024 * 1024; const truncate = options.overflow === 'truncate';
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, { cwd: options.cwd, env: options.env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
-    const stdout = new Capture(Math.floor(limit / 2), Math.floor(limit / 8)); const stderr = new Capture(Math.floor(limit / 2), Math.floor(limit / 8));
+    // The budget covers both streams together: below it everything is kept; above it each stream keeps
+    // a quarter of the budget as head and an eighth as tail, so retained evidence stays under the budget.
+    const stdout = new Capture(Math.floor(limit / 4), Math.floor(limit / 8)); const stderr = new Capture(Math.floor(limit / 4), Math.floor(limit / 8));
     let pending = ''; let bytes = 0;
     let failure: Error | undefined; let escalation: NodeJS.Timeout | undefined;
     const kill = (signal: NodeJS.Signals) => {
@@ -44,19 +69,24 @@ export async function runProcess(binary: string, args: string[], options: Proces
     options.signal?.addEventListener('abort', abort, { once: true });
     // Avoid splitting UTF-8 code points between chunks.
     child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
+    // Account a chunk against the shared budget. In fail mode the first overflow terminates the
+    // process; in truncate mode the chunk is retained first so the head is preserved, then both
+    // streams switch to head/tail retention.
+    const account = (capture: Capture, chunk: string): boolean => {
       bytes += Buffer.byteLength(chunk);
-      if (bytes > limit && !truncate) return stop(new AppError('output_limit', 'Engine output exceeded its limit'));
-      stdout.push(chunk); pending += chunk;
+      if (bytes > limit && !truncate) { stop(new AppError('output_limit', 'Engine output exceeded its limit')); return false; }
+      capture.push(chunk);
+      if (bytes > limit) { stdout.truncate(); stderr.truncate(); }
+      return true;
+    };
+    child.stdout.on('data', (chunk: string) => {
+      if (!account(stdout, chunk)) return;
+      pending += chunk;
       const lines = pending.split('\n'); pending = lines.pop()!;
       try { for (const line of lines) if (line.trim()) options.onLine?.(line); }
       catch (error) { stop(error instanceof Error ? error : new Error(String(error))); }
     });
-    child.stderr.on('data', (chunk: string) => {
-      bytes += Buffer.byteLength(chunk);
-      if (bytes > limit && !truncate) return stop(new AppError('output_limit', 'Engine output exceeded its limit'));
-      stderr.push(chunk);
-    });
+    child.stderr.on('data', (chunk: string) => { account(stderr, chunk); });
     child.stdin.on('error', () => { /* Early exit or cancellation closes stdin. */ });
     child.once('error', error => { failure = new AppError('engine_unavailable', `Unable to launch ${binary}: ${(error as NodeJS.ErrnoException).code ?? 'unknown'}`); });
     child.once('close', code => {
