@@ -11,6 +11,7 @@ import { builtinCapabilities, builtinDirectory, loadRegistry } from '../agents/r
 import { providerExecutable, resolveEngine, resolveProviderId, teamReadiness, type RuntimeSupport } from '../domain/readiness.js';
 import { validatePlan } from '../domain/plan.js';
 import { isWithin } from '../workspace/paths.js';
+import { STARTER_TEAM_ID, STARTER_TEAM_NAME, STARTER_ROLES } from '../domain/starter-team.js';
 
 export class TaskService {
   private runner?: { enqueue(id: string): void; cancel(id: string): void };
@@ -23,7 +24,22 @@ export class TaskService {
     if (!this.runner) throw new AppError('execution_unavailable', 'No execution runtime attached', 503);
     this.runner.enqueue(id); return this.store.task(id);
   }
-  async registerProject(input: unknown) { return this.store.registerProject(await inspectProject(input)); }
+  async registerProject(input: unknown) {
+    const project = await inspectProject(input);
+    const starter = this.store.teams('all').find(t => t.id === STARTER_TEAM_ID);
+    return this.store.registerProject(project, starter && !starter.archived && teamReadiness(starter.members, this.support).ready ? starter.id : undefined);
+  }
+  /** Called before serving requests. Seed only bundled roles, never project/user registry overrides. */
+  async initializeStarterTeam() {
+    const bundled = await loadRegistry([builtinDirectory], this.config);
+    const members = STARTER_ROLES.map(id => {
+      const agent = bundled.find(a => a.id === id);
+      if (!agent) throw new AppError('starter_unavailable', `Missing bundled starter role: ${id}`);
+      return this.memberTemplate(agent);
+    });
+    const team = this.store.ensureStarterTeam({ name: STARTER_TEAM_NAME, description: 'Plans, implements, tests and independently reviews changes.', members }, t => !t.archived && teamReadiness(t.members, this.support).ready);
+    return this.withReadiness(team);
+  }
   async agents(projectId?: string) {
     const directories = [builtinDirectory, join(this.dataDir, 'agents')];
     if (projectId) {
@@ -63,8 +79,9 @@ export class TaskService {
   setProjectDefaultTeam(projectId: string, teamId: string | null, expectedVersion: number) { return this.store.setProjectDefaultTeam(projectId, teamId, expectedVersion); }
   /** Registry agents offered as member templates: complete explicit copies, never links back to the YAML and never truncated. */
   async templates(projectId?: string): Promise<TeamMember[]> {
-    return (await this.agents(projectId)).map(a => ({ id: a.id, name: a.name, description: a.description, enabled: a.enabled, engine: a.engine, provider: a.provider, model: a.model, capabilities: [...a.capabilities], instructions: a.instructions, delegation: { ...a.delegation }, permissions: { readPaths: [...a.permissions.readPaths], writePaths: [...a.permissions.writePaths], allowCommands: a.permissions.allowCommands, allowPush: false as const }, concurrency: a.concurrency, origin: 'template' as const, templateId: a.id }));
+    return (await this.agents(projectId)).map(a => this.memberTemplate(a));
   }
+  private memberTemplate(a: AgentDefinition): TeamMember { return { id: a.id, name: a.name, description: a.description, enabled: a.enabled, engine: a.engine, provider: a.provider, model: a.model, capabilities: [...a.capabilities], instructions: a.instructions, delegation: { ...a.delegation }, permissions: { readPaths: [...a.permissions.readPaths], writePaths: [...a.permissions.writePaths], allowCommands: a.permissions.allowCommands, allowPush: false }, concurrency: a.concurrency, origin: 'template', templateId: a.id }; }
   /**
    * Resolves the team for a new task: explicit team, then project default, then the legacy registry
    * (no snapshot here; the runner snapshots legacy agents at worktree creation). Runs inside the

@@ -12,7 +12,7 @@ Install and start **Docker with Compose**, clone this repository, then run from 
 ./devagents start
 ```
 
-Choose **Browser** (recommended), **Terminal**, or **Later**. Connect Codex with your ChatGPT account or an OpenAI API key, add a project, and choose a team. Saved connections are reused on later starts.
+Choose **Browser** (recommended), **Terminal**, or **Later**. Connect Codex with your ChatGPT account or an OpenAI API key, and add a project. A ready-made starter team is selected automatically; customize it anytime in Teams. Saved connections are reused on later starts.
 
 The first run builds the local image. Later starts reuse it unless the source changed. macOS uses Keychain; Linux requires `openssl`, `secret-tool` and an unlocked desktop keyring.
 

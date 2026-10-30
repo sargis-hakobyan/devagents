@@ -48,7 +48,9 @@ Browser setup cannot browse host folders or control Docker. The host terminal in
 
 ## Team and first task
 
-Choose **Use recommended team** in setup to copy the Tech Lead, Developer, QA and independent Code Reviewer templates and set that team's immutable revision as the project's current default. With multiple projects, select one first. Existing task snapshots never change. You can choose or customize another team in Teams.
+DevAgents creates a **Starter team** automatically: Tech Lead, Developer, QA Engineer and independent Code Reviewer. It becomes the default for new projects, so you can submit work immediately after connecting Codex and registering your project. Teams lets you rename it, edit members, add custom roles or choose another team.
+
+Existing custom defaults and explicitly cleared defaults are preserved. On upgrade, existing projects with untouched team settings receive the starter too. Restart never duplicates, resets or restores an archived starter. If the starter is archived or not ready under your configured engine/provider, it is not assigned automatically; choose a ready team in Teams. Each task still freezes its own team revision and model settings when submitted; existing task snapshots never change.
 
 Then select **Submit work**, describe the change, and add acceptance criteria. Plan approval lets you review the plan before implementation starts. Completed work has tests, independent review, a local commit and a read-only diff. Nothing is automatically merged or pushed.
 

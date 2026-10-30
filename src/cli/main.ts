@@ -68,6 +68,7 @@ cli.command('serve').description('Start the local API').action(async () => {
     status: statusReporter({ dataDir, config, version: '0.1.0', host, port: () => publicPort, executionEnabled: true, revision: () => setupAuth.revision }),
   });
   await service.agents();
+  await service.initializeStarterTeam();
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port(), host, resolve); });
   // Only the process which owns the listening socket may reconcile this service's tasks.
   const recovered = store.recover();

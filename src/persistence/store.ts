@@ -6,6 +6,7 @@ import { AppError } from '../domain/errors.js';
 import { assertTransition } from '../domain/lifecycle.js';
 import { Mode, TaskInput, TeamInput, type Project, type Task, type TaskEvent, type TaskState, type TaskSummary, type TaskTeam, type TeamRecord } from '../domain/schemas.js';
 import { environmentSecrets, redact, redactValues } from '../telemetry/redact.js';
+import { STARTER_TEAM_ID } from '../domain/starter-team.js';
 
 export class Store {
   private readonly db: DatabaseSync;
@@ -57,12 +58,13 @@ export class Store {
   private taskJson(value: unknown): string { return JSON.stringify(redactValues(value, this.secrets)); }
   /** Events and evidence are logs: apply the heuristic credential redaction as well. */
   private json(value: unknown): string { return JSON.stringify(redact(value, this.secrets)); }
-  registerProject(project: Project): Project {
+  registerProject(project: Project, starterTeamId?: string): Project {
     const existing = this.projects().find(p => p.id === project.id || p.path === project.path);
     if (existing) {
       if (existing.id === project.id && existing.path === project.path && existing.defaultMode === project.defaultMode) return existing;
       throw new AppError('project_conflict', 'Project ID or path already registered with different settings', 409);
     }
+    if (starterTeamId && !project.defaultTeamId) project = { ...project, defaultTeamId: starterTeamId };
     this.db.prepare('INSERT INTO projects VALUES (?, ?, ?)').run(project.id, project.path, JSON.stringify(project));
     return project;
   }
@@ -113,6 +115,25 @@ export class Store {
       this.db.prepare('INSERT INTO teams VALUES (?, ?, 0, 1, ?, ?)').run(id, team.name, now, now);
       this.db.prepare('INSERT INTO team_revisions VALUES (?, 1, ?, ?, ?)').run(id, JSON.stringify(team), now, reason);
       return this.team(id);
+    });
+  }
+  /** Bootstrap once by identity, preserving all edits and explicit project choices on every restart. */
+  ensureStarterTeam(input: unknown, usable: (team: TeamRecord) => boolean): TeamRecord {
+    const template = TeamInput.parse(input);
+    return this.transaction(() => {
+      if (!this.db.prepare('SELECT id FROM teams WHERE id=?').get(STARTER_TEAM_ID)) {
+        const now = new Date().toISOString();
+        this.db.prepare('INSERT INTO teams VALUES (?, ?, 0, 1, ?, ?)').run(STARTER_TEAM_ID, template.name, now, now);
+        this.db.prepare('INSERT INTO team_revisions VALUES (?, 1, ?, ?, ?)').run(STARTER_TEAM_ID, JSON.stringify(template), now, 'Starter team installed');
+      }
+      const team = this.team(STARTER_TEAM_ID);
+      if (usable(team)) for (const project of this.projects()) {
+        // Version > 0 includes an intentional removal of a default. Never undo that choice.
+        if (!project.defaultTeamId && project.version === 0) {
+          this.db.prepare('UPDATE projects SET data=? WHERE id=?').run(JSON.stringify({ ...project, defaultTeamId: team.id, version: 1 }), project.id);
+        }
+      }
+      return team;
     });
   }
   /** Every change is a new immutable revision; a stale `expectedRevision` is a conflict, never an overwrite. */

@@ -152,3 +152,7 @@ The owner authorized a short README and one-command startup with a Browser/Termi
 - Setup/active execution are mutually excluded, including uploads that finish after setup starts and workers still draining cancellation. Model-access tests remain explicit terminal opt-ins.
 
 First-start local builds and desktop OS keychain prerequisites remain. Public prebuilt images/installer distribution and authenticated acceptance of the new browser device flow are separate follow-ups. See `SETUP.md` for exact commands and limitations.
+
+### Automatic starter team follow-up
+
+Service startup now seeds a stable, editable Starter team from four bundled roles and selects it for new projects and existing projects with untouched team settings. Custom/cleared defaults and edited/archived teams are preserved. Setup displays the existing selection and offers explicit switching instead of creating duplicate teams by name. Draft or archived starter teams are not assigned automatically. Production startup owns bootstrap; legacy fixtures can continue exercising installations without a saved default.

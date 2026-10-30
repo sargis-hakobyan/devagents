@@ -19,6 +19,7 @@ test('browser connects through a session-owned device flow, saves a key without 
     } else keys.push(key!);
     saved = { saved: true, method };
   } });
+  await f.service.initializeStarterTeam();
   const server = createApi(f.service, 'synthetic-setup-token', { setupAuth: setup, uiRoot: resolve('dist/ui'), status: async () => ({
     service: { version: 'fixture', platform: 'fixture', executionEnabled: false, startedAt: new Date().toISOString() },
     codex: { installed: true, version: 'fixture', signedIn: saved.saved, vaultLocked: false, credentialStore: 'file', modelAccessVerified: false },
@@ -43,8 +44,8 @@ test('browser connects through a session-owned device flow, saves a key without 
     expect(keys).toEqual(['synthetic-key-not-a-credential']);
     await expect(page.locator('input[type=password]')).toHaveCount(0);
     expect(await page.evaluate(() => JSON.stringify({ session: { ...sessionStorage }, local: { ...localStorage }, body: document.body.innerText }))).not.toContain('synthetic-key-not-a-credential');
-    await page.getByRole('button', { name: 'Use recommended team', exact: true }).click();
-    await expect(page.getByText('Development team selected for fixture.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Use recommended team', exact: true })).toBeDisabled();
+    await expect(page.getByText('Starter team selected for fixture.', { exact: true })).toBeVisible();
     expect(f.store.project('fixture').defaultTeamId).toBeTruthy();
     await expect(page.getByText('Codex signed in · model access not verified', { exact: true })).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });
