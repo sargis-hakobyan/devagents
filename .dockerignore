@@ -5,6 +5,8 @@
 !tsconfig.build.json
 !src
 !src/**
+!ui
+!ui/**
 !agents
 !agents/**
 

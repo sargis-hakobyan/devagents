@@ -11,11 +11,15 @@
   "scripts": {
     "dev": "tsx src/cli/main.ts serve",
     "cli": "tsx src/cli/main.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && npm run build:ui",
+    "build:ui": "vite build --config ui/vite.config.ts",
+    "dev:ui": "vite --config ui/vite.config.ts",
+    "typecheck:ui": "tsc -p ui/tsconfig.json --noEmit",
+    "test:ui": "playwright test --config tests/ui/playwright.config.ts",
     "start": "node dist/cli/main.js serve",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/**/*.test.ts",
-    "check": "npm run typecheck && npm test && npm run build",
+    "check": "npm run typecheck && npm run typecheck:ui && npm test && npm run build",
     "spike:mastra": "tsx scripts/mastra-spike.ts",
     "test:docker": "node scripts/docker-smoke.mjs",
     "test:m2": "npm run build && node scripts/m2-smoke.mjs",
@@ -32,8 +36,13 @@
   "devDependencies": {
     "@mastra/core": "1.80.0",
     "@mastra/libsql": "1.27.1",
+    "@playwright/test": "1.64.1",
+    "@preact/preset-vite": "2.10.6",
     "@types/node": "24.19.2",
+    "preact": "11.1.0",
+    "preact-iso": "2.12.2",
     "tsx": "4.23.15",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "vite": "8.3.5"
   }
 }

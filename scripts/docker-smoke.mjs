@@ -32,6 +32,21 @@ try {
   console.log('Building and starting an isolated Docker smoke instance…');
   await docker(['up', '-d', '--build', '--wait', '--wait-timeout', '60']);
   assert.equal((await fetch(`http://127.0.0.1:${port}/health`)).status, 200);
+  // The browser UI ships in the same image on the same port: shell served with a strict CSP, data
+  // routes protected, and the CLI-minted one-time link establishes a cookie session inside the container.
+  const shell = await fetch(`http://127.0.0.1:${port}/ui/`);
+  assert.equal(shell.status, 200); assert.match(shell.headers.get('content-type'), /text\/html/); assert.match(shell.headers.get('content-security-policy'), /script-src 'self'/);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/`, { redirect: 'manual' })).status, 302);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/tasks`)).status, 401);
+  const link = (await docker(['exec', '-T', 'devagents', 'node', 'dist/cli/main.js', 'ui'])).split('\n')[0].trim();
+  assert.match(link, new RegExp(`^http://127\\.0\\.0\\.1:4310/ui/login\\?code=[a-f0-9]{64}$`));
+  const login = await fetch(link.replace(':4310', `:${port}`), { redirect: 'manual' });
+  assert.equal(login.status, 303); const cookie = login.headers.get('set-cookie').split(';')[0];
+  assert.match(login.headers.get('set-cookie'), /HttpOnly; SameSite=Strict/);
+  assert.equal((await fetch(link.replace(':4310', `:${port}`), { redirect: 'manual' })).status, 403, 'links are single use');
+  assert.equal((await fetch(`http://127.0.0.1:${port}/overview`, { headers: { cookie } })).status, 200);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/overview`, { headers: { cookie, origin: 'http://localhost:9999' } })).status, 403);
+  console.log('PASS: browser UI served from the image with CSP; CLI-minted link establishes a cookie session; cross-origin and anonymous access refused.');
   const health = await cli('doctor');
   assert.equal(health.codexAuthenticated, false);
   assert.equal(health.engines.find(e => e.id === 'codex').installed, true);
