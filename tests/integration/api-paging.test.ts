@@ -47,3 +47,74 @@ test('task lists page by cursor with filters, event and evidence polling use seq
     assert.equal((await fetch(`${url}/tasks/${ids[0]}/evidence/999999`, { headers })).status, 404);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await f.cleanup(); }
 });
+
+test('overview categories and grouped task filters include older work before pagination', async () => {
+  const f = await fixture(); const server = createApi(f.service, 't');
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const running = f.service.submit({ projectId: 'fixture', request: 'Old running task', mode: 'autonomous' }, 'old-running');
+    const ready = await f.service.proposePlan(running.id, validPlan()); f.store.transition(running.id, ready.version, 'running', 'test', 'started');
+    const waiting = f.service.submit({ projectId: 'fixture', request: 'Old approval', mode: 'plan-approval' }, 'old-approval');
+    await f.service.proposePlan(waiting.id, validPlan());
+    for (let i = 0; i < 51; i++) f.service.submit({ projectId: 'fixture', request: `Mode ${i}` }, `mode-${i}`);
+    for (let i = 0; i < 201; i++) {
+      const t = f.service.submit({ projectId: 'fixture', request: `Newer ${i}` }, `newer-${i}`); f.service.cancel(t.id);
+    }
+    // A large queue must not displace the executing task either.
+    for (let i = 0; i < 201; i++) f.service.submit({ projectId: 'fixture', request: `Queued ${i}`, mode: 'autonomous' }, `queued-${i}`);
+    const overview = f.store.overview();
+    assert.equal(overview.counts.running, 1); assert.equal(overview.counts.awaiting_plan_approval, 1);
+    assert.ok(overview.active.some(t => t.id === running.id)); assert.equal(overview.active.length, 51);
+    assert.equal(overview.attention.length, 50); assert.equal(overview.recent.length, 8);
+    const get = async (path: string) => { const r = await fetch(url + path, { headers: { authorization: 'Bearer t' } }); assert.equal(r.status, 200); return await r.json() as { tasks: TaskSummary[]; nextBefore?: number; counts: Record<string, number> }; };
+    const query = '/tasks?state=awaiting_mode&state=awaiting_plan_approval&projectId=fixture&limit=50';
+    const first = await get(query); assert.equal(first.tasks.length, 50); assert.ok(first.nextBefore);
+    assert.equal(first.counts.awaiting_mode, 51); assert.equal(first.counts.cancelled, 201);
+    const last = await get(`${query}&before=${first.nextBefore}`);
+    assert.equal(last.tasks.length, 2); assert.equal(last.nextBefore, undefined); assert.equal(last.tasks[1]!.id, waiting.id);
+    assert.equal(new Set([...first.tasks, ...last.tasks].map(t => t.id)).size, 52);
+    assert.deepEqual((await get('/tasks?projectId=missing')).counts, {});
+    assert.equal((await fetch(`${url}/tasks?state=running&state=bogus`, { headers: { authorization: 'Bearer t' } })).status, 400);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await f.cleanup(); }
+});
+
+test('task approval is derived from durable history even after cancellation and event pagination', async () => {
+  const f = await fixture(); const server = createApi(f.service, 't');
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const approval = async (id: string) => (await (await fetch(`${url}/tasks/${id}`, { headers: { authorization: 'Bearer t' } })).json() as { approval: { status: string; timestamp?: string } }).approval;
+    const rejected = f.service.submit({ projectId: 'fixture', request: 'Reject this', mode: 'plan-approval' }, 'reject');
+    assert.equal((await approval(rejected.id)).status, 'not-planned');
+    await f.service.proposePlan(rejected.id, validPlan()); assert.equal((await approval(rejected.id)).status, 'awaiting');
+    f.service.cancel(rejected.id); assert.equal((await approval(rejected.id)).status, 'not-approved');
+    const approved = f.service.submit({ projectId: 'fixture', request: 'Approve this', mode: 'plan-approval' }, 'approve');
+    const planned = await f.service.proposePlan(approved.id, validPlan()); f.service.approve(approved.id, planned.version);
+    // The approval must not depend on the first page of activity or the current terminal state.
+    for (let i = 0; i < 501; i++) f.store.checkpoint(approved.id, f.store.task(approved.id).version, {}, 'fixture checkpoint');
+    f.service.cancel(approved.id);
+    assert.equal((await approval(approved.id)).status, 'approved'); assert.ok((await approval(approved.id)).timestamp);
+    const auto = f.service.submit({ projectId: 'fixture', request: 'Autonomous', mode: 'autonomous' }, 'auto');
+    await f.service.proposePlan(auto.id, validPlan()); assert.equal((await approval(auto.id)).status, 'autonomous');
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await f.cleanup(); }
+});
+
+test('large evidence previews preserve bounded validation and review facts independently of text', async () => {
+  const f = await fixture(); const server = createApi(f.service, 't');
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Noisy evidence' }, 'noisy');
+    for (const [exitCode, truncated] of [[0, false], [1, false], [0, true]] as const) f.store.record(task.id, 'validation', { workItemId: 'greeting', executable: 'node', args: ['--test'], exitCode, truncated, output: 'x'.repeat(20000) });
+    f.store.record(task.id, 'run-completed', { runId: 'review-run', workItemId: 'greeting', phase: 'review', output: { approved: true, summary: 'Long review', findings: ['must fix '.repeat(4000)] } });
+    f.store.record(task.id, 'run-completed', { runId: 'approved-run', workItemId: '@integration', phase: 'review', output: { approved: true, summary: 'passed '.repeat(4000), findings: [] } });
+    const response = await fetch(`${url}/tasks/${task.id}/evidence`, { headers: { authorization: 'Bearer t' } });
+    const rows = await response.json() as { truncated: boolean; metadata: { workItemId: string; exitCode?: number; truncated?: boolean; output?: { approved: boolean; findingsCount: number } }; data: { preview: string } }[];
+    assert.deepEqual(rows.slice(0, 3).map(r => [r.metadata.exitCode, r.metadata.truncated]), [[0, false], [1, false], [0, true]]);
+    assert.ok(rows.every(r => r.truncated && Buffer.byteLength(r.data.preview) <= 16384));
+    assert.ok(rows.every(r => Buffer.byteLength(JSON.stringify(r.metadata)) < 4096));
+    assert.equal(rows[3]!.metadata.output!.findingsCount, 1); assert.equal(rows[4]!.metadata.output!.findingsCount, 0);
+    assert.equal(rows[3]!.metadata.workItemId, 'greeting'); assert.equal(rows[4]!.metadata.workItemId, '@integration');
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await f.cleanup(); }
+});

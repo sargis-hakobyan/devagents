@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fixtureDir, port } from './playwright.config.js';
 
 const base = `http://127.0.0.1:${port}`;
-const shots = join(import.meta.dirname, '..', '..', 'docs', 'screenshots');
+const shots = process.env.DEVAGENTS_UI_SCREENSHOT_DIR ?? join(import.meta.dirname, '..', '..', 'docs', 'screenshots');
 async function bearer(): Promise<string> { return (await readFile(join(fixtureDir, 'api-token'), 'utf8')).trim(); }
 async function signIn(page: Page): Promise<void> {
   const link = await (await fetch(`${base}/ui/bootstrap`, { method: 'POST', headers: { authorization: `Bearer ${await bearer()}`, 'content-type': 'application/json' }, body: '{}' })).json() as { url: string };

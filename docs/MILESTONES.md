@@ -64,6 +64,7 @@ Design and implementation owner: Claude, using its frontend design tools. Produc
 - [x] Product brief, implementation handoff and roadmap alignment.
 - [x] Full screen/state design: Overview, Teams, Projects, Tasks and Settings. Two directions were designed; Direction A was chosen with its Overview restructured for density. Source boards live in `design/ui/` (see its README).
 - [x] U1: same-origin app shell, protected browser session, real read-only progress/history/results, safe content rendering and browser/CLI compatibility. Verified natively with 9 Playwright workflows against the labelled fixture (sign-in, overview, list, completed/approval/failed/cancelled/mode-wait detail, hostile content, disconnect and reconnect, narrow screen, sign-out) plus API/session regression tests; Docker smoke covers the in-image UI and bootstrap exchange.
+- [x] U1 status review fixes: category-first overview queries, state filters before pagination, history-derived plan approval, and bounded structured facts alongside evidence previews. Three new API tests and four new browser regressions; see [verification record](U1_REVIEW_FIXES.md).
 - [ ] U2: persisted reusable teams, custom/template members, revisions, readiness, archive/duplicate, project defaults, submission snapshots and legacy compatibility.
 - [ ] U3: guided setup, project registration, task submission/mode, version-bound plan approval, cancellation and safe diff inspection.
 - [x] U1 browser workflow/security tests, responsive layout, screenshots in `docs/screenshots/` and native/Docker packaging. Repeat for U2 and U3.
@@ -94,7 +95,7 @@ Before the M2 live fixture, configure the dedicated account with `npm run cli --
 
 ## Acceptance commands
 
-- `npm run check`: 103 tests, backend and UI typecheck, production build of service and UI (one real-sandbox containment test runs only when the pinned Codex is installed).
+- `npm run check`: 107 tests, backend and UI typecheck, production build of service and UI (one real-sandbox containment test runs only when the pinned Codex is installed).
 - `npm run test:m2`: deterministic planning/implementation/review with real sandboxed validation and a local commit.
 - `npm run test:m3`: deterministic three-item DAG with isolated branches, dependency integration, actual sandboxed validation and a combined commit.
 - `npm run test:m3-live`: opt-in authenticated three-item fixture; equivalent container command passed with saved ChatGPT sign-in. Native authenticated execution remains unverified.

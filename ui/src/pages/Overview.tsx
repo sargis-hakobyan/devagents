@@ -11,7 +11,8 @@ export function OverviewPage() {
   if (!overview) return <><Skeleton rows={2} label="Loading overview" /><Skeleton rows={4} /></>;
   const counts = overview.counts; const n = (...states: string[]) => states.reduce((sum, s) => sum + (counts[s] ?? 0), 0);
   const running = overview.active.filter(t => t.state !== 'planning' && t.state !== 'ready'); const queued = overview.active.filter(t => t.state === 'ready' || t.state === 'planning');
-  const headline = overview.attention.length ? `${overview.attention.length} task${overview.attention.length > 1 ? 's' : ''} waiting for you` : running.length ? 'Work is running' : queued.length ? 'Work is queued' : 'Nothing is running';
+  const attentionCount = n('awaiting_mode', 'awaiting_plan_approval');
+  const headline = attentionCount ? `${attentionCount} task${attentionCount > 1 ? 's' : ''} waiting for you` : running.length ? 'Work is running' : queued.length ? 'Work is queued' : 'Nothing is running';
   return <>
     <div class="page-head">
       <div><div class="h">Overview</div><h1>Workspace</h1><p>{headline}{running[0] ? ` · ${running[0].workItems.filter(i => i.state === 'completed').length} of ${running[0].workItems.length || '?'} items integrated on the running task` : ''}.</p></div>
@@ -20,7 +21,7 @@ export function OverviewPage() {
     <div class="cols">
       <div class="stack">
         {overview.attention.length > 0 && <Card tone="warn">
-          <div class="strip warn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#B45309" stroke-width="2.5" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>Needs your attention · {overview.attention.length}</div>
+          <div class="strip warn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#B45309" stroke-width="2.5" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>Needs your attention · {attentionCount}</div>
           {overview.attention.map(t => <div key={t.id} style={{ padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', borderTop: '1px solid var(--row)' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
               <div><b>{taskState(t).label}</b> · <span class="mono">{t.projectId}</span>{t.state === 'awaiting_plan_approval' && <> · v{t.version}</>}</div>
@@ -28,6 +29,7 @@ export function OverviewPage() {
             </div>
             <a class="btn primary" href={`/ui/tasks/${t.id}`}>{t.state === 'awaiting_plan_approval' ? 'Review plan' : 'Open task'}</a>
           </div>)}
+          {attentionCount > overview.attention.length && <div class="card-foot">Showing {overview.attention.length} of {attentionCount}. <a href="/ui/tasks?group=attention">View all tasks needing attention</a></div>}
         </Card>}
         {running.length === 0 && queued.length === 0 ? <Card title="Currently running"><Empty title="Nothing is running">{status?.codex.signedIn ? 'Submit work with the CLI to start a task.' : 'Sign in to Codex and register a project to start.'}</Empty></Card> : running.concat(queued).slice(0, 2).map(t => <Card key={t.id} title={<span style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}><StateChip task={t} />{truncate(t.request, 80)}<span class="muted mono">{t.projectId} · legacy agent configuration</span></span>} right={<a href={`/ui/tasks/${t.id}`} style={{ fontWeight: 700 }}>Open task →</a>}
           foot={t.workItems.length ? `Measured: ${t.workItems.filter(i => i.state === 'completed').length} of ${t.workItems.length} items integrated · updated ${relative(t.updatedAt, now)}. Combined validation, independent review and one local commit follow.` : `No work items yet · updated ${relative(t.updatedAt, now)}`}>

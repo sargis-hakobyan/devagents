@@ -70,22 +70,38 @@ export class Store {
     };
   }
   /** The list view: no agent snapshots, plans or instructions, which grow to hundreds of kilobytes per task. Newest first, cursor by row id. */
-  summaries(options: { limit?: number; before?: number; projectId?: string; state?: TaskState } = {}): { tasks: TaskSummary[]; nextBefore?: number } {
+  summaries(options: { limit?: number; before?: number; projectId?: string; state?: TaskState; states?: TaskState[] } = {}): { tasks: TaskSummary[]; nextBefore?: number } {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
-    const rows = this.db.prepare('SELECT rowid AS sequence, data FROM tasks WHERE (? IS NULL OR rowid < ?) AND (? IS NULL OR project_id = ?) AND (? IS NULL OR state = ?) ORDER BY rowid DESC LIMIT ?')
-      .all(options.before ?? null, options.before ?? null, options.projectId ?? null, options.projectId ?? null, options.state ?? null, options.state ?? null, limit + 1) as { sequence: number; data: string }[];
+    const states = options.states ?? (options.state ? [options.state] : undefined);
+    const filter = states ? JSON.stringify(states) : null;
+    const rows = this.db.prepare('SELECT rowid AS sequence, data FROM tasks WHERE (? IS NULL OR rowid < ?) AND (? IS NULL OR project_id = ?) AND (? IS NULL OR state IN (SELECT value FROM json_each(?))) ORDER BY rowid DESC LIMIT ?')
+      .all(options.before ?? null, options.before ?? null, options.projectId ?? null, options.projectId ?? null, filter, filter, limit + 1) as { sequence: number; data: string }[];
     const page = rows.slice(0, limit).map(r => this.summarize(JSON.parse(r.data) as Task, Number(r.sequence)));
     return rows.length > limit ? { tasks: page, nextBefore: page[page.length - 1]!.sequence } : { tasks: page };
   }
-  /** Measured counts and attention items for the Overview; nothing here is estimated. */
-  overview(): { counts: Record<string, number>; attention: TaskSummary[]; active: (TaskSummary & { workItems: Record<string, unknown>[] })[]; recent: TaskSummary[] } {
+  stateCounts(projectId?: string): Record<string, number> {
     const counts: Record<string, number> = {};
-    for (const row of this.db.prepare('SELECT state, COUNT(*) AS n FROM tasks GROUP BY state').all() as { state: string; n: number }[]) counts[row.state] = Number(row.n);
-    const all = this.summaries({ limit: 200 }).tasks;
-    const attention = all.filter(t => t.state === 'awaiting_mode' || t.state === 'awaiting_plan_approval');
-    const active = all.filter(t => ['planning', 'ready', 'running', 'validating', 'reviewing', 'committing', 'repairing'].includes(t.state)).map(t => ({ ...t, workItems: this.workItems(t.id) }));
-    const recent = all.filter(t => ['completed', 'failed', 'cancelled'].includes(t.state)).slice(0, 8);
+    for (const row of this.db.prepare('SELECT state, COUNT(*) AS n FROM tasks WHERE (? IS NULL OR project_id = ?) GROUP BY state').all(projectId ?? null, projectId ?? null) as { state: string; n: number }[]) counts[row.state] = Number(row.n);
+    return counts;
+  }
+  /** Query each category before limiting it; queued submissions must never hide execution. */
+  overview(): { counts: Record<string, number>; attention: TaskSummary[]; active: (TaskSummary & { workItems: Record<string, unknown>[] })[]; recent: TaskSummary[] } {
+    const counts = this.stateCounts();
+    const attention = this.summaries({ states: ['awaiting_mode', 'awaiting_plan_approval'], limit: 50 }).tasks;
+    const executing = this.summaries({ states: ['running', 'validating', 'reviewing', 'committing', 'repairing'], limit: 50 }).tasks;
+    const queued = this.summaries({ states: ['planning', 'ready'], limit: 50 }).tasks;
+    const active = [...executing, ...queued].sort((a, b) => b.sequence - a.sequence).map(t => ({ ...t, workItems: this.workItems(t.id) }));
+    const recent = this.summaries({ states: ['completed', 'failed', 'cancelled'], limit: 8 }).tasks;
     return { counts, attention, active, recent };
+  }
+  /** Approval is historical evidence, not an inference from the task's present state. */
+  planApproval(id: string): { status: 'not-planned' | 'autonomous' | 'awaiting' | 'approved' | 'not-approved'; timestamp?: string } {
+    const task = this.task(id);
+    if (!task.plan) return { status: 'not-planned' };
+    if (task.mode === 'autonomous') return { status: 'autonomous' };
+    const row = this.db.prepare(`SELECT data FROM events WHERE task_id=? AND json_extract(data, '$.actor')='user' AND json_extract(data, '$.state')='ready' AND json_extract(data, '$.reason')='Plan explicitly approved' ORDER BY sequence DESC LIMIT 1`).get(id);
+    if (row) return { status: 'approved', timestamp: (JSON.parse(String(row.data)) as TaskEvent).timestamp };
+    return { status: task.state === 'awaiting_plan_approval' ? 'awaiting' : 'not-approved' };
   }
   task(id: string): Task {
     const row = this.db.prepare('SELECT data FROM tasks WHERE id=?').get(id);

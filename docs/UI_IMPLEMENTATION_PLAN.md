@@ -1,6 +1,6 @@
 # Browser UI implementation plan (U1 first)
 
-Status: plan for U1 to U3 as required by `docs/FRONTEND_IMPLEMENTATION_PROMPT.md`; U1 is being implemented against it. Visual reference: `design/ui/` (Direction A). Behaviour and acceptance: `docs/FRONTEND_BRIEF.md`.
+Status: U1 implemented; U2/U3 planned as required by `docs/FRONTEND_IMPLEMENTATION_PROMPT.md`. Visual reference: `design/ui/` (Direction A). Behaviour and acceptance: `docs/FRONTEND_BRIEF.md`.
 
 ## Stack
 
@@ -35,12 +35,12 @@ Action controls that arrive in U2/U3 (submit, approve, cancel, register, team ed
 
 ## API changes (U1)
 
-- `GET /tasks?limit=&before=&projectId=&state=` cursor pagination by row id (default 50, max 200) returning summaries plus `nextBefore`.
-- `GET /tasks/:id/events?after=&limit=` and `GET /tasks/:id/evidence?after=&limit=` with sequence cursors so polling appends without duplicates; evidence entries are truncated to 16 KB with `truncated: true`, and `GET /tasks/:id/evidence/:sequence` returns one entry bounded to 1 MiB.
-- `GET /overview`: counts by state, attention items (awaiting mode, awaiting approval), the active task with its work items, recent outcomes. All values measured from the store.
+- `GET /tasks?limit=&before=&projectId=&state=` cursor pagination by row id (default 50, max 200); repeated state parameters are ORed before pagination. Returns summaries, `nextBefore`, and project-wide state counts independent of the current page/state filter.
+- `GET /tasks/:id/events?after=&limit=` and `GET /tasks/:id/evidence?after=&limit=` with sequence cursors so polling appends without duplicates; evidence text is previewed at 16 KB with `truncated: true` and a separately bounded metadata projection retaining execution facts, and `GET /tasks/:id/evidence/:sequence` returns one entry bounded to 1 MiB.
+- `GET /overview`: counts by state, attention items (awaiting mode, awaiting approval), the active task with its work items, recent outcomes. Each category is queried independently before limiting; execution is also separated from queued work so old running tasks cannot disappear behind new submissions. Attention previews link to the full filtered list. All counts cover the store, not a recent-history slice.
 - `GET /status`: runtime and credential availability without secrets (Codex installed/version, dedicated profile signed in, vault locked, Claude installed but not enabled), config defaults and limits, service info. Cached for 30 s because it runs `codex login status`.
 - `GET /ui/session`, `POST /ui/bootstrap` (bearer only), `GET /ui/login`, `POST /ui/logout`.
-- Existing routes keep their shapes for the CLI and scripts.
+- Task detail adds history-derived `approval` status/timestamp; current state alone never implies user approval. Read-only response additions preserve existing fields for the CLI and scripts.
 
 ## Team persistence, migrations and task snapshots (U2, designed now)
 

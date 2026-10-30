@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { api, type Evidence, type ItemProgress, type Task, type TaskEvent } from '../api';
+import { api, evidenceFacts, type Evidence, type ItemProgress, type Task, type TaskEvent } from '../api';
 import { Card, Chip, ErrorNote, ItemChip, Later, Pre, Skeleton, Stage, StateChip, pretty } from '../components/ui';
 import { command, elapsed, formatTime, relative, taskState } from '../format';
 import { forget, useNow, usePoll } from '../state';
@@ -83,14 +83,14 @@ function summarize(task: Task, items: ItemProgress[]): { title: string; detail: 
 }
 const itemVerb = (s: string) => ({ running: 'implementing', validating: 'validating', reviewing: 'reviewing', repairing: 'repairing', creating: 'preparing a worktree for', checkpointing: 'checkpointing', integrating: 'integrating' } as Record<string, string>)[s] ?? s;
 
-type PerItem = Record<string, { tests?: { exitCode: number; truncated?: boolean }[]; review?: { approved: boolean; findings: string[] }; commit?: string; implementations: number }>;
+type PerItem = Record<string, { tests?: { exitCode: number; truncated?: boolean }[]; review?: { approved: boolean; findingsCount: number }; commit?: string; implementations: number }>;
 function itemEvidence(rows: Evidence[]): PerItem {
   const out: PerItem = {};
   const at = (id: string) => (out[id] ??= { implementations: 0 });
   for (const e of rows) {
-    const d = (e.data ?? {}) as Record<string, unknown>; const id = typeof d.workItemId === 'string' ? d.workItemId : undefined;
+    const d = evidenceFacts(e); const id = typeof d.workItemId === 'string' ? d.workItemId : undefined;
     if (e.kind === 'validation' && id) at(id).tests = [...(at(id).tests ?? []), { exitCode: Number(d.exitCode), ...(d.truncated ? { truncated: true } : {}) }];
-    if (e.kind === 'run-completed' && id && d.phase === 'review') { const o = d.output as { approved?: boolean; findings?: string[] } | undefined; if (o) at(id).review = { approved: Boolean(o.approved), findings: o.findings ?? [] }; }
+    if (e.kind === 'run-completed' && id && d.phase === 'review') { const o = d.output as ReviewFacts | undefined; if (o) at(id).review = { approved: reviewPassed(o), findingsCount: findingCount(o) ?? 0 }; }
     if (e.kind === 'run-completed' && id && d.phase === 'implementation') at(id).implementations++;
     if (e.kind === 'item-commit-created' && id && typeof d.commit === 'string') at(id).commit = d.commit;
   }
@@ -111,7 +111,7 @@ function WorkTab({ task, items, perItem, now }: { task: Task; items: ItemProgres
         <div class="stages">
           <Stage tone={ev?.implementations ? 'ok' : current && st === 'running' ? 'run' : 'neutral'}>Implemented{ev?.implementations ? ` ×${ev.implementations}` : ''}</Stage>
           <Stage tone={!testsRan ? (st === 'validating' ? 'run' : 'neutral') : lastTest && lastTest.exitCode === 0 && !lastTest.truncated ? (testsRan > 1 ? 'warn' : 'ok') : 'bad'}>{!testsRan ? 'Tests' : lastTest!.exitCode === 0 && !lastTest!.truncated ? (testsRan > 1 ? `Tests ✕ then ✓ (${testsRan} runs)` : 'Tests ✓') : lastTest!.truncated ? 'Tests · output truncated' : `Tests ✕ (exit ${lastTest!.exitCode})`}</Stage>
-          <Stage tone={!ev?.review ? (st === 'reviewing' ? 'run' : 'neutral') : ev.review.approved && ev.review.findings.length === 0 ? 'ok' : 'warn'}>{!ev?.review ? 'Review' : ev.review.approved && ev.review.findings.length === 0 ? 'Review ✓' : `Review · ${ev.review.findings.length} finding${ev.review.findings.length === 1 ? '' : 's'}`}</Stage>
+          <Stage tone={!ev?.review ? (st === 'reviewing' ? 'run' : 'neutral') : ev.review.approved && ev.review.findingsCount === 0 ? 'ok' : 'warn'}>{!ev?.review ? 'Review' : ev.review.approved && ev.review.findingsCount === 0 ? 'Review ✓' : `Review · ${ev.review.findingsCount} finding${ev.review.findingsCount === 1 ? '' : 's'}`}</Stage>
           {multi && <Stage tone={ev?.commit || p?.commit ? 'ok' : 'neutral'}>{p?.commit || ev?.commit ? `Checkpoint ${(p?.commit ?? ev?.commit)!.slice(0, 7)}` : 'Checkpoint'}</Stage>}
         </div>
         <div class="muted" style={{ fontSize: '12.5px' }}>Repairs: {p?.repairCycles ?? 0} · validation <span class="mono">{planned.validation.map(command).join(' ; ')}</span>{p?.updatedAt && <> · updated {relative(p.updatedAt, now)}</>}</div>
@@ -125,7 +125,7 @@ function PlanTab({ task }: { task: Task }) {
   const plan = task.plan;
   if (!plan) return <Card><div class="empty"><b>No plan yet</b><span>{task.state === 'awaiting_mode' ? 'Planning starts after a mode is chosen.' : task.state === 'planning' ? 'The Tech Lead is planning now.' : 'This task ended before a plan was stored.'}</span></div></Card>;
   return <div class="stack">
-    <Card title={<>Plan · version {task.version}{task.mode === 'autonomous' ? ' · approved automatically (autonomous)' : task.state === 'awaiting_plan_approval' ? ' · awaiting your approval' : ' · approved by you'}</>} right={<Chip tone="neutral">frozen at submission</Chip>}>
+    <Card title={<>Plan · {approvalLabel(task)}{task.approval?.timestamp ? ` · ${formatTime(task.approval.timestamp)}` : ''}</>} right={<Chip tone="neutral">saved plan</Chip>}>
       <div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
         <div><div class="h">Summary</div><div class="wrap-anywhere">{plan.summary}</div><div class="h" style={{ marginTop: '10px' }}>Risks</div>{plan.risks.length ? <ul class="criteria">{plan.risks.map((r, i) => <li key={i} class="wrap-anywhere">{r}</li>)}</ul> : <div class="muted">None declared by the planner.</div>}</div>
         <div><div class="h">Your acceptance criteria</div>{task.acceptanceCriteria.length ? <ul class="criteria">{task.acceptanceCriteria.map((c, i) => <li key={i} class="wrap-anywhere">{c}</li>)}</ul> : <div class="muted">None given.</div>}
@@ -150,7 +150,7 @@ function ActivityTab({ task, events, evidence }: { task: Task; events: TaskEvent
   type Row = { at: string; actor: string; sequence: number; kind: 'event' | 'evidence'; body: string; detail?: unknown; truncated?: boolean; evidenceSequence?: number };
   // Completed and failed runs carry the run id, not the agent; the start entry names the agent.
   const agentByRun = new Map<string, string>();
-  for (const e of evidence) { const d = (e.data ?? {}) as Record<string, unknown>; if (e.kind === 'run-started' && typeof d.runId === 'string' && typeof d.agentId === 'string') agentByRun.set(d.runId, d.agentId); }
+  for (const e of evidence) { const d = evidenceFacts(e); if (e.kind === 'run-started' && typeof d.runId === 'string' && typeof d.agentId === 'string') agentByRun.set(d.runId, d.agentId); }
   const rows: Row[] = [
     ...events.map(e => ({ at: e.timestamp, actor: e.actor, sequence: e.sequence, kind: 'event' as const, body: `${taskState({ state: e.state, error: '' }).label} · ${e.reason}` })),
     ...evidence.map(e => ({ at: e.at, actor: evidenceActor(e, agentByRun), sequence: e.sequence, kind: 'evidence' as const, body: evidenceTitle(e), detail: e.data, ...(e.truncated ? { truncated: true } : {}), evidenceSequence: e.sequence })),
@@ -173,26 +173,26 @@ function EvidenceRow({ taskId, row }: { taskId: string; row: { body: string; det
   </details>;
 }
 function evidenceActor(e: Evidence, agentByRun: Map<string, string>): string {
-  const d = (e.data ?? {}) as Record<string, unknown>;
+  const d = evidenceFacts(e);
   if (typeof d.agentId === 'string') return d.agentId;
   if (typeof d.runId === 'string' && agentByRun.has(d.runId)) return agentByRun.get(d.runId)!;
   return e.kind.startsWith('run-') || e.kind === 'progress' ? 'engine' : 'orchestrator';
 }
 function evidenceTitle(e: Evidence): string {
-  const d = (e.data ?? {}) as Record<string, unknown>; const item = typeof d.workItemId === 'string' ? ` · item ${d.workItemId}` : typeof d.itemId === 'string' ? ` · item ${d.itemId}` : '';
+  const d = evidenceFacts(e); const item = typeof d.workItemId === 'string' ? ` · item ${d.workItemId}` : typeof d.itemId === 'string' ? ` · item ${d.itemId}` : '';
   switch (e.kind) {
     case 'run-started': return `${d.phase} run started${item}`;
-    case 'run-completed': return `${d.phase} run completed${item}${d.phase === 'review' ? ` · ${(d.output as { approved?: boolean } | undefined)?.approved ? 'approved' : 'changes requested'}` : ''}`;
+    case 'run-completed': return `${d.phase} run completed${item}${d.phase === 'review' ? ` · ${reviewPassed(d.output as ReviewFacts | undefined) ? 'approved' : 'changes requested'}` : ''}`;
     case 'run-failed': return `${d.phase} run failed${item}`;
-    case 'validation': return `validation ${d.exitCode === 0 ? 'passed' : `failed (exit ${String(d.exitCode)})`}${d.truncated ? ' · output truncated' : ''}${item} · ${[d.executable, ...((d.args as string[] | undefined) ?? [])].join(' ')}`;
+    case 'validation': return `validation ${typeof d.exitCode !== 'number' ? 'result unavailable' : d.truncated ? 'failed (output truncated)' : d.exitCode === 0 ? 'passed' : `failed (exit ${d.exitCode})`}${d.truncated ? ' · output truncated' : ''}${item} · ${[d.executable, ...((d.args as string[] | undefined) ?? [])].join(' ')}`;
     case 'work-item': return `item ${String(d.itemId)} → ${String(d.state)}`;
     case 'progress': return `engine ${String(d.kind)}${item}`;
     default: return `${e.kind}${item}`;
   }
 }
 function ResultTab({ task, evidence }: { task: Task; evidence: Evidence[] }) {
-  const reviews = evidence.filter(e => e.kind === 'run-completed' && (e.data as { phase?: string }).phase === 'review');
-  const last = reviews[reviews.length - 1]; const review = last ? (last.data as { output?: { approved?: boolean; summary?: string; findings?: string[] } }).output : undefined;
+  const reviews = evidence.filter(e => e.kind === 'run-completed' && evidenceFacts(e).phase === 'review');
+  const last = reviews[reviews.length - 1]; const review = last ? evidenceFacts(last).output as ReviewFacts | undefined : undefined;
   const validations = evidence.filter(e => e.kind === 'validation');
   if (task.state !== 'completed') return <Card tone={task.state === 'failed' ? 'bad' : undefined}><div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
     <b>Result</b>
@@ -204,11 +204,25 @@ function ResultTab({ task, evidence }: { task: Task; evidence: Evidence[] }) {
       <dt>Commit</dt><dd class="mono">{task.outcome?.commit ?? '—'} on {task.workspace?.branch ?? '—'}</dd>
       <dt>Changed files</dt><dd>{task.outcome?.files?.length ? <ul class="criteria mono">{task.outcome.files.map(f => <li key={f} class="wrap-anywhere">{f}</li>)}</ul> : '—'}</dd>
       <dt>Repairs used</dt><dd>{task.outcome?.repairCycles ?? 0}</dd>
-      <dt>Tests</dt><dd>{validations.length ? `${validations.filter(v => (v.data as { exitCode: number }).exitCode === 0).length} of ${validations.length} validation runs passed; see Activity for output` : 'none recorded'}</dd>
-      <dt>Review</dt><dd class="wrap-anywhere">{review ? `${review.approved ? 'Approved' : 'Changes requested'} · ${review.summary ?? ''}` : '—'}</dd>
+      <dt>Tests</dt><dd>{validations.length ? `${validations.filter(v => evidenceFacts(v).exitCode === 0 && !evidenceFacts(v).truncated).length} of ${validations.length} validation runs passed; see Activity for output` : 'none recorded'}</dd>
+      <dt>Review</dt><dd class="wrap-anywhere">{review ? `${reviewPassed(review) ? 'Approved' : 'Changes requested'} · ${review.summary ?? ''}` : '—'}</dd>
       <dt>Diff</dt><dd>Read-only diff inspection arrives in U3. Until then: <code>git -C &lt;project&gt; show {task.outcome?.commit?.slice(0, 7) ?? '<commit>'}</code></dd>
       <dt>Worktree</dt><dd class="mono wrap-anywhere">{task.workspace?.path ?? '—'}</dd>
     </dl></div>
     <div class="card-foot">Completion is a local reviewed commit, not a merge or deployment. The original checkout was not modified.</div></Card>
   </div>;
+}
+
+
+type ReviewFacts = { approved?: boolean; summary?: string; findings?: string[]; findingsCount?: number };
+function findingCount(review: ReviewFacts): number | undefined { return review.findingsCount ?? review.findings?.length; }
+function reviewPassed(review: ReviewFacts | undefined): boolean { return review?.approved === true && findingCount(review) === 0; }
+function approvalLabel(task: Task): string {
+  switch (task.approval?.status) {
+    case 'approved': return 'approved by you';
+    case 'autonomous': return 'autonomous mode (no user approval required)';
+    case 'awaiting': return `awaiting your approval · version ${task.version}`;
+    case 'not-approved': return 'not approved';
+    default: return 'approval history unavailable';
+  }
 }

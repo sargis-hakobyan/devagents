@@ -9,6 +9,7 @@ import { State } from '../domain/schemas.js';
 import { environmentSecrets, redactValues, log } from '../telemetry/redact.js';
 import { BrowserSessions, SESSION_COOKIE, parseCookies, sessionCookie, clearedSessionCookie, type BrowserSession } from './session.js';
 import { securityHeaders, serveUi } from './static.js';
+import { evidenceMetadata } from './evidence.js';
 
 export async function accessToken(dataDir: string): Promise<string> {
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
@@ -41,7 +42,7 @@ const EVIDENCE_PREVIEW_BYTES = 16 * 1024; const EVIDENCE_ENTRY_BYTES = 1024 * 10
 function boundEvidence(entry: { sequence: number; kind: string; at: string; data: unknown }, limit: number) {
   const json = JSON.stringify(entry.data ?? null);
   if (Buffer.byteLength(json) <= limit) return entry;
-  return { sequence: entry.sequence, kind: entry.kind, at: entry.at, data: { preview: Buffer.from(json).subarray(0, limit).toString('utf8'), bytes: Buffer.byteLength(json) }, truncated: true };
+  return { sequence: entry.sequence, kind: entry.kind, at: entry.at, metadata: evidenceMetadata(entry.data), data: { preview: Buffer.from(json).subarray(0, limit).toString('utf8'), bytes: Buffer.byteLength(json) }, truncated: true };
 }
 const integer = (value: string | null, fallback: number) => { const n = Number(value ?? fallback); return Number.isInteger(n) && n >= 0 ? n : fallback; };
 
@@ -123,13 +124,15 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
         return send(res, 200, await options.status());
       }
       if (req.method === 'GET' && path === '/tasks') {
-        const state = url.searchParams.get('state'); const projectId = url.searchParams.get('projectId'); const before = url.searchParams.get('before');
-        return send(res, 200, service.store.summaries({
+        const states = z.array(State).max(State.options.length).parse(url.searchParams.getAll('state'));
+        const project = url.searchParams.get('projectId'); const projectId = project ? z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).parse(project) : undefined;
+        const before = url.searchParams.get('before');
+        return send(res, 200, { ...service.store.summaries({
           limit: integer(url.searchParams.get('limit'), 50),
           ...(before ? { before: integer(before, 0) } : {}),
-          ...(projectId ? { projectId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).parse(projectId) } : {}),
-          ...(state ? { state: State.parse(state) } : {}),
-        }));
+          ...(projectId ? { projectId } : {}),
+          ...(states.length ? { states } : {}),
+        }), counts: service.store.stateCounts(projectId) });
       }
       if (req.method === 'POST' && path === '/tasks') {
         const key = z.string().min(1).max(200).parse(req.headers['idempotency-key']);
@@ -138,7 +141,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       const match = /^\/tasks\/([a-f0-9-]{36})(?:\/(events|evidence|items|run|mode|plan|approve|cancel|cleanup)(?:\/(\d{1,12}))?)?$/.exec(path);
       if (match) {
         const id = match[1]!; const action = match[2]; const sub = match[3];
-        if (req.method === 'GET' && !action) return send(res, 200, service.store.task(id));
+        if (req.method === 'GET' && !action) return send(res, 200, { ...service.store.task(id), approval: service.store.planApproval(id) });
         if (req.method === 'GET' && action === 'events') return send(res, 200, service.store.events(id, integer(url.searchParams.get('after'), 0), Math.min(integer(url.searchParams.get('limit'), 500), 1000)));
         if (req.method === 'GET' && action === 'evidence' && sub) return send(res, 200, boundEvidence(service.store.evidenceEntry(id, Number(sub)), EVIDENCE_ENTRY_BYTES));
         if (req.method === 'GET' && action === 'evidence') return send(res, 200, service.store.evidence(id, integer(url.searchParams.get('after'), 0), Math.min(integer(url.searchParams.get('limit'), 200), 1000)).map(e => boundEvidence(e, EVIDENCE_PREVIEW_BYTES)));

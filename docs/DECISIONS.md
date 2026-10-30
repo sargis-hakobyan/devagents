@@ -119,3 +119,10 @@
 - Data: cursor pagination for task lists, sequence cursors for events and evidence so polling and reconnects append without duplication, bounded evidence previews with a single-entry route, a measured overview and a secret-free status report that never claims verified model access.
 - Fixture: `scripts/ui-fixture.mjs` is a labelled development fixture (banner in the UI) with a deterministic fake engine on a temporary data directory; it is the target of the Playwright suite and never part of production. Playwright is a dev dependency; `npm test` stays browser-free.
 - Deferred to U2/U3 and shown disabled: team editing, submission, mode choice, approval, cancellation, registration, cleanup, guided setup, diff inspection. The authenticated M2/M3 reruns remain pending; this increment claims no release acceptance.
+
+
+## U1 status correctness review — 2026-10-30
+
+- Query overview categories before applying limits, with separate execution and queue queries. A finite preview is explicitly labelled and links to the full attention list. Grouped task filters are applied in SQL before cursor pagination; project-wide counts do not depend on the displayed page. Text search remains explicitly page-local.
+- Resolve plan approval from the durable user approval event instead of inferring it from leaving the approval-wait state. Add a read-only approval projection to task detail; it requires no schema migration and remains available independently of activity pagination. Later cancellation does not erase an actual approval, and rejection does not invent one.
+- Preserve bounded structured metadata alongside truncated evidence text. Validation exit codes, execution-output truncation, review finding counts and run/item attribution remain available to every task view. Preview truncation is not validation failure; an actual truncated validation result still fails, and approval with findings is still rejected. Model output and logs remain text-only and redacted.

@@ -36,9 +36,9 @@ export type Command = { executable: string; args: string[] };
 export type WorkItem = { id: string; title: string; description: string; acceptanceCriteria: string[]; dependsOn: string[]; requiredCapabilities: string[]; projectId: string; branch: string; validation: Command[]; assignedAgent?: string; ownedPaths?: string[] };
 export type Plan = { summary: string; risks: string[]; items: WorkItem[]; integration?: { assignedAgent: string; validation: Command[] } | null };
 export type AgentDefinition = { id: string; name: string; description: string; enabled: boolean; engine: string; provider: string; model: string; capabilities: string[]; instructionsFile: string; delegation: { canReceiveTasks: boolean; canDelegate: boolean }; permissions: { readPaths: string[]; writePaths: string[]; allowCommands: boolean; allowPush: boolean }; concurrency: number; instructions: string; source: string };
-export type Task = TaskSummary & { request: string; acceptanceCriteria: string[]; runId: string; plan?: Plan; workspace?: { path: string; branch: string; baseSha: string }; agents?: AgentDefinition[]; outcome?: { commit?: string; files?: string[]; summary?: string; error?: string; repairCycles: number } };
+export type Task = TaskSummary & { approval?: { status: 'not-planned' | 'autonomous' | 'awaiting' | 'approved' | 'not-approved'; timestamp?: string }; request: string; acceptanceCriteria: string[]; runId: string; plan?: Plan; workspace?: { path: string; branch: string; baseSha: string }; agents?: AgentDefinition[]; outcome?: { commit?: string; files?: string[]; summary?: string; error?: string; repairCycles: number } };
 export type TaskEvent = { sequence: number; taskId: string; runId: string; actor: string; reason: string; state: TaskState; timestamp: string };
-export type Evidence = { sequence: number; kind: string; at: string; data: unknown; truncated?: boolean };
+export type Evidence = { sequence: number; kind: string; at: string; data: unknown; metadata?: Record<string, unknown>; truncated?: boolean };
 export type ItemProgress = { itemId: string; state: string; agentId?: string; branch?: string; dependsOn?: string[]; ownedPaths?: string[]; updatedAt?: string; commit?: string; repairCycles?: number; error?: string; reason?: string; workspace?: { path: string; branch: string } };
 export type Overview = { counts: Record<string, number>; attention: TaskSummary[]; active: (TaskSummary & { workItems: ItemProgress[] })[]; recent: TaskSummary[] };
 export type Project = { id: string; path: string; defaultMode?: 'autonomous' | 'plan-approval'; baseSha: string; registeredAt: string };
@@ -58,3 +58,6 @@ export const resources = {
   projects: { key: 'projects', load: () => api<Project[]>('/projects'), intervalMs: 30000 },
   agents: { key: 'agents', load: () => api<AgentDefinition[]>('/agents'), intervalMs: 15000 },
 };
+
+/** A preview is display text, never a substitute for structured execution facts. */
+export const evidenceFacts = (e: Evidence): Record<string, unknown> => e.truncated ? e.metadata ?? {} : (e.data ?? {}) as Record<string, unknown>;
