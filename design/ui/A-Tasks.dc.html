@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents Tasks — Direction A</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#3B3F5E;text-decoration:none;font-weight:600;font-size:14px}
+.nav a:hover{background:#E6E8F3;color:#1C1A33}.nav a.on{background:#231F4A;color:#FFFFFF}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}
+.filter{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;border-radius:999px;border:1px solid #D1D4E4;background:#FFFFFF;font:inherit;font-size:13px;font-weight:600;color:#3B3F5E;cursor:pointer}
+.filter.on{background:#231F4A;color:#FFFFFF;border-color:#231F4A}
+.btn:focus-visible,.nav a:focus-visible,.filter:focus-visible,input:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+table{border-collapse:collapse;width:100%}th{text-align:left;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#5A5F78;padding:10px 14px;border-bottom:1px solid #E0E2EE}td{padding:14px;border-bottom:1px solid #EAECF5;vertical-align:top}
+tr.row:hover td{background:#FAFBFE}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+  <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 18px">
+      <div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div>
+      <div style="width: 1px; height: 36px; background: rgba(255,255,255,0.18)"></div>
+      <div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #B9B6D9">Local workspace</span><span style="font-weight: 700; font-size: 16px">~/Projects · native</span></div>
+    </div>
+    <span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6EE7A8" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Service connected · updated 1 s ago</span>
+  </header>
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD">
+      <a href="Main.dc.html">Overview</a>
+      <a href="A-Tasks.dc.html" class="on" aria-current="page">Tasks</a>
+      <a href="A-Teams.dc.html">Teams</a>
+      <a href="A-Projects.dc.html">Projects</a>
+      <a href="A-Settings.dc.html">Settings</a>
+    </nav>
+    <main style="flex: 999 1 560px; min-width: 0; padding: 32px 40px 48px; display: flex; flex-direction: column; gap: 22px">
+      <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap">
+        <div>
+          <div style="font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #5A5F78; font-weight: 700">Tasks</div>
+          <h1 style="margin: 4px 0 0; font-size: 40px; letter-spacing: -0.03em; line-height: 1.1">All tasks</h1>
+          <p class="muted" style="margin: 6px 0 0">7 tasks across 2 projects. Summaries only; open a task for its plan, work items, activity and result.</p>
+        </div>
+        <button class="btn primary" type="button" disabled aria-disabled="true" title="Task submission arrives in U3. Use the CLI: devagents tasks submit" style="opacity: .55; cursor: not-allowed">Submit work <span style="font-weight: 500; font-size: 12px; opacity: .85">· U3</span></button>
+      </div>
+      <div role="group" aria-label="Filters" style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center">
+        <label style="display: flex; align-items: center; gap: 8px; border: 1px solid #D1D4E4; background: #FFFFFF; border-radius: 999px; padding: 0 12px; min-height: 36px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5A5F78" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Search tasks</span><input type="search" placeholder="Search request text" style="border: 0; font: inherit; font-size: 14px; width: 220px; background: transparent"></label>
+        <span class="muted" style="font-size: 13px; font-weight: 600; margin-left: 6px">State</span>
+        <button class="filter on" type="button" aria-pressed="true">All · 7</button>
+        <button class="filter" type="button" aria-pressed="false">Needs you · 1</button>
+        <button class="filter" type="button" aria-pressed="false">Active · 1</button>
+        <button class="filter" type="button" aria-pressed="false">Finished · 5</button>
+        <span class="muted" style="font-size: 13px; font-weight: 600; margin-left: 6px">Project</span>
+        <button class="filter" type="button" aria-pressed="false">fixture · 5</button>
+        <button class="filter" type="button" aria-pressed="false">website · 2</button>
+      </div>
+      <section class="card" style="padding: 0; overflow: hidden">
+        <div style="overflow-x: auto"><table>
+          <thead><tr><th>Request</th><th>Project</th><th>State</th><th>Items</th><th>Updated</th><th>Branch / result</th></tr></thead>
+          <tbody>
+            <tr class="row"><td><a href="A-States.dc.html" style="font-weight: 700; color: #1C1A33; text-decoration: none">Add input validation to the API</a><div class="muted" style="font-size: 13px">plan-approval · version 3</div></td><td class="mono">website</td><td><span class="chip" style="background: #FFF1DB; color: #7A4A00"><svg width="12" height="12" viewBox="0 0 24 24" fill="#B45309" aria-hidden="true"><circle cx="12" cy="12" r="6"/></svg>Awaiting your approval</span></td><td>2 planned</td><td class="muted">14 min ago</td><td class="muted">Nothing runs until approved</td></tr>
+            <tr class="row"><td><a href="A-Task.dc.html" style="font-weight: 700; color: #1C1A33; text-decoration: none">Three modules</a><div class="muted" style="font-size: 13px">autonomous · legacy agent configuration</div></td><td class="mono">fixture</td><td><span class="chip" style="background: #E3ECFF; color: #1C3F99"><svg width="12" height="12" viewBox="0 0 24 24" fill="#2457C5" aria-hidden="true"><circle cx="12" cy="12" r="6"/></svg>Running · validating c</span></td><td>2 of 3 integrated</td><td class="muted">2 s ago</td><td class="mono">codex/devagents-a81f…</td></tr>
+            <tr class="row"><td><span style="font-weight: 700">Fix greeting so the test passes</span><div class="muted" style="font-size: 13px">autonomous</div></td><td class="mono">fixture</td><td><span class="chip" style="background: #E1F5EA; color: #135E38">✓ Completed</span></td><td>1 of 1</td><td class="muted">Yesterday 22:10</td><td class="mono">commit 39001f6 · 1 file</td></tr>
+            <tr class="row"><td><span style="font-weight: 700">Combine both edits</span><div class="muted" style="font-size: 13px">autonomous</div></td><td class="mono">fixture</td><td><span class="chip" style="background: #FDE8E6; color: #8A1C14">✕ Failed</span></td><td>2 of 2 reviewed · integration conflict</td><td class="muted">Yesterday 21:58</td><td class="muted">Repair budget exhausted · worktrees preserved</td></tr>
+            <tr class="row"><td><span style="font-weight: 700">Rename helper module</span><div class="muted" style="font-size: 13px">plan-approval</div></td><td class="mono">website</td><td><span class="chip" style="background: #EAECF5; color: #3B3F5E">⊘ Cancelled by you</span></td><td>—</td><td class="muted">Mon 16:02</td><td class="muted">Plan rejected · no commit</td></tr>
+            <tr class="row"><td><span style="font-weight: 700">Greeting with hidden helper</span><div class="muted" style="font-size: 13px">autonomous</div></td><td class="mono">fixture</td><td><span class="chip" style="background: #FDE8E6; color: #8A1C14">✕ Failed</span></td><td>0 of 1</td><td class="muted">Mon 15:40</td><td class="muted">Implementation changed an ignored file</td></tr>
+            <tr class="row"><td><span style="font-weight: 700">Survive a process crash</span><div class="muted" style="font-size: 13px">autonomous</div></td><td class="mono">fixture</td><td><span class="chip" style="background: #FFF1DB; color: #7A4A00">⚠ Interrupted by shutdown</span></td><td>1 of 1 interrupted</td><td class="muted">Sun 09:12</td><td class="muted">Marked failed on restart · inspect evidence</td></tr>
+          </tbody></table></div>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-top: 1px solid #EAECF5"><span class="muted" style="font-size: 13px">Showing 7 of 7 · newest first</span><div style="display: flex; gap: 8px"><button class="filter" type="button" disabled aria-disabled="true" style="opacity: .5">← Newer</button><button class="filter" type="button" disabled aria-disabled="true" style="opacity: .5">Older →</button></div></div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

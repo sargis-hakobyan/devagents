@@ -1,0 +1,103 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-10-30T10:40:00Z"
+  },
+  "title": "DevAgents UI — selected design",
+  "launch": {
+    "view": "canvas"
+  },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1360,
+      "h": 1040,
+      "title": "A · Overview",
+      "expand": "fill"
+    },
+    "A-Tasks.dc.html": {
+      "x": 1440,
+      "y": 0,
+      "w": 1360,
+      "h": 900,
+      "title": "A · Tasks",
+      "expand": "fill"
+    },
+    "A-Task.dc.html": {
+      "x": 2880,
+      "y": 0,
+      "w": 1360,
+      "h": 1560,
+      "title": "A · Task detail (running)",
+      "expand": "fill"
+    },
+    "A-Teams.dc.html": {
+      "x": 4320,
+      "y": 0,
+      "w": 1360,
+      "h": 1480,
+      "title": "A · Teams + member editor",
+      "expand": "fill"
+    },
+    "A-Projects.dc.html": {
+      "x": 5760,
+      "y": 0,
+      "w": 1360,
+      "h": 900,
+      "title": "A · Projects",
+      "expand": "fill"
+    },
+    "A-Settings.dc.html": {
+      "x": 7200,
+      "y": 0,
+      "w": 1360,
+      "h": 1000,
+      "title": "A · Settings",
+      "expand": "fill"
+    },
+    "A-States.dc.html": {
+      "x": 8640,
+      "y": 0,
+      "w": 1360,
+      "h": 1400,
+      "title": "A · States + narrow screen",
+      "expand": "fill"
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "A-Tasks.dc.html",
+    "A-Task.dc.html",
+    "A-Teams.dc.html",
+    "A-Projects.dc.html",
+    "A-Settings.dc.html",
+    "A-States.dc.html"
+  ],
+  "notes": {
+    "rowA": {
+      "x": 0,
+      "y": -300,
+      "text": "Direction A — indigo band, light workspace, amber accent",
+      "kind": "title1",
+      "maxW": 10000
+    },
+    "legend": {
+      "x": 10080,
+      "y": 0,
+      "w": 420,
+      "text": "All example content mirrors the deterministic fixtures (project “fixture”, task “Three modules”, items a/b/c, built-in roles). Counts and stages are real backend fields; nothing shows percentages, estimates or model availability that the backend cannot measure. Controls that arrive in U2/U3 are drawn visibly unavailable.",
+      "fill": "blue"
+    },
+    "chosen": {
+      "x": 0,
+      "y": -420,
+      "text": "Selected direction: A, with a denser two-column Overview.",
+      "kind": "title1",
+      "maxW": 10000
+    }
+  },
+  "designSystems": []
+}

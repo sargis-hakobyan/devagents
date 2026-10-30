@@ -1,0 +1,9 @@
+# Copy to compose.override.yaml and replace the source with your existing checkout.
+services:
+  devagents:
+    volumes:
+      - type: bind
+        source: /absolute/path/to/already-cloned-project
+        target: /projects/my-project
+        bind:
+          create_host_path: false

@@ -1,0 +1,19 @@
+schemaVersion: 1
+id: frontend-developer
+name: Frontend Developer
+description: Implements frontend interfaces
+enabled: true
+engine: default
+provider: default
+model: default
+capabilities: [implementation, frontend, filesystem-read, filesystem-write]
+instructionsFile: ./frontend-developer.md
+delegation:
+  canReceiveTasks: true
+  canDelegate: false
+permissions:
+  readPaths: ["project:/**"]
+  writePaths: ["project:/**"]
+  allowCommands: true
+  allowPush: false
+concurrency: 1

@@ -1,0 +1,15 @@
+*
+!package.json
+!package-lock.json
+!tsconfig.json
+!tsconfig.build.json
+!src
+!src/**
+!ui
+!ui/**
+!agents
+!agents/**
+
+!scripts
+!scripts/m2-smoke.mjs
+!scripts/m3-smoke.mjs

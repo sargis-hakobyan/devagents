@@ -1,0 +1,33 @@
+services:
+  devagents:
+    image: devagents:local
+    build: .
+    init: true
+    ports:
+      - "127.0.0.1:${DEVAGENTS_PORT:-4310}:4310"
+    volumes:
+      - devagents-data:/data
+    read_only: true
+    environment:
+      DEVAGENTS_CREDENTIAL_RUNTIME: /run/devagents-auth
+      # The browser reaches the service through the published host port; sign-in links and the
+      # Host allowlist must use it rather than the container's internal 4310.
+      DEVAGENTS_PUBLIC_PORT: ${DEVAGENTS_PORT:-4310}
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+      - /run/devagents-auth:size=64m,mode=0700,uid=1000,gid=1000,exec
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    cpus: 2
+    mem_limit: 1g
+    # Codex workers use multiple runtime/tool threads; two live workers exceeded 128.
+    pids_limit: 512
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4310/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+volumes:
+  devagents-data:

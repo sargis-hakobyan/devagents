@@ -1,0 +1,23 @@
+schemaVersion: 1
+defaultEngine: codex
+defaultProvider: openai
+# M2 runs serially; higher concurrency is reserved for M3.
+concurrency: 1
+maxRepairCycles: 1
+executionTimeoutMs: 600000
+validationTimeoutMs: 120000
+# Upper bound on directory entries scanned per sandbox launch (symlink/hardlink/secret denial). Fail-closed when exceeded.
+workspaceScanLimit: 200000
+providers:
+  - id: openai
+    kind: openai
+    auth: login
+  - id: anthropic
+    kind: anthropic
+    auth: api-key
+    apiKeyEnv: ANTHROPIC_API_KEY
+  # Configuration seam only: local execution is a follow-up milestone.
+  - id: local
+    kind: ollama
+    auth: none
+    baseUrl: http://127.0.0.1:11434

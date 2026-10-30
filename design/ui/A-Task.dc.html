@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents Task detail — Direction A</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#3B3F5E;text-decoration:none;font-weight:600;font-size:14px}
+.nav a:hover{background:#E6E8F3;color:#1C1A33}.nav a.on{background:#231F4A;color:#FFFFFF}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}
+.tab{min-height:44px;padding:0 4px;border:0;background:transparent;font:inherit;font-weight:700;font-size:14px;color:#5A5F78;border-bottom:3px solid transparent;cursor:pointer}
+.tab.on{color:#231F4A;border-bottom-color:#FFB703}
+.btn:focus-visible,.nav a:focus-visible,.tab:focus-visible,details summary:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.stage{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:3px 8px;border-radius:6px}
+details summary{cursor:pointer;font-weight:700;list-style:none}details summary::-webkit-details-marker{display:none}
+pre{margin:0;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.5;background:#F5F6FA;border:1px solid #E0E2EE;border-radius:10px;padding:12px;max-height:220px;overflow:auto}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+  <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 18px">
+      <div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div>
+      <div style="width: 1px; height: 36px; background: rgba(255,255,255,0.18)"></div>
+      <div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #B9B6D9">fixture</span><span style="font-weight: 700; font-size: 16px">Three modules</span></div>
+    </div>
+    <span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6EE7A8" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Live · polling every 3 s · last event 2 s ago</span>
+  </header>
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD">
+      <a href="Main.dc.html">Overview</a><a href="A-Tasks.dc.html" class="on" aria-current="page">Tasks</a><a href="A-Teams.dc.html">Teams</a><a href="A-Projects.dc.html">Projects</a><a href="A-Settings.dc.html">Settings</a>
+    </nav>
+    <main style="flex: 999 1 560px; min-width: 0; padding: 24px 40px 48px; display: flex; flex-direction: column; gap: 20px">
+      <a href="A-Tasks.dc.html" style="font-weight: 700; font-size: 14px; text-decoration: none">← All tasks</a>
+      <section class="card" aria-label="Task header" style="padding: 22px 24px; display: flex; flex-direction: column; gap: 14px">
+        <div style="display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-start">
+          <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: #E3ECFF; color: #1C3F99"><svg width="12" height="12" viewBox="0 0 24 24" fill="#2457C5" aria-hidden="true"><circle cx="12" cy="12" r="6"/></svg>Running</span><span class="muted" style="font-size: 13px">autonomous · version 4 · started 09:41 · elapsed 7 min</span></div>
+            <h1 style="margin: 0; font-size: 30px; letter-spacing: -0.02em; line-height: 1.2">Plan exactly three implementation items with IDs a, b, c…</h1>
+            <div class="muted" style="font-size: 14px">Project <span class="mono">fixture</span> · Team: <span style="font-weight: 600">Legacy agent configuration</span> (6 agents snapshotted at submission) · Branch <span class="mono">codex/devagents-a81f2c…</span></div>
+          </div>
+          <div style="display: flex; gap: 10px; align-items: center">
+            <button class="btn" type="button" disabled aria-disabled="true" title="Cancellation from the browser arrives in U3. Use the CLI: devagents tasks cancel" style="opacity: .55; cursor: not-allowed">Cancel task <span style="font-weight: 500; font-size: 12px">· U3</span></button>
+          </div>
+        </div>
+        <div style="display: flex; gap: 12px; align-items: flex-start; background: #F5F6FA; border-radius: 12px; padding: 12px 14px">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2457C5" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          <div><div style="font-weight: 700">Now: validating work item c in its own worktree</div><div class="muted" style="font-size: 14px">Items a and b are integrated. When c passes its tests and independent review, the combined result is validated and reviewed once more before one local commit on the task branch. No merge, push or deployment happens.</div></div>
+        </div>
+      </section>
+      <div role="tablist" aria-label="Task sections" style="display: flex; gap: 22px; border-bottom: 1px solid #E0E2EE; overflow-x: auto">
+        <button class="tab on" role="tab" aria-selected="true" type="button">Work · 3 items</button><button class="tab" role="tab" aria-selected="false" type="button">Plan</button><button class="tab" role="tab" aria-selected="false" type="button">Activity · 41</button><button class="tab" role="tab" aria-selected="false" type="button">Result</button>
+      </div>
+      <section aria-label="Work items" style="display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px"><span class="muted" style="font-size: 13px">Measured: 2 of 3 integrated · wave 2 of 2 · global limit 2 · per-role limit 1 · repairs used 0 of 1</span><button class="btn" type="button" style="min-height: 36px; font-size: 13px">Dependency graph</button></div>
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px">
+          <article class="card" style="padding: 16px; display: flex; flex-direction: column; gap: 10px">
+            <div style="display: flex; justify-content: space-between; align-items: center"><span style="font-weight: 800">a · Module a</span><span class="chip" style="background: #E1F5EA; color: #135E38">✓ Integrated</span></div>
+            <div class="muted" style="font-size: 13px">backend-developer · owns <span class="mono">a/**</span> · no dependencies</div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="stage" style="background: #E1F5EA; color: #135E38">Implemented</span><span class="stage" style="background: #E1F5EA; color: #135E38">Tests ✓ 1/1</span><span class="stage" style="background: #E1F5EA; color: #135E38">Review ✓</span><span class="stage" style="background: #E1F5EA; color: #135E38">Checkpoint 9c2e…</span></div>
+            <div class="muted" style="font-size: 13px">Repairs: 0 · validation <span class="mono">node --test a.test.cjs</span></div>
+          </article>
+          <article class="card" style="padding: 16px; display: flex; flex-direction: column; gap: 10px">
+            <div style="display: flex; justify-content: space-between; align-items: center"><span style="font-weight: 800">b · Module b</span><span class="chip" style="background: #E1F5EA; color: #135E38">✓ Integrated</span></div>
+            <div class="muted" style="font-size: 13px">frontend-developer · owns <span class="mono">b/**</span> · no dependencies</div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="stage" style="background: #E1F5EA; color: #135E38">Implemented</span><span class="stage" style="background: #FFF1DB; color: #7A4A00">Tests ✕ then ✓ (1 repair)</span><span class="stage" style="background: #E1F5EA; color: #135E38">Review ✓</span><span class="stage" style="background: #E1F5EA; color: #135E38">Checkpoint 41ab…</span></div>
+            <div class="muted" style="font-size: 13px">Repairs: 1 of 1 · first validation failed; repaired and passed</div>
+          </article>
+          <article class="card" style="padding: 16px; display: flex; flex-direction: column; gap: 10px; border-color: #2457C5; box-shadow: 0 0 0 3px #E3ECFF">
+            <div style="display: flex; justify-content: space-between; align-items: center"><span style="font-weight: 800">c · Combine a + b</span><span class="chip" style="background: #E3ECFF; color: #1C3F99">Validating</span></div>
+            <div class="muted" style="font-size: 13px">general-developer · owns <span class="mono">c/**</span> · depends on a, b</div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="stage" style="background: #E1F5EA; color: #135E38">Implemented</span><span class="stage" style="background: #E3ECFF; color: #1C3F99">Tests running</span><span class="stage" style="background: #EAECF5; color: #5A5F78">Review</span><span class="stage" style="background: #EAECF5; color: #5A5F78">Checkpoint</span></div>
+            <div class="muted" style="font-size: 13px">Repairs: 0 of 1 · <span class="mono">node --test c.test.cjs</span> · started 09:47:12</div>
+          </article>
+        </div>
+        <div class="card" style="padding: 14px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap"><span style="font-weight: 800">Then</span><span class="stage" style="background: #EAECF5; color: #5A5F78">Combined validation · 3 commands</span><span class="stage" style="background: #EAECF5; color: #5A5F78">Independent review by code-reviewer</span><span class="stage" style="background: #EAECF5; color: #5A5F78">Final local commit</span><span class="muted" style="font-size: 13px">Stages can revisit tests, review and implementation during repair.</span></div>
+      </section>
+      <section class="card" aria-label="Plan" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; justify-content: space-between; align-items: center"><span style="font-weight: 800; font-size: 16px">Plan · version 4 · approved automatically (autonomous)</span><span class="chip" style="background: #EAECF5; color: #3B3F5E">Frozen at submission</span></div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+          <div><div class="muted" style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em">Summary</div><div>Implement independent A/B modules and combine them.</div><div class="muted" style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; margin-top: 10px">Risks</div><div>None declared by the planner.</div></div>
+          <div><div class="muted" style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em">Acceptance criteria (yours)</div><ul style="margin: 4px 0 0; padding-left: 18px"><li>All three existing tests pass unchanged</li><li>c/c.cjs calls the a/a.cjs and b/b.cjs modules</li><li>Original checkout remains unchanged</li></ul></div>
+        </div>
+        <div class="muted" style="font-size: 13px">Integration: general-developer · combined validation <span class="mono">node --test a.test.cjs b.test.cjs c.test.cjs</span></div>
+      </section>
+      <section class="card" aria-label="Activity" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px"><span style="font-weight: 800; font-size: 16px">Activity</span><span class="muted" style="font-size: 13px">41 events · newest first · evidence bounded to 50 KB per entry</span></div>
+        <ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">
+          <li style="display: grid; grid-template-columns: 90px 120px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-top: 1px solid #EAECF5"><span class="mono muted">09:47:12</span><span class="muted" style="font-size: 13px">orchestrator</span><span>Item <b>c</b> validating · <span class="mono">node --test c.test.cjs</span></span></li>
+          <li style="display: grid; grid-template-columns: 90px 120px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-top: 1px solid #EAECF5"><span class="mono muted">09:47:10</span><span class="muted" style="font-size: 13px">general-developer</span><details><summary>Implementation run completed · 1 file changed</summary><pre>{"summary":"Implemented module c calling a and b"}
+files: c/c.cjs</pre></details></li>
+          <li style="display: grid; grid-template-columns: 90px 120px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-top: 1px solid #EAECF5"><span class="mono muted">09:46:02</span><span class="muted" style="font-size: 13px">orchestrator</span><span>Dependency checkpoint <span class="mono">5e0d…</span> · a, b integrated · wave 2 started</span></li>
+          <li style="display: grid; grid-template-columns: 90px 120px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-top: 1px solid #EAECF5"><span class="mono muted">09:45:48</span><span class="muted" style="font-size: 13px">code-reviewer</span><details><summary>Item b review · approved · 0 findings</summary><pre>Summary: Tests pass after repair; module exports a function returning 'b'.</pre></details></li>
+          <li style="display: grid; grid-template-columns: 90px 120px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-top: 1px solid #EAECF5"><span class="mono muted">09:44:20</span><span class="muted" style="font-size: 13px">orchestrator</span><span>Item <b>b</b> validation failed (exit 1) · repair 1 of 1 requested</span></li>
+          <li style="display: grid; grid-template-columns: 90px 120px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-top: 1px solid #EAECF5"><span class="mono muted">09:41:03</span><span class="muted" style="font-size: 13px">you</span><span>Task submitted with mode autonomous · idempotency key <span class="mono">m3-smoke</span></span></li>
+        </ol>
+        <button class="btn" type="button" style="align-self: flex-start; min-height: 36px; font-size: 13px">Load 35 older events</button>
+      </section>
+      <section class="card" aria-label="Result" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 8px; border-style: dashed">
+        <span style="font-weight: 800; font-size: 16px">Result</span>
+        <div class="muted">Not available yet. Completion means one reviewed local commit on <span class="mono">codex/devagents-a81f2c…</span>; you merge it yourself. Changed files, the read-only diff, test evidence and the review outcome appear here afterwards.</div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
