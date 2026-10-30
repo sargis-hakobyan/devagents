@@ -17,7 +17,7 @@ export function OverviewPage() {
   return <>
     <div class="page-head">
       <div><div class="h">Overview</div><h1>Workspace</h1><p>{headline}{running[0] ? ` · ${running[0].workItems.filter(i => i.state === 'completed').length} of ${running[0].workItems.length || '?'} items integrated on the running task` : ''}.</p></div>
-      <Later label="Submit work" increment="U3" reason="Task submission arrives in U3. Use the CLI: devagents tasks submit" primary />
+      <a class="btn primary" href="/ui/tasks/new">Submit work</a>
     </div>
     <div class="cols">
       <div class="stack">

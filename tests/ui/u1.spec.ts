@@ -36,7 +36,7 @@ test('one-time link signs in; the overview shows measured counts, attention item
   await expect(rail.locator('dd').nth(2)).toHaveText('1');
   await expect(rail.locator('dd').nth(3)).toHaveText('1');
   await expect(page.getByText('Recent outcomes')).toBeVisible();
-  await expect(page.getByRole('button', { name: /Submit work/ })).toBeDisabled();
+  await expect(page.getByRole('link', { name: /Submit work/ })).toHaveAttribute('href', '/ui/tasks/new');
   await page.screenshot({ path: join(shots, 'u1-overview.png'), fullPage: true });
   expect(dialogs).toEqual([]);
 });
@@ -83,7 +83,7 @@ test('a completed multi-item task shows real items, plan, activity and result', 
   await expect(page.getByText('Completion is a local reviewed commit, not a merge or deployment.')).toBeVisible();
   await page.screenshot({ path: join(shots, 'u1-task-completed.png'), fullPage: true });
 });
-test('approval-wait, failed and cancelled tasks explain themselves and offer only unavailable actions', async ({ page }) => {
+test('approval-wait, failed and cancelled tasks explain themselves and keep cleanup unavailable', async ({ page }) => {
   await signIn(page);
   const waiting = await find('Add input validation');
   await page.goto(`${base}/ui/tasks/${waiting.id}`);

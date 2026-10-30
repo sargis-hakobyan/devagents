@@ -37,3 +37,25 @@ test('registration preserves input on backend refusal and registers an existing 
   expect((await (await call('/projects')).json()).find((p: { id: string }) => p.id === 'browser-project').path).toBe(await realpath(root));
 });
 
+test('submission uses effective defaults, disables unavailable teams and shows the frozen response', async ({ page }) => {
+  await signIn(page); await page.goto(`${base}/ui/tasks/new`);
+  await page.getByLabel('Project', { exact: true }).selectOption('website');
+  await expect(page.getByRole('radio', { name: /Use default/ })).toHaveAccessibleName(/plan-approval \(project\)/);
+  await expect(page.getByLabel('Team', { exact: true }).locator('option', { hasText: /Design team/ })).toHaveJSProperty('disabled', true);
+  await expect(page.getByLabel('Team', { exact: true }).locator('option', { hasText: /Old platform team/ })).toHaveJSProperty('disabled', true);
+  await expect(page.getByLabel('Team', { exact: true }).locator('option').first()).toContainText('Project default · Website team');
+  await page.getByLabel('Project', { exact: true }).selectOption('fixture');
+  await page.getByLabel('What should the team do?').fill('Browser submission with frozen team');
+  await page.getByRole('button', { name: 'Add criterion' }).click();
+  await page.getByLabel('Criterion 1', { exact: true }).fill('Keep existing tests');
+  const teams = await (await call('/teams')).json(); const team = teams.find((t: { name: string }) => t.name === 'Website team');
+  await page.getByLabel('Team', { exact: true }).selectOption(team.id);
+  await page.getByRole('button', { name: 'Submit task', exact: true }).click();
+  await expect(page.getByText('Task accepted', { exact: true })).toBeVisible();
+  await expect(page.getByText(`Website team · revision ${team.revision}`, { exact: true })).toBeVisible();
+  const href = await page.getByRole('link', { name: 'Open task' }).getAttribute('href');
+  const task = await (await call(href!.replace('/ui', ''))).json();
+  expect(task.state).toBe('awaiting_mode'); expect(task.acceptanceCriteria).toEqual(['Keep existing tests']);
+  await page.screenshot({ path: join(shots, 'u3-accepted.png'), fullPage: true });
+});
+

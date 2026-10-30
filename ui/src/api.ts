@@ -6,9 +6,10 @@ export class SignedOutError extends ApiError {
   constructor(message: string) { super(401, 'session_expired', message); }
 }
 let csrfToken: string | undefined;
-export async function api<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+export async function api<T>(path: string, init: { method?: string; body?: unknown; idempotencyKey?: string } = {}): Promise<T> {
   const method = init.method ?? 'GET';
   const headers: Record<string, string> = { accept: 'application/json' };
+  if (init.idempotencyKey) headers['idempotency-key'] = init.idempotencyKey;
   if (init.body !== undefined) headers['content-type'] = 'application/json';
   if (method !== 'GET') {
     if (!csrfToken) await session();

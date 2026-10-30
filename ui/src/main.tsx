@@ -9,6 +9,7 @@ import { OverviewPage } from './pages/Overview';
 import { TasksPage } from './pages/Tasks';
 import { TaskDetailPage } from './pages/TaskDetail';
 import { ProjectsPage, SettingsPage, SignedOutPage } from './pages/Simple';
+import { SubmitTaskPage } from './pages/SubmitTask';
 import { RegisterProjectPage } from './pages/RegisterProject';
 import { TeamEditorPage, TeamsPage } from './pages/Teams';
 
@@ -28,6 +29,7 @@ function Authenticated() {
       <Route path="/ui/" component={OverviewPage} />
       <Route path="/ui" component={OverviewPage} />
       <Route path="/ui/tasks" component={TasksPage} />
+      <Route path="/ui/tasks/new" component={SubmitTaskPage} />
       <Route path="/ui/tasks/:id" component={({ id }: { id: string }) => <TaskDetailPage id={id} />} />
       <Route path="/ui/teams" component={TeamsPage} />
       <Route path="/ui/teams/:id" component={({ id }: { id: string }) => <TeamEditorPage id={id} />} />

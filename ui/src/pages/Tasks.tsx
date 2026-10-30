@@ -20,7 +20,7 @@ export function TasksPage() {
   return <>
     <div class="page-head">
       <div><div class="h">Tasks</div><h1>All tasks</h1><p>Summaries only; open a task for its plan, work items, activity and result.</p></div>
-      <Later label="Submit work" increment="U3" reason="Task submission arrives in U3. Use the CLI: devagents tasks submit" primary />
+      <a class="btn primary" href="/ui/tasks/new">Submit work</a>
     </div>
     <div class="filters" role="group" aria-label="Filters">
       <label class="search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5A5F78" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg><span class="sr-only">Search request text on this page</span><input type="search" placeholder="Search this page" value={search} onInput={e => setSearch((e.target as HTMLInputElement).value)} /></label>

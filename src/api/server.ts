@@ -115,6 +115,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
         sessions.destroy(principal.session.id);
         return send(res, 200, { signedOut: true }, { 'set-cookie': clearedSessionCookie(Boolean(options.secureCookies)) });
       }
+      if (req.method === 'GET' && path === '/submission-options') return send(res, 200, service.submissionOptions());
       if (req.method === 'GET' && path === '/projects') return send(res, 200, service.store.projects());
       if (req.method === 'POST' && path === '/projects') return send(res, 201, await service.registerProject(await body(req)));
       if (req.method === 'GET' && path === '/agents') return send(res, 200, await service.agents(url.searchParams.get('projectId') ?? undefined));
