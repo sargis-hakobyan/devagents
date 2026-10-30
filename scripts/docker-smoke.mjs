@@ -54,6 +54,21 @@ try {
   const task = await cli('tasks', 'submit', 'fixture', 'Persist across restart', '--key', 'docker-smoke');
   assert.equal(task.state, 'awaiting_mode');
   console.log(await docker(['exec', '-T', 'devagents', 'node', 'scripts/vault-smoke.mjs', 'create']));
+  const session = await (await fetch(`http://127.0.0.1:${port}/ui/session`, { headers: { cookie } })).json();
+  const authHeaders = { cookie, origin: `http://127.0.0.1:${port}`, 'x-csrf-token': session.csrfToken, 'content-type': 'application/json' };
+  const browserKey = 'sk-fixture-browser-not-real';
+  const saved = await fetch(`http://127.0.0.1:${port}/setup/auth`, { method: 'POST', headers: authHeaders, body: JSON.stringify({ attemptId: crypto.randomUUID(), method: 'api-key', apiKey: browserKey }) });
+  assert.equal(saved.status, 202); assert.equal((await saved.text()).includes(browserKey), false);
+  let connection;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    connection = await (await fetch(`http://127.0.0.1:${port}/setup/auth`, { headers: { cookie } })).json();
+    if (connection.job.state !== 'running') break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.equal(connection.job.state, 'completed', JSON.stringify(connection));
+  assert.equal(connection.connection.method, 'api-key');
+  console.log(await docker(['exec', '-T', 'devagents', 'node', 'scripts/vault-smoke.mjs', 'browser']));
+  console.log('PASS: browser API saves a synthetic key through the production login manager without a model request.');
   await docker(['restart']);
   await docker(['up', '-d', '--wait', '--wait-timeout', '60']);
   console.log(await docker(['exec', '-T', 'devagents', 'node', 'scripts/vault-smoke.mjs', 'restore']));

@@ -8,7 +8,7 @@ import { AppError } from '../../domain/errors.js';
 import { configuredVault, credentialStore } from '../../security/credential-vault.js';
 
 export async function setupCodexAuth(dataDir: string, options: {
-  replaceKey?: boolean; binary?: string; readKey?: () => Promise<string>; store?: 'file' | 'keyring';
+  replaceKey?: boolean; signal?: AbortSignal; binary?: string; readKey?: () => Promise<string>; store?: 'file' | 'keyring';
 } = {}): Promise<'saved' | 'reused'> {
   const vault = await configuredVault(dataDir); await vault?.assertUnlocked();
   const home = runtimeHome(dataDir);
@@ -19,7 +19,7 @@ export async function setupCodexAuth(dataDir: string, options: {
   const config = ['-c', `cli_auth_credentials_store="${store}"`];
   const env = safeEnvironment(home, home);
   if (store === 'keyring') env.HOME = homedir();
-  const processOptions = { cwd: home, env, timeoutMs: 15000 };
+  const processOptions = { cwd: home, env, timeoutMs: 15000, ...(options.signal ? { signal: options.signal } : {}) };
   if (!options.replaceKey) {
     const status = await runProcess(binary, [...config, 'login', 'status'], processOptions);
     if (status.exitCode === 0) {

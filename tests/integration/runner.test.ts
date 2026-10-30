@@ -77,7 +77,7 @@ test('cancellation stops a running engine and releases the serial worker slot', 
     const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'cancel');
     const deadline = Date.now() + 10000;
     while (!engine.calls.some(c => c.phase === 'implementation')) { if (Date.now() > deadline) throw new Error('Worker did not start'); await new Promise(r => setTimeout(r, 10)); }
-    f.service.cancel(task.id); await runner.idle();
+    f.service.cancel(task.id); assert.equal(runner.busy, true); await runner.idle(); assert.equal(runner.busy, false);
     assert.equal(f.store.task(task.id).state, 'cancelled'); assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
     engine.options.waitForCancel = false;
     const next = f.service.submit({ projectId: 'fixture', request: 'Next greeting', mode: 'autonomous' }, 'after-cancel'); await runner.idle();

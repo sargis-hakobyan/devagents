@@ -35,3 +35,19 @@ test('cancelled device login terminates the child and removes signal listeners',
     assert.equal(process.listenerCount('SIGINT'), listeners);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('browser device login exposes only an allowlisted challenge from bounded stdout/stderr', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'device-browser-')); const binary = join(root, 'codex');
+  const challenges: unknown[] = [];
+  try {
+    await writeFile(binary, `#!${process.execPath}
+import fs from 'node:fs';
+console.error('untrusted raw output with private-value and https://evil.example/login');
+console.log('https://auth.openai.com/codex/device');
+console.error('  ABCD-12345  ');
+fs.writeFileSync(process.env.CODEX_HOME+'/auth.json', '{}');
+`, { mode: 0o700 });
+    await loginWithChatGPT(root, { binary, store: 'file', onChallenge: c => challenges.push(c) });
+    assert.deepEqual(challenges, [{ url: 'https://auth.openai.com/codex/device', code: 'ABCD-12345' }]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

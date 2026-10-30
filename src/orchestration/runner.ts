@@ -33,6 +33,7 @@ export class TaskRunner {
   }
   cancel(id: string): void { this.queued.delete(id); if (this.active?.id === id) this.active.abort.abort(); }
   async stop(): Promise<void> { this.stopping = true; this.queued.clear(); this.active?.abort.abort(); await this.active?.promise; }
+  get busy(): boolean { return Boolean(this.active || this.queued.size); }
   async idle(): Promise<void> { while (this.active) await this.active.promise; }
   private drain(): void {
     if (this.active || this.stopping) return;

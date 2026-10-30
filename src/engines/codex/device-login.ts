@@ -1,3 +1,4 @@
+import { runProcess } from '../process.js';
 import { spawn } from 'node:child_process';
 import { mkdir, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -6,13 +7,26 @@ import { AppError } from '../../domain/errors.js';
 import { configuredVault, credentialStore } from '../../security/credential-vault.js';
 import { runtimeHome, safeEnvironment } from './sandbox.js';
 
-export async function loginWithChatGPT(dataDir: string, options: { binary?: string; store?: 'file' | 'keyring'; signal?: AbortSignal } = {}): Promise<void> {
+export type DeviceChallenge = { url: string; code: string };
+/** Accept only the pinned CLI's device URL and standalone code; never expose arbitrary runtime text. */
+export function deviceChallenge(text: string): DeviceChallenge | undefined {
+  const clean = text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+  const url = /https:\/\/auth\.openai\.com\/codex\/device(?=\s|$)/.exec(clean)?.[0];
+  const code = /^\s*([A-Z0-9]{4}-[A-Z0-9]{4,5})\s*$/m.exec(clean)?.[1];
+  return url && code ? { url, code } : undefined;
+}
+export async function loginWithChatGPT(dataDir: string, options: { binary?: string; store?: 'file' | 'keyring'; signal?: AbortSignal; onChallenge?: (value: DeviceChallenge) => void } = {}): Promise<void> {
   if (options.signal?.aborted) throw new AppError('cancelled', 'ChatGPT sign-in cancelled.');
   const vault = await configuredVault(dataDir); await vault?.assertUnlocked();
   const home = runtimeHome(dataDir); await mkdir(home, { recursive: true, mode: 0o700 });
   const store = options.store ?? credentialStore(); const env = safeEnvironment(home, home);
   if (store === 'keyring') env.HOME = homedir();
-  await new Promise<void>((resolve, reject) => {
+  if (options.onChallenge) {
+    let output = ''; let published = false;
+    const consume = (line: string) => { output = (output + '\n' + line).slice(-8192); const value = deviceChallenge(output); if (value && !published) { published = true; options.onChallenge!(value); } };
+    const result = await runProcess(options.binary ?? 'codex', ['-c', `cli_auth_credentials_store="${store}"`, 'login', '--device-auth'], { cwd: home, env, timeoutMs: 10 * 60 * 1000, maxBytes: 64 * 1024, onLine: consume, onStderrLine: consume, ...(options.signal ? { signal: options.signal } : {}) });
+    if (result.exitCode !== 0) throw new AppError('login_failed', 'ChatGPT sign-in did not complete.');
+  } else await new Promise<void>((resolve, reject) => {
     const child = spawn(options.binary ?? 'codex', ['-c', `cli_auth_credentials_store="${store}"`, 'login', '--device-auth'], { cwd: home, env, stdio: 'inherit' });
     let cancelled = false; let unavailable = false; let escalation: NodeJS.Timeout | undefined;
     const cancel = () => {

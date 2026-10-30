@@ -1,3 +1,4 @@
+import type { SetupAuth } from '../setup/auth.js';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises';
@@ -21,12 +22,12 @@ export async function accessToken(dataDir: string): Promise<string> {
   await chmod(path, 0o600);
   return (await readFile(path, 'utf8')).trim();
 }
-async function body(req: IncomingMessage): Promise<unknown> {
+async function body(req: IncomingMessage, limit = 256 * 1024): Promise<unknown> {
   if (!req.headers['content-type']?.startsWith('application/json')) throw new AppError('invalid_content_type', 'Use application/json', 415);
   let size = 0; const chunks: Buffer[] = [];
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > 256 * 1024) throw new AppError('body_too_large', 'Request exceeds 256KB', 413);
+    if (size > limit) throw new AppError('body_too_large', 'Request exceeds the allowed size', 413);
     chunks.push(chunk as Buffer);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
@@ -47,6 +48,8 @@ function boundEvidence(entry: { sequence: number; kind: string; at: string; data
 const integer = (value: string | null, fallback: number) => { const n = Number(value ?? fallback); return Number.isInteger(n) && n >= 0 ? n : fallback; };
 
 export type ApiOptions = {
+  setupAuth?: SetupAuth;
+  assertSetupIdle?: () => void;
   sessions?: BrowserSessions;
   uiRoot?: string | undefined;
   status?: () => Promise<unknown>;
@@ -63,6 +66,7 @@ export type ApiOptions = {
 type Principal = { kind: 'bearer' } | { kind: 'session'; session: BrowserSession };
 
 export function createApi(service: TaskService, token: string, options: ApiOptions = {}) {
+  let maintenanceUntil = 0;
   const sessions = options.sessions ?? new BrowserSessions();
   // Responses use the store's secret list (environment heuristic plus configured provider keys), the same list applied at rest.
   const secrets = [...new Set([...environmentSecrets(), ...service.store.secrets])];
@@ -101,13 +105,14 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       if (req.method === 'GET' && path === '/ui/login') {
         const session = sessions.exchange(url.searchParams.get('code') ?? '');
         if (!session) throw new AppError('invalid_login_code', 'This sign-in link is invalid, expired or already used; create a new one with: devagents ui', 403);
-        res.writeHead(303, { ...securityHeaders, 'set-cookie': sessionCookie(session.id, Boolean(options.secureCookies)), location: '/ui/', 'cache-control': 'no-store' }); return res.end();
+        res.writeHead(303, { ...securityHeaders, 'set-cookie': sessionCookie(session.id, Boolean(options.secureCookies)), location: url.searchParams.get('next') === 'setup' ? '/ui/settings/setup' : '/ui/', 'cache-control': 'no-store' }); return res.end();
       }
       if (req.method === 'GET' && (path === '/ui' || (path.startsWith('/ui/') && !['/ui/session', '/ui/logout', '/ui/bootstrap'].includes(path)))) return serveUi(options.uiRoot, path, res);
       const principal = authenticate(req);
       if (path === '/ui/bootstrap' && req.method === 'POST') {
         if (principal.kind !== 'bearer') throw new AppError('bearer_required', 'Sign-in links are created through the CLI', 403);
-        return send(res, 201, { url: `http://127.0.0.1:${publicPort(req)}/ui/login?code=${sessions.mintCode()}`, expiresInSeconds: 600, singleUse: true });
+        const input = z.object({ setup: z.boolean().optional() }).strict().parse(await body(req));
+        return send(res, 201, { url: `http://127.0.0.1:${publicPort(req)}/ui/login?code=${sessions.mintCode()}${input.setup ? '&next=setup' : ''}`, expiresInSeconds: 600, singleUse: true });
       }
       if (path === '/ui/session' && req.method === 'GET') {
         if (principal.kind !== 'session') throw new AppError('session_required', 'Only browser sessions have a CSRF token', 403);
@@ -115,9 +120,35 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       }
       if (path === '/ui/logout' && req.method === 'POST') {
         if (principal.kind !== 'session') throw new AppError('session_required', 'Only browser sessions can sign out', 403);
+        if (options.setupAuth) await options.setupAuth.cancel(principal.session.id).catch(() => {});
         sessions.destroy(principal.session.id);
         return send(res, 200, { signedOut: true }, { 'set-cookie': clearedSessionCookie(Boolean(options.secureCookies)) });
       }
+      const owner = principal.kind === 'session' ? principal.session.id : 'terminal';
+      if (path === '/setup/auth' && req.method === 'GET') return send(res, 200, options.setupAuth ? await options.setupAuth.status(owner) : { available: false, busy: false, connection: { saved: false } });
+      if (path === '/setup/auth' && req.method === 'POST') {
+        if (!options.setupAuth) throw new AppError('setup_unavailable', 'Provider setup is not enabled on this service.', 503);
+        const input = await body(req, 8192);
+        if (maintenanceUntil > Date.now()) throw new AppError('setup_busy', 'The launcher is updating project mounts. Try again afterwards.', 409);
+        return send(res, 202, options.setupAuth.start(owner, input));
+      }
+      if (path === '/setup/auth/cancel' && req.method === 'POST') {
+        if (!options.setupAuth) throw new AppError('setup_unavailable', 'Provider setup is not enabled on this service.', 503);
+        return send(res, 200, await options.setupAuth.cancel(owner));
+      }
+      if (path === '/setup/maintenance/release' && req.method === 'POST') {
+        if (principal.kind !== 'bearer') throw new AppError('bearer_required', 'Project mounts are managed by the local launcher.', 403);
+        maintenanceUntil = 0; return send(res, 200, { ready: true });
+      }
+      if (path === '/setup/maintenance' && req.method === 'POST') {
+        if (principal.kind !== 'bearer') throw new AppError('bearer_required', 'Project mounts are managed by the local launcher.', 403);
+        options.assertSetupIdle?.();
+        if (options.setupAuth?.busy || service.store.summaries({ states: ['planning', 'ready', 'running', 'validating', 'reviewing', 'repairing', 'committing'], limit: 1 }).tasks.length) throw new AppError('setup_busy', 'Finish or cancel active work and sign-in before changing project mounts.', 409);
+        maintenanceUntil = Date.now() + 120000;
+        return send(res, 200, { ready: true });
+      }
+      const assertExecutionReady = () => { if (options.setupAuth?.busy || maintenanceUntil > Date.now()) throw new AppError('setup_busy', 'Setup is in progress. Retry after it finishes.', 409); };
+      if ((options.setupAuth?.busy || maintenanceUntil > Date.now()) && req.method === 'POST' && (path === '/tasks' || /^\/tasks\/[^/]+\/(mode|approve|run|plan)$/.test(path))) throw new AppError('setup_busy', 'Setup is in progress. Retry after it finishes.', 409);
       if (req.method === 'GET' && path === '/submission-options') return send(res, 200, service.submissionOptions());
       if (req.method === 'GET' && path === '/projects') return send(res, 200, service.store.projects());
       if (req.method === 'POST' && path === '/projects') return send(res, 201, await service.registerProject(await body(req)));
@@ -165,7 +196,8 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       }
       if (req.method === 'POST' && path === '/tasks') {
         const key = z.string().min(1).max(200).parse(req.headers['idempotency-key']);
-        return send(res, 201, service.submit(await body(req), key));
+        const input = await body(req); assertExecutionReady();
+        return send(res, 201, service.submit(input, key));
       }
       const match = /^\/tasks\/([a-f0-9-]{36})(?:\/(events|evidence|items|diff|run|mode|plan|approve|cancel|cleanup)(?:\/(\d{1,12}))?)?$/.exec(path);
       if (match) {
@@ -181,9 +213,9 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
         if (req.method === 'GET' && action === 'items') return send(res, 200, service.store.workItems(id));
         if (req.method === 'POST' && !sub) {
           if (action === 'run') return send(res, 202, service.run(id));
-          if (action === 'mode') return send(res, 200, service.mode(id, z.strictObject({ mode: z.unknown() }).parse(await body(req)).mode));
-          if (action === 'plan') return send(res, 200, await service.proposePlan(id, await body(req)));
-          if (action === 'approve') return send(res, 200, service.approve(id, z.strictObject({ version: z.number().int().nonnegative() }).parse(await body(req)).version));
+          if (action === 'mode') { const input = await body(req); assertExecutionReady(); return send(res, 200, service.mode(id, z.strictObject({ mode: z.unknown() }).parse(input).mode)); }
+          if (action === 'plan') { const input = await body(req); assertExecutionReady(); return send(res, 200, await service.proposePlan(id, input)); }
+          if (action === 'approve') { const input = await body(req); assertExecutionReady(); return send(res, 200, service.approve(id, z.strictObject({ version: z.number().int().nonnegative() }).parse(input).version)); }
           if (action === 'cancel') return send(res, 200, service.cancel(id));
           if (action === 'cleanup') return send(res, 200, await service.cleanup(id));
         }

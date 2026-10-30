@@ -21,6 +21,12 @@ if (process.argv[2] === 'create') {
     assert.equal(result.exitCode, 0, result.output);
   } finally { await rm(project, { recursive: true, force: true }); }
   console.log('PASS: Docker stores encrypted credentials and keeps plaintext on tmpfs only.');
+} else if (process.argv[2] === 'browser') {
+  const encrypted = await readFile(vault.encrypted, 'utf8');
+  assert.equal(encrypted.includes('sk-fixture-browser-not-real'), false);
+  await assert.rejects(stat(`${data}/engines/codex/auth.json`), { code: 'ENOENT' });
+  assert.equal(await setupCodexAuth(data, { readKey: async () => { throw new Error('Unexpected key prompt'); } }), 'reused');
+  console.log('PASS: browser-saved synthetic credentials are encrypted and reusable.');
 } else {
   await assert.rejects(vault.assertUnlocked(), /locked/);
   await vault.unlock('3'.repeat(64));

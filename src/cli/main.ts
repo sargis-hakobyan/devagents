@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { SetupAuth, codexSetupDriver, type AuthJob } from '../setup/auth.js';
+import { readHiddenKey } from './secret-prompt.js';
 import { Command, Option } from 'commander';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -22,8 +24,7 @@ import { CodexAdapter } from '../engines/codex/adapter.js';
 import { CodexValidator } from '../engines/codex/validator.js';
 import { TaskRunner } from '../orchestration/runner.js';
 import { lockService } from '../persistence/service-lock.js';
-import { setupCodexAuth, codexAuthStatus } from '../engines/codex/setup.js';
-import { loginWithChatGPT } from '../engines/codex/device-login.js';
+import { codexAuthStatus } from '../engines/codex/setup.js';
 import { testCodexConnection } from '../engines/codex/connection-test.js';
 import { onboard } from './onboarding.js';
 import type { AuthChoice } from '../domain/auth.js';
@@ -58,9 +59,13 @@ cli.command('serve').description('Start the local API').action(async () => {
   const uiRoot = await findUiRoot([resolve(here, '../ui'), resolve(here, '../../dist/ui'), resolve(here, '../../ui/dist')]);
   // Docker listens on 4310 inside the container; Compose publishes DEVAGENTS_PORT on the host loopback.
   const publicPort = z.coerce.number().int().min(1).max(65535).parse(process.env.DEVAGENTS_PUBLIC_PORT ?? port());
+  const assertSetupIdle = () => {
+    if (runner.busy || store.summaries({ states: ['planning', 'ready', 'running', 'validating', 'reviewing', 'repairing', 'committing'], limit: 1 }).tasks.length) throw new AppError('work_active', 'Finish or cancel active work before changing sign-in.', 409);
+  };
+  const setupAuth = new SetupAuth(codexSetupDriver(dataDir), assertSetupIdle);
   const server = createApi(service, await accessToken(dataDir), {
-    sessions: new BrowserSessions(), uiRoot, publicPort,
-    status: statusReporter({ dataDir, config, version: '0.1.0', host, port: () => publicPort, executionEnabled: true }),
+    sessions: new BrowserSessions(), uiRoot, publicPort, setupAuth, assertSetupIdle,
+    status: statusReporter({ dataDir, config, version: '0.1.0', host, port: () => publicPort, executionEnabled: true, revision: () => setupAuth.revision }),
   });
   await service.agents();
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port(), host, resolve); });
@@ -71,14 +76,14 @@ cli.command('serve').description('Start the local API').action(async () => {
   let closing = false;
   const shutdown = () => {
     if (closing) return; closing = true;
-    void runner.stop();
-    server.close(() => { void runner.stop().then(() => { store.close(); unlock(); process.exitCode = 0; }); });
+    void setupAuth.close(); void runner.stop();
+    server.close(() => { void Promise.all([runner.stop(), setupAuth.close()]).then(() => { store.close(); unlock(); process.exitCode = 0; }); });
     server.closeIdleConnections();
   };
   process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
 });
-cli.command('ui').description('Create a one-time sign-in link for the browser UI (never exposes the CLI token)').option('--open', 'Open the link with the OS browser').action(async (opts: { open?: boolean }) => {
-  const link = await request('/ui/bootstrap', 'POST', {}) as { url: string; expiresInSeconds: number };
+cli.command('ui').description('Create a one-time sign-in link for the browser UI (never exposes the CLI token)').option('--open', 'Open the link with the OS browser').option('--setup', 'Open guided setup').action(async (opts: { open?: boolean; setup?: boolean }) => {
+  const link = await request('/ui/bootstrap', 'POST', opts.setup ? { setup: true } : {}) as { url: string; expiresInSeconds: number };
   console.log(link.url);
   console.error(`Single use, valid for ${Math.round(link.expiresInSeconds / 60)} minutes. Sessions end when the service restarts.`);
   if (!opts.open) return;
@@ -87,6 +92,29 @@ cli.command('ui').description('Create a one-time sign-in link for the browser UI
   child.once('error', () => console.error('Could not open a browser automatically; open the link above manually.'));
   child.unref();
 });
+cli.command('setup-status').action(async () => {
+  const status = await request('/setup/auth') as { connection: { saved: boolean }; locked?: boolean };
+  const projects = await request('/projects') as unknown[];
+  console.log(status.connection.saved && !status.locked && projects.length ? 'ready' : 'needed');
+});
+cli.command('mount-done').action(async () => { await request('/setup/maintenance/release', 'POST', {}); });
+cli.command('mount-ready').action(async () => { await request('/setup/maintenance', 'POST', {}); });
+async function sharedLogin(method: 'chatgpt' | 'api-key', key?: string) {
+  const attemptId = randomUUID();
+  let job = await request('/setup/auth', 'POST', { attemptId, method, ...(key ? { apiKey: key } : {}) }) as AuthJob;
+  let shown = false; const cancel = () => { void request('/setup/auth/cancel', 'POST', {}).catch(() => {}); };
+  process.once('SIGINT', cancel); process.once('SIGTERM', cancel);
+  try {
+    while (job.state === 'running') {
+      if (job.challenge && !shown) { console.log(`Open ${job.challenge.url} and enter the one-time code: ${job.challenge.code}`); shown = true; }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const status = await request('/setup/auth') as { job?: AuthJob };
+      if (!status.job || status.job.attemptId !== attemptId) throw new AppError('login_interrupted', 'Sign-in state was lost. Start setup again.');
+      job = status.job;
+    }
+    if (job.state !== 'completed') throw new AppError('login_failed', job.message);
+  } finally { process.removeListener('SIGINT', cancel); process.removeListener('SIGTERM', cancel); }
+}
 cli.command('doctor').description('Report configuration and engine setup').action(async () => {
   const config = await loadConfig();
   const health = await engineHealth(dataDirectory());
@@ -95,6 +123,13 @@ cli.command('doctor').description('Report configuration and engine setup').actio
 const projects = cli.command('projects');
 projects.command('list').action(async () => print(await request('/projects')));
 projects.command('add <id> <path>').option('--mode <mode>', 'Optional project autonomy default').action(async (id: string, path: string, opts: { mode?: string }) => print(await request('/projects', 'POST', { id, path, ...(opts.mode ? { defaultMode: opts.mode } : {}) })));
+projects.command('ensure <id> <path>').description('Register a launcher-mounted checkout, or confirm its existing registration').action(async (id: string, path: string) => {
+  const projects = await request('/projects') as { id: string; path: string }[];
+  const existing = projects.find(p => p.id === id);
+  if (existing && existing.path !== path) throw new AppError('project_conflict', 'That project ID already belongs to another path.');
+  if (!existing) await request('/projects', 'POST', { id, path, defaultMode: 'plan-approval' });
+  console.log(`Project ${id} is registered with plan approval for new registrations.`);
+});
 projects.command('default-team <project> <team>').description('Set a saved team as the project default, or "none" to clear it').requiredOption('--version <version>', 'Project settings version you looked at').action(async (projectId: string, team: string, opts: { version: string }) => print(await request(`/projects/${encodeURIComponent(projectId)}/default-team`, 'PUT', { teamId: team === 'none' ? null : team, expectedVersion: Number(opts.version) })));
 const teams = cli.command('teams').description('Saved teams: named rosters copied from templates or custom roles');
 teams.command('list').option('--archived', 'Only archived teams').option('--all', 'Active and archived teams').action(async (opts: { archived?: boolean; all?: boolean }) => print(await request(`/teams?filter=${opts.all ? 'all' : opts.archived ? 'archived' : 'active'}`)));
@@ -152,8 +187,7 @@ auth.command('setup').description('Choose ChatGPT, an API key, or a saved login;
       const passed = await onboard({
         status: () => codexAuthStatus(dataDir),
         login: async method => {
-          if (method === 'chatgpt') await loginWithChatGPT(dataDir);
-          else await setupCodexAuth(dataDir, { replaceKey: true });
+          await sharedLogin(method, method === 'api-key' ? await readHiddenKey() : undefined);
         },
         test: method => testCodexConnection(dataDir, method),
       }, { interactive: Boolean(process.stdin.isTTY), write: message => console.log(message), ask: readChoice }, {
@@ -167,10 +201,10 @@ auth.command('setup').description('Choose ChatGPT, an API key, or a saved login;
     }
   });
 auth.command('codex').description('Sign in to DevAgents’ dedicated Codex profile').option('--api-key-env <name>', 'Read an API key from this environment variable').action(async (opts: { apiKeyEnv?: string }) => {
-  if (!opts.apiKeyEnv) { await loginWithChatGPT(dataDirectory()); return; }
+  if (!opts.apiKeyEnv) { await sharedLogin('chatgpt'); return; }
   const key = process.env[opts.apiKeyEnv];
   if (!key) throw new AppError('missing_key', 'The selected API key environment variable is empty');
-  await setupCodexAuth(dataDirectory(), { replaceKey: true, readKey: async () => key });
+  await sharedLogin('api-key', key);
   console.log('API key saved securely. Model access has not been checked.');
 });
 try { await cli.parseAsync(); }

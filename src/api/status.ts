@@ -18,10 +18,11 @@ export function statusLimits(config: AppConfig): ServiceStatus['limits'] {
  * values, tokens or raw runtime output, and it never contacts a model: a saved sign-in is reported
  * as such, with model access explicitly unverified. Cached because it runs `codex login status`.
  */
-export function statusReporter(input: { dataDir: string; config: AppConfig; version: string; host: string; port: () => number; executionEnabled: boolean; ttlMs?: number }): () => Promise<ServiceStatus> {
-  const startedAt = new Date().toISOString(); let cached: { at: number; value: ServiceStatus } | undefined;
+export function statusReporter(input: { dataDir: string; config: AppConfig; version: string; host: string; port: () => number; executionEnabled: boolean; ttlMs?: number; revision?: () => number }): () => Promise<ServiceStatus> {
+  const startedAt = new Date().toISOString(); let cached: { at: number; revision: number; value: ServiceStatus } | undefined;
   return async () => {
-    if (cached && Date.now() - cached.at < (input.ttlMs ?? 30000)) return cached.value;
+    const revision = input.revision?.() ?? 0;
+    if (cached && cached.revision === revision && Date.now() - cached.at < (input.ttlMs ?? 30000)) return cached.value;
     const health = await engineHealth(input.dataDir);
     const codex = health.engines.find(e => e.id === 'codex'); const claude = health.engines.find(e => e.id === 'claude-code');
     const vault = await configuredVault(input.dataDir).catch(() => undefined);
@@ -36,7 +37,7 @@ export function statusReporter(input: { dataDir: string; config: AppConfig; vers
       },
       limits: statusLimits(input.config),
     };
-    cached = { at: Date.now(), value };
+    cached = { at: Date.now(), revision, value };
     return value;
   };
 }

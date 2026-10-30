@@ -3,7 +3,7 @@ import { AppError } from '../domain/errors.js';
 
 export type ProcessOptions = {
   cwd: string; env: NodeJS.ProcessEnv; signal?: AbortSignal; timeoutMs: number;
-  input?: string; onLine?: (line: string) => void; maxBytes?: number;
+  input?: string; onStderrLine?: (line: string) => void; onLine?: (line: string) => void; maxBytes?: number;
   /** 'fail' (default) terminates the process when output exceeds maxBytes; 'truncate' keeps head and tail and marks the result. */
   overflow?: 'fail' | 'truncate';
 };
@@ -53,7 +53,7 @@ export async function runProcess(binary: string, args: string[], options: Proces
     // The budget covers both streams together: below it everything is kept; above it each stream keeps
     // a quarter of the budget as head and an eighth as tail, so retained evidence stays under the budget.
     const stdout = new Capture(Math.floor(limit / 4), Math.floor(limit / 8)); const stderr = new Capture(Math.floor(limit / 4), Math.floor(limit / 8));
-    let pending = ''; let bytes = 0;
+    let pending = ''; let stderrPending = ''; let bytes = 0;
     let failure: Error | undefined; let escalation: NodeJS.Timeout | undefined;
     const kill = (signal: NodeJS.Signals) => {
       if (!child.pid) return;
@@ -90,14 +90,19 @@ export async function runProcess(binary: string, args: string[], options: Proces
       try { for (const line of lines) if (line.trim()) options.onLine(line); }
       catch (error) { stop(error instanceof Error ? error : new Error(String(error))); }
     });
-    child.stderr.on('data', (chunk: string) => { account(stderr, chunk); });
+    child.stderr.on('data', (chunk: string) => {
+      if (!account(stderr, chunk) || !options.onStderrLine) return;
+      stderrPending += chunk; const lines = stderrPending.split('\n'); stderrPending = lines.pop()!;
+      if (Buffer.byteLength(stderrPending) > limit) return stop(new AppError('output_limit', 'A single output line exceeded the limit'));
+      try { for (const line of lines) if (line.trim()) options.onStderrLine(line); } catch (e) { stop(e instanceof Error ? e : new Error('Invalid process output')); }
+    });
     child.stdin.on('error', () => { /* Early exit or cancellation closes stdin. */ });
     child.once('error', error => { failure = new AppError('engine_unavailable', `Unable to launch ${binary}: ${(error as NodeJS.ErrnoException).code ?? 'unknown'}`); });
     child.once('close', code => {
       clearTimeout(timer); if (escalation) clearTimeout(escalation);
       // Kill any detached descendants even after their immediate parent exits.
       kill('SIGKILL'); options.signal?.removeEventListener('abort', abort);
-      try { if (pending.trim() && !failure) options.onLine!(pending); }
+      try { if (pending.trim() && !failure) options.onLine!(pending); if (stderrPending.trim() && !failure) options.onStderrLine!(stderrPending); }
       catch (error) { failure = error instanceof Error ? error : new Error(String(error)); }
       if (failure) reject(failure); else resolve({ stdout: stdout.text(), stderr: stderr.text(), exitCode: code ?? 1, truncated: stdout.dropped + stderr.dropped > 0 });
     });
