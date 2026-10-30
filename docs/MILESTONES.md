@@ -160,3 +160,17 @@ All five P3 findings from `CLAUDE_REVIEW_U3.md` are addressed after the configur
 - F6: The browser test for binary, truncated, empty and unavailable diffs now uses real Git commits and the authenticated HTTP endpoint, including hostile text and redaction. No diff-response interception remains in that test.
 
 Verification: `npm run check` passed 134 tests, typechecks and build; `npm run test:ui` passed all 33 workflows, including every U1/U2 workflow. The updated diff screenshot was inspected. The six-test diff suite was also rerun after extending the log-redaction assertion. Docker, protocol and M2/M3 suites were not rerun for this follow-up: it changes UI/status projection, diff read limits/diagnostics and fixture coverage, not engine execution, sandboxing or packaging. No authenticated fixtures, credential inspection or push. The original review report is unchanged.
+
+## Simplified startup and provider setup — 2026-10-30
+
+Delivered before M4:
+
+- Short README with one entry command, purpose and setup links; detailed material moved to `REFERENCE.md` and `SETUP.md`.
+- Cached local-image startup with Browser (default), Terminal and Later routes, direct setup links, saved-connection reuse and explicit setup reopening.
+- Session-owned browser Codex device sign-in and write-only API-key entry, shared with terminal authentication. Secure existing storage, bounded output/lifetime, cancellation and execution exclusion are retained. No automatic model test.
+- Host launcher project selection, Git validation, additive Compose mounts and registration without manual YAML; user overrides preserved, conflicting mounts refused, restart failure rollback and maintenance admission checks.
+- Recommended saved team and first-task navigation using the existing frontend components and server policies. Claude and local models remain disabled; M4 is unchanged.
+
+Verification: `npm run check` passes 140 tests, backend/UI typechecks and build; `npm run test:ui` passes all 34 workflows, preserving U1/U2/U3 coverage. Deterministic native M2/M3 pass. The Docker suite passes encrypted synthetic browser-key save/reuse across restart, authentication/session checks, sandbox containment, deterministic M2/M3 and two concurrent real-runtime protocol fixtures against a loopback server. Upload-race admission and cancellation-drain checks have regression coverage. The connected setup screenshot at 390 px was inspected in ignored `test-results/ui-screenshots/`.
+
+Limits: first start still builds locally and requires Docker plus a desktop OS credential store. Public prebuilt-image distribution remains release work. Host folder mounting stays in the terminal. Tests do not claim live acceptance of the new device-login UI, paid model access or a real OS keychain interaction; all credentials used in this increment's tests are synthetic. No authenticated fixture or push was performed.

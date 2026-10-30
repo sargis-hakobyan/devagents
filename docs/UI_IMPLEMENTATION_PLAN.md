@@ -91,7 +91,7 @@ Prerequisite: U2 is accepted, including the F6 pending-save fix. Submission fing
 
 Implemented in the handoff order on local `main`. Registration, submission, tab-scoped retry identity, task decisions, completed-task diff and guided setup reuse the existing shell/API/pollers. Header and Plan-tab decisions share a pending guard. Cleanup and patch download remain unavailable. Owner defaults applied: rejection is cancellation only, resubmission copies text/criteria only, and missing sign-in warns without blocking the form. Effective mode defaults come from authenticated `GET /submission-options`; no provider settings or secrets are exposed.
 
-The implemented diff limits replace illustrative board values: 64 KiB/file, 256 KiB total text, 200 files, a 256 KiB file-list bound and a 1 MiB/file read bound with a 4 MiB aggregate patch-read budget per request. Over-read files are omitted entirely before secret redaction can be cut short. Recorded task/commit ownership is required; missing metadata is unavailable. The browser submits no paths or refs to the diff endpoint. Browser setup uses secret-free status and copyable terminal commands only.
+The implemented diff limits replace illustrative board values: 64 KiB/file, 256 KiB total text, 200 files, a 256 KiB file-list bound and a 1 MiB/file read bound with a 4 MiB aggregate patch-read budget per request. Over-read files are omitted entirely before secret redaction can be cut short. Recorded task/commit ownership is required; missing metadata is unavailable. The browser submits no paths or refs to the diff endpoint. U3 originally used secret-free status and copyable terminal commands only; the separately authorized setup follow-up below adds browser connection entry.
 
 See `MILESTONES.md` for verification. The following design and handoff text is retained as the implementation contract, not a request to begin another increment.
 
@@ -140,3 +140,15 @@ Unresolved design decisions, left for the owner: (1) whether a rejected plan sho
 ## Out of scope for U1
 
 Team editing (U2); submission, mode choice, approval, cancellation, registration, cleanup and guided setup from the browser (U3); event streaming; the Claude adapter (M4). The separately authorized authenticated M2/M3 reruns passed on 2026-10-30 at `db95711`; see `MILESTONES.md`. This implementation plan does not authorize additional model calls.
+
+## Setup follow-up — 2026-10-30
+
+The owner authorized a short README and one-command startup with a Browser/Terminal/Later choice. This supersedes the U3-only restriction on new credential input, while preserving the prohibition on saved-secret reads and automatic paid tests. Existing approved components, shell and shared polling are reused.
+
+- `./devagents start` builds only when needed, starts and unlocks the service, then offers a setup route. Subsequent configured starts reuse the connection and print a dashboard link. `./devagents setup` reopens setup.
+- Browser setup uses a session-owned, cancellable official Codex device flow or a write-only API-key password field. The backend retains only an ephemeral job; no arbitrary provider output is returned. Same-origin/CSRF checks cover every browser mutation. Terminal authentication uses the same login manager.
+- A host-side `project add` helper validates and mounts a selected existing checkout, preserves user overrides, restarts and registers it, then prints a new browser link. The browser cannot run host commands, browse folders or access Docker.
+- A recommended four-member team can become the selected project's default; existing task snapshots and model-pinning rules are unchanged. Claude and local-model connections stay unavailable until their adapters exist.
+- Setup/active execution are mutually excluded, including uploads that finish after setup starts and workers still draining cancellation. Model-access tests remain explicit terminal opt-ins.
+
+First-start local builds and desktop OS keychain prerequisites remain. Public prebuilt images/installer distribution and authenticated acceptance of the new browser device flow are separate follow-ups. See `SETUP.md` for exact commands and limitations.
