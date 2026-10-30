@@ -7,6 +7,7 @@ export function OverviewPage() {
   const now = useNow();
   const { data: overview, error } = usePoll(resources.overview.key, resources.overview.load, resources.overview.intervalMs);
   const status = usePoll(resources.status.key, resources.status.load, resources.status.intervalMs).data;
+  const projects = usePoll(resources.projects.key, resources.projects.load, resources.projects.intervalMs).data;
   const teams = usePoll(resources.teams.key, resources.teams.load, resources.teams.intervalMs).data;
   if (!overview && error) return <ErrorNote message={error} />;
   if (!overview) return <><Skeleton rows={2} label="Loading overview" /><Skeleton rows={4} /></>;
@@ -15,7 +16,7 @@ export function OverviewPage() {
   const attentionCount = n('awaiting_mode', 'awaiting_plan_approval');
   const headline = attentionCount ? `${attentionCount} task${attentionCount > 1 ? 's' : ''} waiting for you` : running.length ? 'Work is running' : queued.length ? 'Work is queued' : 'Nothing is running';
   return <>
-    <div class="note info"><a href="/ui/settings/setup">Finish setup</a> · Check connection availability, register a project and choose a team.</div>
+    {((status && (!status.codex.installed || !status.codex.signedIn || status.codex.vaultLocked)) || projects?.length === 0) && <div class="note info"><a href="/ui/settings/setup">Finish setup</a> · Check connection availability, register a project and choose a team.</div>}
     <div class="page-head">
       <div><div class="h">Overview</div><h1>Workspace</h1><p>{headline}{running[0] ? ` · ${running[0].workItems.filter(i => i.state === 'completed').length} of ${running[0].workItems.length || '?'} items integrated on the running task` : ''}.</p></div>
       <a class="btn primary" href="/ui/tasks/new">Submit work</a>
@@ -33,7 +34,7 @@ export function OverviewPage() {
           </div>)}
           {attentionCount > overview.attention.length && <div class="card-foot">Showing {overview.attention.length} of {attentionCount}. <a href="/ui/tasks?group=attention">View all tasks needing attention</a></div>}
         </Card>}
-        {running.length === 0 && queued.length === 0 ? <Card title="Currently running"><Empty title="Nothing is running">{status?.codex.signedIn ? 'Submit work with the CLI to start a task.' : 'Sign in to Codex and register a project to start.'}</Empty></Card> : running.concat(queued).slice(0, 2).map(t => <Card key={t.id} title={<span style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}><StateChip task={t} />{truncate(t.request, 80)}<span class="muted" style={{ fontSize: '12.5px', fontWeight: 500 }}><span class="mono">{t.projectId}</span> · {teamLabel(t.team)}</span></span>} right={<a href={`/ui/tasks/${t.id}`} style={{ fontWeight: 700 }}>Open task →</a>}
+        {running.length === 0 && queued.length === 0 ? <Card title="Currently running"><Empty title="Nothing is running">{status?.codex.signedIn ? 'Submit work to start a task.' : 'Sign in to Codex and register a project to start.'}</Empty></Card> : running.concat(queued).slice(0, 2).map(t => <Card key={t.id} title={<span style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}><StateChip task={t} />{truncate(t.request, 80)}<span class="muted" style={{ fontSize: '12.5px', fontWeight: 500 }}><span class="mono">{t.projectId}</span> · {teamLabel(t.team)}</span></span>} right={<a href={`/ui/tasks/${t.id}`} style={{ fontWeight: 700 }}>Open task →</a>}
           foot={t.workItems.length ? `Measured: ${t.workItems.filter(i => i.state === 'completed').length} of ${t.workItems.length} items integrated · updated ${relative(t.updatedAt, now)}. Combined validation, independent review and one local commit follow.` : `No work items yet · updated ${relative(t.updatedAt, now)}`}>
           {t.workItems.length > 0 ? <div class="scroll-x"><table>
             <thead><tr><th>Item</th><th>Agent</th><th>Depends</th><th>Stage</th><th>Repairs</th><th>Updated</th></tr></thead>

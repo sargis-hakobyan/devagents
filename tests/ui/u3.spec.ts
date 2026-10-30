@@ -2,6 +2,8 @@ import type { AddressInfo } from 'node:net';
 import { createApi } from '../../src/api/server.js';
 import { Config } from '../../src/domain/schemas.js';
 import { TaskService } from '../../src/orchestration/service.js';
+import { fixture as diffFixture } from '../helpers.js';
+import { WorkspaceManager, git } from '../../src/workspace/git.js';
 import { Store } from '../../src/persistence/store.js';
 import { test, expect, type Page } from '@playwright/test';
 import { readFile, realpath, mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises';
@@ -283,21 +285,56 @@ test('an unresolved attempt survives an actual service restart with new sessions
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); store.close(); await rm(data, { recursive: true, force: true }); }
 });
 
-test('diff states render hostile text safely and distinguish missing, empty, binary and truncated output', async ({ page }) => {
+test('real HTTP diffs distinguish hostile truncated text, binary, empty and missing commits', async ({ page }) => {
+  const f = await diffFixture();
+  const status = await (await call('/status')).json();
+  const server = createApi(f.service, 'synthetic-diff-token', { uiRoot: join(process.cwd(), 'dist/ui'), status: async () => status });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const complete = async (files: Record<string, string | Buffer>) => {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Browser diff fixture', mode: 'autonomous' }, crypto.randomUUID());
+    const workspace = await new WorkspaceManager(f.dataDir).create(f.store.project('fixture'), task.id);
+    for (const [name, contents] of Object.entries(files)) await writeFile(join(workspace.path, name), contents);
+    await git(workspace.path, ['add', '.']);
+    await git(workspace.path, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'Browser diff fixture']);
+    const commit = await git(workspace.path, ['rev-parse', 'HEAD']);
+    let t = f.store.checkpoint(task.id, f.store.task(task.id).version, { workspace }, 'fixture');
+    for (const state of ['ready', 'running', 'validating', 'reviewing', 'committing'] as const) t = f.store.transition(task.id, t.version, state, 'fixture', 'fixture');
+    return f.store.transition(task.id, t.version, 'completed', 'fixture', 'done', { outcome: { commit, repairCycles: 0 } });
+  };
+  try {
+    const changed = await complete({ '<img src=x onerror=alert(1)>': 'fixture-secret-value\n' + '<script>alert(1)</script>\n'.repeat(5000), 'asset.bin': Buffer.from([0, 1, 2]) });
+    const empty = await complete({});
+    const response = await fetch(`${origin}/ui/bootstrap`, { method: 'POST', headers: { authorization: 'Bearer synthetic-diff-token', 'content-type': 'application/json' }, body: '{}' });
+    await page.goto((await response.json()).url);
+    const openResult = async (id: string) => { await page.goto(`${origin}/ui/tasks/${id}`); await page.getByRole('tab', { name: 'Result', exact: true }).click(); };
+    await openResult(changed.id);
+    const selected = page.getByRole('region', { name: 'Selected file diff' });
+    await expect(selected).toContainText('<script>alert(1)</script>');
+    await expect(selected).toContainText('[REDACTED]'); await expect(selected).not.toContainText('fixture-secret-value');
+    await expect(selected).toContainText('Truncated by the display or read limit.');
+    await expect(page.locator('#app script, #app img')).toHaveCount(0);
+    await page.getByRole('button', { name: /asset.bin/ }).click(); await expect(page.getByText('Binary content is not shown.', { exact: true })).toBeVisible();
+    await openResult(empty.id); await expect(page.getByText('Both commits exist.', { exact: false })).toBeVisible();
+    await git(f.project, ['update-ref', '-d', `refs/heads/${changed.workspace!.branch}`]);
+    await openResult(changed.id);
+    await expect(page.getByRole('alert')).toContainText('Recorded repository, commits or task branch are unavailable');
+    await expect(page.getByText('Both commits exist.', { exact: false })).toHaveCount(0);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await f.cleanup(); }
+});
+
+test('overview setup hint follows availability and projects; fixture limits match the status contract', async ({ page }) => {
+  const status = await (await call('/status')).json();
+  expect(Object.keys(status.limits).sort()).toEqual(['concurrency', 'executionTimeoutMs', 'maxRepairCycles', 'validationTimeoutMs', 'workspaceScanLimit']);
+  let locked = false;
+  await page.route(`${base}/status`, route => route.fulfill({ json: { ...status, codex: { ...status.codex, installed: true, signedIn: true, vaultLocked: locked } } }));
   await signIn(page);
-  const task = (await (await call('/tasks?limit=200')).json()).tasks.find((t: { state: string }) => t.state === 'completed');
-  let state = 'truncated';
-  await page.route(`${base}/tasks/${task.id}/diff`, async route => {
-    if (state === 'unavailable') return route.fulfill({ status: 409, json: { error: 'diff_unavailable', message: 'Recorded commit is unavailable' } });
-    await route.fulfill({ json: { base: 'a'.repeat(40), final: 'b'.repeat(40), state, limits: { perFileBytes: 65536, totalBytes: 262144, files: 200, readBytes: 1048576 }, files: state === 'empty' ? [] : [{ path: '<img src=x onerror=alert(1)>', added: 1, removed: 0, state: 'truncated', text: '+<script>alert(1)</script> [REDACTED]', shownBytes: 40, bytes: 100000, redacted: true }, { path: 'asset.bin', added: null, removed: null, state: 'binary', text: '', shownBytes: 0, bytes: null, redacted: false }] } });
-  });
-  await page.goto(`${base}/ui/tasks/${task.id}`); await page.getByRole('tab', { name: 'Result', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Selected file diff' })).toContainText('<script>alert(1)</script>');
-  await expect(page.locator('#app script, #app img')).toHaveCount(0);
-  await page.getByRole('button', { name: /asset.bin/ }).click(); await expect(page.getByText('Binary content is not shown.', { exact: true })).toBeVisible();
-  state = 'empty'; await page.reload(); await page.getByRole('tab', { name: 'Result', exact: true }).click();
-  await expect(page.getByText('Both commits exist.', { exact: false })).toBeVisible();
-  state = 'unavailable'; await page.reload(); await page.getByRole('tab', { name: 'Result', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('Recorded commit is unavailable');
-  await expect(page.getByText('Both commits exist.', { exact: false })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Workspace', exact: true })).toBeVisible();
+  await expect(page.getByText('✓ Sign-in saved', { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Finish setup', exact: true })).toHaveCount(0);
+  locked = true; await page.reload();
+  await expect(page.getByRole('link', { name: 'Finish setup', exact: true })).toBeVisible();
+  locked = false;
+  await page.route(`${base}/projects`, route => route.fulfill({ json: [] })); await page.reload();
+  await expect(page.getByRole('link', { name: 'Finish setup', exact: true })).toBeVisible();
 });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFile, access } from 'node:fs/promises';
+import { writeFile, access, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fixture } from '../helpers.js';
 import { git, WorkspaceManager } from '../../src/workspace/git.js';
@@ -100,4 +100,37 @@ test('configured provider secrets outside the environment-name heuristic are red
     assert.doesNotMatch(body, /provider-value-9f8e7d6c5b4a/);
     assert.doesNotMatch(JSON.stringify(store.task(task.id)), /provider-value/);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); store.close(); await f.cleanup(); }
+});
+
+test('diff limits aggregate patch reads even when oversized files yield no display text', async () => {
+  const x = await completed(Object.fromEntries([
+    ...Array.from({ length: 5 }, (_, i) => [`large-${i}.txt`, 'x'.repeat(diffLimits.readBytes + 1)]),
+    ['z-small.txt', 'This later file must not be read after the aggregate budget is exhausted.'],
+  ]));
+  try {
+    const diff = await x.read();
+    assert.equal(diff.state, 'truncated');
+    assert.equal(diff.files.find(f => f.path === 'z-small.txt')!.state, 'truncated');
+    assert.ok(diff.files.every(f => f.text === '' && f.bytes === null));
+    assert.equal(diff.limits.totalReadBytes, 4 * 1024 * 1024);
+  } finally { await x.f.cleanup(); }
+});
+
+test('diff installation failures remain unavailable and emit bounded redacted diagnostics', async t => {
+  const x = await completed({ 'change.txt': 'x' });
+  const lines: string[] = []; const oldPath = process.env.PATH;
+  const capture = t.mock.method(process.stderr, 'write', (chunk: string | Uint8Array) => { lines.push(String(chunk)); return true; });
+  try {
+    process.env.PATH = '/nonexistent/fixture-secret-value';
+    await assert.rejects(x.read(), { code: 'diff_unavailable' });
+    const entry = lines.map(l => JSON.parse(l)).find(l => l.event === 'diff_read_failed');
+    assert.equal(entry.data.code, 'ENOENT'); assert.equal(entry.data.taskId, x.done.id);
+    assert.ok(entry.data.message.length <= 2048);
+    const bin = join(x.f.root, 'bin'); await mkdir(bin);
+    await writeFile(join(bin, 'git'), '#!/bin/sh\nprintf \"fixture-secret-value\\n\" >&2\nexit 2\n', { mode: 0o755 });
+    process.env.PATH = bin;
+    await assert.rejects(x.read(), { code: 'diff_unavailable' });
+    assert.match(lines.join(''), /\[REDACTED\]/);
+    assert.doesNotMatch(lines.join(''), /fixture-secret-value/);
+  } finally { if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath; capture.mock.restore(); await x.f.cleanup(); }
 });

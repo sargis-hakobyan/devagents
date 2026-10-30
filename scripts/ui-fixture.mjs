@@ -12,6 +12,7 @@ import { TaskService } from '../dist/orchestration/service.js';
 import { TaskRunner } from '../dist/orchestration/runner.js';
 import { Config } from '../dist/domain/schemas.js';
 import { createApi, accessToken } from '../dist/api/server.js';
+import { statusLimits } from '../dist/api/status.js';
 import { BrowserSessions } from '../dist/api/session.js';
 import { runProcess } from '../dist/engines/process.js';
 import { git } from '../dist/workspace/git.js';
@@ -82,7 +83,7 @@ const validator = { async execute(cwd, command, signal, timeoutMs) { const r = a
 const runner = new TaskRunner(service, engine, validator); service.attachRunner(runner);
 const token = await accessToken(data); const sessions = new BrowserSessions();
 // Synthetic availability only: browser tests never inspect a host credential store or runtime login.
-const status = { service: { version: '0.1.0-fixture', host: '127.0.0.1', port, platform: process.platform, node: process.version, dataDir: data, executionEnabled: true, startedAt: new Date().toISOString(), checkedAt: new Date().toISOString() }, codex: { installed: true, version: 'fixture', signedIn: false, credentialStore: 'file', vaultLocked: false, modelAccessVerified: false }, claude: { installed: false, enabled: false, note: 'Adapter planned for M4' }, defaults: { engine: 'codex', provider: 'openai', model: null, providers: [{ id: 'openai', kind: 'openai', auth: 'login', apiKeyConfigured: null, executable: true }] }, limits: config, fixture: { label } };
+const status = { service: { version: '0.1.0-fixture', host: '127.0.0.1', port, platform: process.platform, node: process.version, dataDir: data, executionEnabled: true, startedAt: new Date().toISOString(), checkedAt: new Date().toISOString() }, codex: { installed: true, version: 'fixture', signedIn: false, credentialStore: 'file', vaultLocked: false, modelAccessVerified: false }, claude: { installed: false, enabled: false, note: 'Adapter planned for M4' }, defaults: { engine: 'codex', provider: 'openai', model: null, providers: [{ id: 'openai', kind: 'openai', auth: 'login', apiKeyConfigured: null, executable: true }] }, limits: statusLimits(config), fixture: { label } };
 const server = createApi(service, token, { sessions, uiRoot: resolve('dist/ui'), status: async () => status });
 
 // Representative tasks. Each completes (or stops) through the real orchestrator against real Git worktrees.

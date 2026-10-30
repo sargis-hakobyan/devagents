@@ -9,6 +9,10 @@ export type ServiceStatus = {
   defaults: { engine: string; provider: string; model: string | null; providers: { id: string; kind: string; auth: string; apiKeyConfigured: boolean | null; executable: boolean }[] };
   limits: { concurrency: number; maxRepairCycles: number; executionTimeoutMs: number; validationTimeoutMs: number; workspaceScanLimit: number };
 };
+/** Shared secret-free limit projection for the service and deterministic browser fixture. */
+export function statusLimits(config: AppConfig): ServiceStatus['limits'] {
+  return { concurrency: config.concurrency, maxRepairCycles: config.maxRepairCycles, executionTimeoutMs: config.executionTimeoutMs, validationTimeoutMs: config.validationTimeoutMs, workspaceScanLimit: config.workspaceScanLimit };
+}
 /**
  * Secret-free availability report for the Settings and Overview screens. It never includes key
  * values, tokens or raw runtime output, and it never contacts a model: a saved sign-in is reported
@@ -30,7 +34,7 @@ export function statusReporter(input: { dataDir: string; config: AppConfig; vers
         engine: input.config.defaultEngine, provider: input.config.defaultProvider, model: input.config.defaultModel ?? null,
         providers: input.config.providers.map(p => ({ id: p.id, kind: p.kind, auth: p.auth, apiKeyConfigured: p.apiKeyEnv ? Boolean(process.env[p.apiKeyEnv]) : null, executable: p.kind === 'openai' && !p.baseUrl })),
       },
-      limits: { concurrency: input.config.concurrency, maxRepairCycles: input.config.maxRepairCycles, executionTimeoutMs: input.config.executionTimeoutMs, validationTimeoutMs: input.config.validationTimeoutMs, workspaceScanLimit: input.config.workspaceScanLimit },
+      limits: statusLimits(input.config),
     };
     cached = { at: Date.now(), value };
     return value;

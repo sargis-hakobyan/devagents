@@ -148,3 +148,15 @@ Verification on the final implementation:
 - Representative desktop and 390 px screenshots were generated and inspected in ignored `test-results/ui-screenshots/` (registration errors, submission, accepted result, approval, diff and guided setup). They are development evidence, not checked-in visual baselines.
 
 Live acceptance is not claimed for this new increment. The earlier authorized live baseline remains recorded above; any further authenticated run needs separate authorization. Browser cleanup still requires its preview/revalidation/ownership follow-up before it can be enabled.
+
+## U3 remaining review notes F2–F6 — 2026-10-30
+
+All five P3 findings from `CLAUDE_REVIEW_U3.md` are addressed after the configured-secret fix:
+
+- F2: Overview's setup note follows missing/locked runtime sign-in or an empty project list; a configured workspace no longer receives an unconditional prompt. Teams remain optional.
+- F3: Diff failures retain fail-closed 409 responses and emit bounded, redacted diagnostics with task ID, read phase and error code. Synthetic missing-runtime and secret-bearing process errors exercise the logging path.
+- F4: A 4 MiB aggregate patch-read budget supplements the 1 MiB/file limit. Oversized reads consume their reservation even if all text is omitted; remaining files become explicitly truncated. This limits captured output, not total Git computation time. Existing display caps are unchanged.
+- F5: The real status reporter and browser fixture share an explicit five-field limits projection; provider/configuration fields no longer appear under fixture limits.
+- F6: The browser test for binary, truncated, empty and unavailable diffs now uses real Git commits and the authenticated HTTP endpoint, including hostile text and redaction. No diff-response interception remains in that test.
+
+Verification: `npm run check` passed 134 tests, typechecks and build; `npm run test:ui` passed all 33 workflows, including every U1/U2 workflow. The updated diff screenshot was inspected. The six-test diff suite was also rerun after extending the log-redaction assertion. Docker, protocol and M2/M3 suites were not rerun for this follow-up: it changes UI/status projection, diff read limits/diagnostics and fixture coverage, not engine execution, sandboxing or packaging. No authenticated fixtures, credential inspection or push. The original review report is unchanged.
