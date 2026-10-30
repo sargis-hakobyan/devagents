@@ -164,3 +164,7 @@ fieldset:disabled .field input, fieldset:disabled .field select, fieldset:disabl
 .task-actions{display:flex;flex-direction:column;gap:10px;min-width:0;max-width:620px}.task-actions .note{overflow-wrap:anywhere}
 
 .diff-file{display:flex;flex-direction:column;align-items:flex-start;white-space:normal;text-align:left}.diff-file[aria-current=true]{border-color:var(--ink);background:var(--bg)}.diff-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:650px;overflow:auto}
+
+.diff-grid{grid-template-columns:minmax(0,1fr) minmax(0,2fr)}
+.decision-bar{position:sticky;bottom:12px;background:var(--panel,#fff);padding:12px;border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 28px rgba(35,31,74,.12)}
+@media(max-width:800px){.diff-grid{grid-template-columns:minmax(0,1fr)}.submit-action{position:sticky;bottom:12px;box-shadow:0 6px 16px rgba(35,31,74,.16)}}

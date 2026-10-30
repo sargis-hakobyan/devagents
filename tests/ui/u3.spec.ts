@@ -1,3 +1,7 @@
+import type { AddressInfo } from 'node:net';
+import { createApi } from '../../src/api/server.js';
+import { Config } from '../../src/domain/schemas.js';
+import { TaskService } from '../../src/orchestration/service.js';
 import { Store } from '../../src/persistence/store.js';
 import { test, expect, type Page } from '@playwright/test';
 import { readFile, realpath, mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises';
@@ -27,7 +31,7 @@ test('registration preserves input on backend refusal and registers an existing 
   await page.getByLabel('Project ID', { exact: true }).fill('browser-project');
   await page.getByLabel('Absolute path as the service sees it').fill('/projects/not-mounted');
   await page.getByRole('button', { name: 'Register project', exact: true }).click();
-  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('mount the checkout and register its container path');
   await expect(page.getByLabel('Project ID', { exact: true })).toHaveValue('browser-project');
   await expect(page.getByLabel('Absolute path as the service sees it')).toHaveValue('/projects/not-mounted');
   await page.screenshot({ path: join(shots, 'u3-register-error.png'), fullPage: true });
@@ -51,6 +55,11 @@ test('submission uses effective defaults, disables unavailable teams and shows t
   await page.getByLabel('Criterion 1', { exact: true }).fill('Keep existing tests');
   const teams = await (await call('/teams')).json(); const team = teams.find((t: { name: string }) => t.name === 'Website team');
   await page.getByLabel('Team', { exact: true }).selectOption(team.id);
+  await page.screenshot({ path: join(shots, 'u3-submit.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: join(shots, 'u3-submit-narrow.png'), fullPage: true });
+  await page.setViewportSize({ width: 1360, height: 900 });
   await page.getByRole('button', { name: 'Submit task', exact: true }).click();
   await expect(page.getByText('Task accepted', { exact: true })).toBeVisible();
   await expect(page.getByText(`Website team · revision ${team.revision}`, { exact: true })).toBeVisible();
@@ -143,7 +152,7 @@ test('browser workflow registers, submits, rejects stale approval, approves and 
   await page.getByRole('button', { name: 'Submit task', exact: true }).click();
   await page.getByRole('link', { name: 'Open task' }).click();
   const id = page.url().split('/').pop()!;
-  const approve = page.getByRole('button', { name: /^Approve version/ });
+  const approve = page.getByRole('button', { name: /^Approve version/ }).first();
   await expect(approve).toBeEnabled();
   await page.screenshot({ path: join(shots, 'u3-approval.png'), fullPage: true });
   // A second writer changes the durable version after the page rendered, before POST arrives.
@@ -159,7 +168,7 @@ test('browser workflow registers, submits, rejects stale approval, approves and 
   await page.unroute(`${base}/tasks/${id}/approve`);
   await page.getByRole('button', { name: 'Review updated plan' }).click();
   await expect(page.getByRole('tab', { name: 'Plan', exact: true })).toHaveAttribute('aria-selected', 'true');
-  await approve.click();
+  await page.getByRole('button', { name: /^Approve version/ }).last().click();
   await expect(page.getByText('Completed: one reviewed local commit on the task branch', { exact: true })).toBeVisible({ timeout: 20000 });
   await page.getByRole('tab', { name: 'Result', exact: true }).click();
   await expect(page.getByText('Read-only diff', { exact: true })).toBeVisible();
@@ -215,4 +224,80 @@ test('guided setup uses status and terminal commands without credential fields o
   await page.getByRole('link', { name: 'Submit work', exact: true }).click();
   await expect(page.getByLabel('What should the team do?')).toBeEnabled();
   expect(posts).toEqual([]);
+});
+
+test('queued and running cancellation work and the committing boundary offers no cancel', async ({ page }) => {
+  await signIn(page); await stopInitialHold(page);
+  const running = await (await call('/tasks', 'POST', { projectId: 'fixture', request: 'U3 running cancellation [hold]', mode: 'autonomous' }, { 'idempotency-key': crypto.randomUUID() })).json();
+  try {
+    await expect.poll(async () => (await (await call(`/tasks/${running.id}`)).json()).state).toBe('running');
+    const queued = await (await call('/tasks', 'POST', { projectId: 'fixture', request: 'U3 queued cancellation', mode: 'autonomous' }, { 'idempotency-key': crypto.randomUUID() })).json();
+    await page.goto(`${base}/ui/tasks/${queued.id}`);
+    await page.getByRole('button', { name: 'Cancel task…', exact: true }).click();
+    await page.getByRole('button', { name: 'Confirm cancellation' }).click();
+    await expect(page.getByText('Cancelled by you', { exact: true }).first()).toBeVisible();
+    // The real committing refusal is covered by the API regression; exercise its presentation too.
+    await page.route(`${base}/tasks/${running.id}`, async route => { const response = await route.fetch(); await route.fulfill({ response, json: { ...(await response.json()), state: 'committing' } }); });
+    await page.goto(`${base}/ui/tasks/${running.id}`);
+    await expect(page.getByText('Committing · not cancellable', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Cancel task…', exact: true })).toHaveCount(0);
+    await page.unroute(`${base}/tasks/${running.id}`); await page.reload();
+    await page.getByRole('button', { name: 'Cancel task…', exact: true }).click();
+    await page.getByRole('button', { name: 'Confirm cancellation' }).click();
+    await expect(page.getByText('Cancelled by you', { exact: true }).first()).toBeVisible();
+  } finally { await call(`/tasks/${running.id}/cancel`, 'POST', {}); }
+});
+
+test('an unresolved attempt survives an actual service restart with new sessions and the same database', async ({ page }) => {
+  const data = await mkdtemp(join(tmpdir(), 'devagents-u3-restart-'));
+  const db = join(data, 'test.db'); const status = await (await call('/status')).json();
+  let store = new Store(db, []); let service = new TaskService(store, Config.parse({ schemaVersion: 1 }), data);
+  await service.registerProject({ id: 'restart-project', path: root });
+  let server = createApi(service, 'fixture-restart-token', { uiRoot: join(process.cwd(), 'dist/ui'), status: async () => status });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const restartPort = (server.address() as AddressInfo).port; const origin = `http://127.0.0.1:${restartPort}`;
+  const login = async () => {
+    const response = await fetch(`${origin}/ui/bootstrap`, { method: 'POST', headers: { authorization: 'Bearer fixture-restart-token', 'content-type': 'application/json' }, body: '{}' });
+    await page.goto((await response.json()).url);
+    await page.goto(`${origin}/ui/tasks/new`);
+  };
+  try {
+    await login(); await page.getByLabel('Project', { exact: true }).selectOption('restart-project');
+    await page.getByLabel('What should the team do?').fill('Survive actual restart');
+    await page.route(`${origin}/tasks`, async route => { if (route.request().method() !== 'POST') return route.continue(); await route.fetch(); await route.abort(); });
+    await page.getByRole('button', { name: 'Submit task', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Retry this attempt' })).toBeEnabled();
+    const original = store.summaries({ limit: 20 }).tasks[0]!;
+    server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); store.close();
+    store = new Store(db, []); service = new TaskService(store, Config.parse({ schemaVersion: 1, defaultMode: 'autonomous' }), data);
+    server = createApi(service, 'fixture-restart-token', { uiRoot: join(process.cwd(), 'dist/ui'), status: async () => status });
+    await new Promise<void>(resolve => server.listen(restartPort, '127.0.0.1', resolve));
+    await page.unroute(`${origin}/tasks`); await page.reload();
+    await expect(page).toHaveURL(`${origin}/ui/signed-out`);
+    await login();
+    await expect(page.getByRole('button', { name: 'Retry this attempt' })).toBeEnabled();
+    await page.getByRole('button', { name: 'Retry this attempt' }).click();
+    await expect(page.getByText('Task accepted', { exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Open task' })).toHaveAttribute('href', `/ui/tasks/${original.id}`);
+    expect(store.summaries({ limit: 20 }).tasks).toHaveLength(1); expect(store.task(original.id).mode).toBeUndefined();
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); store.close(); await rm(data, { recursive: true, force: true }); }
+});
+
+test('diff states render hostile text safely and distinguish missing, empty, binary and truncated output', async ({ page }) => {
+  await signIn(page);
+  const task = (await (await call('/tasks?limit=200')).json()).tasks.find((t: { state: string }) => t.state === 'completed');
+  let state = 'truncated';
+  await page.route(`${base}/tasks/${task.id}/diff`, async route => {
+    if (state === 'unavailable') return route.fulfill({ status: 409, json: { error: 'diff_unavailable', message: 'Recorded commit is unavailable' } });
+    await route.fulfill({ json: { base: 'a'.repeat(40), final: 'b'.repeat(40), state, limits: { perFileBytes: 65536, totalBytes: 262144, files: 200, readBytes: 1048576 }, files: state === 'empty' ? [] : [{ path: '<img src=x onerror=alert(1)>', added: 1, removed: 0, state: 'truncated', text: '+<script>alert(1)</script> [REDACTED]', shownBytes: 40, bytes: 100000, redacted: true }, { path: 'asset.bin', added: null, removed: null, state: 'binary', text: '', shownBytes: 0, bytes: null, redacted: false }] } });
+  });
+  await page.goto(`${base}/ui/tasks/${task.id}`); await page.getByRole('tab', { name: 'Result', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Selected file diff' })).toContainText('<script>alert(1)</script>');
+  await expect(page.locator('#app script, #app img')).toHaveCount(0);
+  await page.getByRole('button', { name: /asset.bin/ }).click(); await expect(page.getByText('Binary content is not shown.', { exact: true })).toBeVisible();
+  state = 'empty'; await page.reload(); await page.getByRole('tab', { name: 'Result', exact: true }).click();
+  await expect(page.getByText('Both commits exist.', { exact: false })).toBeVisible();
+  state = 'unavailable'; await page.reload(); await page.getByRole('tab', { name: 'Result', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Recorded commit is unavailable');
+  await expect(page.getByText('Both commits exist.', { exact: false })).toHaveCount(0);
 });

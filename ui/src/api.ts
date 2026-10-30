@@ -15,7 +15,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
     if (!csrfToken) await session();
     if (csrfToken) headers['x-csrf-token'] = csrfToken;
   }
-  const res = await fetch(path, { method, headers, credentials: 'same-origin', ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}) });
+  const res = await fetch(path, { method, headers, credentials: 'same-origin', signal: AbortSignal.timeout(30000), ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}) });
   const text = await res.text();
   let data: unknown = undefined;
   try { data = text ? JSON.parse(text) : undefined; } catch { data = undefined; }

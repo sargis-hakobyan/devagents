@@ -1,5 +1,5 @@
 import { TaskDiff } from '../components/TaskDiff';
-import { TaskActions } from '../components/TaskActions';
+import { useTaskActions } from '../components/TaskActions';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { api, evidenceFacts, type Evidence, type ItemProgress, type Task, type TaskEvent } from '../api';
 import { Card, Chip, ErrorNote, ItemChip, Later, Pre, Skeleton, Stage, StateChip, pretty } from '../components/ui';
@@ -29,6 +29,7 @@ export function TaskDetailPage({ id }: { id: string }) {
   const events = useAppendLog<TaskEvent>(`/tasks/${id}/events`, 3000, 500);
   const evidence = useAppendLog<Evidence>(`/tasks/${id}/evidence`, 3000, 200);
   const task = detail.data?.task; const items = detail.data?.items ?? [];
+  const renderActions = useTaskActions({ task, reload: detail.reload, showPlan: () => setTab('plan') });
   const perItem = useMemo(() => itemEvidence(evidence.rows), [evidence.rows]);
   useEffect(() => { if (task?.state === 'completed' && tab === 'work' && !task.plan) setTab('result'); }, [task?.state]);
   if (!task && detail.error) return <ErrorNote message={detail.error} />;
@@ -47,7 +48,7 @@ export function TaskDetailPage({ id }: { id: string }) {
             <div class="muted" style={{ fontSize: '13.5px' }}>Project <span class="mono">{task.projectId}</span> · Team: {task.team ? <><a href={`/ui/teams/${task.team.id}`}><b>{task.team.name}</b></a> revision {task.team.revision} · {task.team.members.filter(m => m.enabled).length} enabled members frozen at submission{task.team.modelPinned ? '' : ' · model: runtime default (not pinned)'}</> : <><b>Legacy agent configuration</b>{task.agents ? ` (${task.agents.length} agents snapshotted at worktree creation)` : ' (snapshotted when the worktree is created)'}</>}{task.workspace && <> · Branch <span class="mono">{task.workspace.branch}</span></>}</div>
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <TaskActions key={task.id} task={task} reload={detail.reload} showPlan={() => setTab('plan')} />
+            {renderActions()}
           </div>
         </div>
         <div class={`note ${summary.tone}`} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}><span aria-hidden="true" style={{ fontSize: '16px' }}>{state.icon}</span><div><b>{summary.title}</b><div class="muted" style={{ fontSize: '13.5px' }}>{summary.detail}</div></div></div>
@@ -59,7 +60,7 @@ export function TaskDetailPage({ id }: { id: string }) {
       {([['work', `Work · ${items.length}`], ['plan', 'Plan'], ['activity', `Activity · ${events.rows.length + evidence.rows.length}`], ['result', 'Result']] as [Tab, string][]).map(([t, label]) => <button key={t} type="button" role="tab" class="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{label}</button>)}
     </div>
     {tab === 'work' && <WorkTab task={task} items={items} perItem={perItem} now={now} />}
-    {tab === 'plan' && <><div class="note info">Plan · version {task.version}. Approval applies to this version.</div><PlanTab task={task} /></>}
+    {tab === 'plan' && <><div class="note info">Plan · version {task.version}. Approval applies to this version.</div><PlanTab task={task} /><div class="decision-bar">{renderActions()}</div></>}
     {tab === 'activity' && <ActivityTab task={task} events={events.rows} evidence={evidence.rows} />}
     {tab === 'result' && <ResultTab task={task} evidence={evidence.rows} />}
   </>;

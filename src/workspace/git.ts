@@ -24,7 +24,7 @@ export async function git(cwd: string, args: string[], trim = true, maxBuffer = 
 export async function inspectProject(input: unknown): Promise<Project> {
   const project = ProjectInput.parse(input);
   if (!isAbsolute(project.path)) throw new AppError('invalid_path', 'Provide an absolute project path');
-  const path = await realpath(project.path);
+  const path = await realpath(project.path).catch(() => { throw new AppError('invalid_path', 'Project path does not exist or is inaccessible to the service. In Docker, mount the checkout and register its container path.'); });
   if (path === parse(path).root || path === await realpath(homedir())) throw new AppError('invalid_path', 'Register a project directory, not a filesystem root or home directory');
   if (!(await stat(path)).isDirectory()) throw new AppError('invalid_path', 'Project must be a directory');
   const root = await git(path, ['rev-parse', '--show-toplevel']);
