@@ -264,3 +264,50 @@ The protocol smoke and the Docker suite had been left out of every earlier pass.
 | `npm run test:docker` | Pass: image rebuilt from the current source during the run (creation time inside the run window; `dist/workspace/hidden.js`, `dist/workspace/conflicts.js`, `dist/domain/protected-paths.js`, `dist/domain/roles.js`, `workspaceScanLimit` and the cleanup route present in the image); health, unauthenticated setup, explicit project mount, non-root read-only service, task and event persistence across restart, idempotent retry; vault create and restore; deterministic M2 and M3 fixtures with real sandboxed validation inside the container; two concurrent real Codex protocol workers under the configured PID, CPU and memory limits; the suite removed its own containers and volumes |
 
 The protocol fixture selected the keyring credential store with the real home directory, as noted in the review; no keychain prompt appeared and the fixture used only its fake environment key. The live fixtures (`test:codex-live`, `test:m3-live`) remain the only checks not run; they need the user's account and were excluded by instruction.
+
+---
+
+# Follow-up review of the fixes — 2026-10-30
+
+An external review (Codex) of the fix commits reported three remaining defects. Each was verified before being changed; all three were real. Each fix is its own commit with regression tests. `CLAUDE_REVIEW.md` is unchanged.
+
+## Findings as verified
+
+1. **Unbounded line buffer** (`src/engines/process.ts`). The unfinished-line buffer `pending` was appended on every stdout chunk even without an `onLine` consumer, and had no bound of its own. Confirmed by code reading: a newline-free 2,000,000-byte output in truncate mode kept the whole stream in `pending` while the returned text was already truncated.
+2. **Per-instance seal lock** (`src/security/credential-vault.ts`). The F12 serialization was an instance field, but `configuredVault()` constructs a new `CredentialVault` for every adapter call, so production callers never shared the lock. Confirmed by code reading.
+3. **Truncation below the budget** (`src/engines/process.ts`). Reproduced: with `maxBytes: 1000`, 600 bytes of stdout returned `truncated: true` and a `[0 bytes truncated]` marker, because each stream's head was capped at half the budget regardless of the total. A passing validation with 600 bytes of output would have counted as failed.
+
+## Fixes
+
+| Commit | Item | Change |
+| --- | --- | --- |
+| `3593edc` | 3 | Streams are retained in full while the combined stdout/stderr total is within the budget. On overflow, each stream keeps a head (a quarter of the budget) and a tail (an eighth), cut on UTF-8 code-point boundaries; the marker reports exactly written minus retained; the overflowing chunk is retained before the split so the head is never empty; retained evidence stays within the budget. |
+| `a0fabf7` | 1 | The line buffer exists only when an `onLine` consumer is supplied, and an unfinished line longer than the budget fails closed with `output_limit` in both overflow modes, so engine JSONL parsing stays fail-closed. Without a consumer, oversized newline-free output is simply truncated. |
+| `1a659d5` | 2 | The seal lock is a module-level map keyed by the canonical encrypted-file path, shared by every instance targeting the same vault; idle entries are removed. |
+
+## Regression tests added
+
+- Output below, at and above the budget (0, 1, 600, 999, 1000 kept whole; 1001, 1500, 5000, 300000 truncated with head, tail and exact accounting, retained bytes within the budget).
+- Combined stdout and stderr under and over the shared budget, with accounting across both streams.
+- Two-byte and four-byte newline-free output: no replacement characters, no partial code points, exact accounting; exact-budget multi-byte output kept whole.
+- Streaming consumer: whole lines in order, blank lines skipped, the final unterminated line delivered on close; newline-free output beyond the budget truncated without a consumer and rejected with one in both overflow modes; two thousand short lines streamed while retained text stays within the budget.
+- Four separate `CredentialVault` instances on the same files sealing concurrently during atomic rotations: never more than one seal in flight (instrumented), newest credentials restored by unlock. Synthetic credentials only.
+
+## Verification
+
+Run natively on macOS ARM64 with Codex CLI 0.160.1 and Docker Engine 24.0.6 (Linux ARM64), at commit `1a659d5` (all three fixes applied), host load average about 9, no credentials and no live model call:
+
+| Check | Result |
+| --- | --- |
+| `npm run check` | Pass: typecheck, 99 tests (93 before this pass), 0 failures, 0 skipped, production build; also passed before each of the three commits |
+| `npm run test:m2` | Pass, including the containment probe |
+| `npm run test:m3` | Pass: three items, isolated worktrees, dependency integration, item and combined reviews, one final commit, original checkout unchanged |
+| `npm run test:codex-protocol` | Pass: scoped shell and patch containment, denials, blocked networking, read-only review, loopback connection check |
+| `npm run test:docker` | Pass: image rebuilt during the run (creation time inside the run window); vault create, restart and restore; real-runtime credential save; M2 and M3 fixtures in the container; two concurrent protocol workers under the configured limits; health, mount, non-root, persistence and idempotent retry |
+| Live fixtures | Not run, by instruction |
+
+## Remaining limitations
+
+- Truncation keeps at most three eighths of the budget per stream (a quarter head, an eighth tail), so two noisy streams together retain at most three quarters of the budget plus two short markers; the remainder of the budget is deliberately unused so retained evidence never exceeds it.
+- A streaming consumer sees every complete line even in truncate mode; only the retained text is bounded. That is the intended contract for evidence, but it means the consumer, not `runProcess`, must bound any per-line work.
+- The seal lock is per process. Two DevAgents service processes on one data directory are already prevented by the service lock, so no cross-process lock was added.

@@ -76,7 +76,7 @@ Before the M2 live fixture, configure the dedicated account with `npm run cli --
 
 ## Acceptance commands
 
-- `npm run check`: 93 tests, typecheck and production build (one real-sandbox containment test runs only when the pinned Codex is installed).
+- `npm run check`: 99 tests, typecheck and production build (one real-sandbox containment test runs only when the pinned Codex is installed).
 - `npm run test:m2`: deterministic planning/implementation/review with real sandboxed validation and a local commit.
 - `npm run test:m3`: deterministic three-item DAG with isolated branches, dependency integration, actual sandboxed validation and a combined commit.
 - `npm run test:m3-live`: opt-in authenticated three-item fixture; equivalent container command passed with saved ChatGPT sign-in. Native authenticated execution remains unverified.
