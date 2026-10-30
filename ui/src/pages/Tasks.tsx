@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { api, resources, type TaskSummary, type TaskState } from '../api';
+import { api, resources, teamLabel, type TaskSummary, type TaskState } from '../api';
 import { Card, Empty, ErrorNote, Later, Skeleton, StateChip } from '../components/ui';
 import { activeStates, attentionStates, finishedStates, relative, truncate } from '../format';
 import { useNow, usePoll } from '../state';
@@ -40,7 +40,7 @@ export function TasksPage() {
       {tasks.length === 0 ? <Empty title={count('all') === 0 ? 'No tasks yet' : 'No tasks match these filters'}>{count('all') === 0 && <span>Submit work with <code>devagents tasks submit &lt;project&gt; "&lt;request&gt;"</code></span>}</Empty> : <div class="scroll-x"><table>
         <thead><tr><th>Request</th><th>Project</th><th>State</th><th>Items</th><th>Updated</th><th>Branch / result</th></tr></thead>
         <tbody>{tasks.map(t => <tr key={t.id} class="row">
-          <td><a href={`/ui/tasks/${t.id}`} style={{ fontWeight: 700, color: 'var(--text)', textDecoration: 'none' }} class="wrap-anywhere">{truncate(t.request, 110)}</a><div class="muted" style={{ fontSize: '12.5px' }}>{t.mode ?? 'mode not chosen'} · v{t.version} · <span class="mono">{t.id.slice(0, 8)}</span></div></td>
+          <td><a href={`/ui/tasks/${t.id}`} style={{ fontWeight: 700, color: 'var(--text)', textDecoration: 'none' }} class="wrap-anywhere">{truncate(t.request, 110)}</a><div class="muted wrap-anywhere" style={{ fontSize: '12.5px' }}>{t.mode ?? 'mode not chosen'} · v{t.version} · <span class="mono">{t.id.slice(0, 8)}</span> · {teamLabel(t.team)}</div></td>
           <td class="mono">{t.projectId}</td><td><StateChip task={t} /></td><td class="mono">{t.items ? `${t.items} planned` : '—'}</td><td class="muted">{relative(t.updatedAt, now)}</td>
           <td class={t.commit ? 'mono' : 'muted'}>{t.commit ? `${t.commit.slice(0, 7)} · ${t.branch ?? ''}` : t.error ? truncate(t.error, 100) : t.branch ? <span class="mono">{t.branch}</span> : '—'}</td>
         </tr>)}</tbody></table></div>}

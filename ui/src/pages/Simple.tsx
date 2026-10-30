@@ -1,32 +1,37 @@
-import { resources } from '../api';
+import { useState } from 'preact/hooks';
+import { api, ApiError, resources, type Project, type TeamSummary } from '../api';
 import { Card, Chip, Code, Empty, ErrorNote, Later, Skeleton } from '../components/ui';
 import { formatTime } from '../format';
 import { usePoll } from '../state';
 
-export function TeamsPage() {
-  const agents = usePoll(resources.agents.key, resources.agents.load, resources.agents.intervalMs);
-  const list = agents.data ?? [];
-  const planner = list.some(a => a.enabled && a.delegation.canDelegate && a.capabilities.includes('planning'));
-  const implementer = list.some(a => a.enabled && a.delegation.canReceiveTasks && a.permissions.writePaths.length > 0);
-  const reviewer = list.some(a => a.enabled && a.delegation.canReceiveTasks && a.capabilities.includes('review') && a.permissions.writePaths.length === 0);
-  return <>
-    <div class="page-head"><div><div class="h">Teams</div><h1>Teams</h1><p>A team is a saved, named roster you reuse across projects. It is configuration, not a running process.</p></div><Later label="New team" increment="U2" reason="Saved teams arrive in U2" primary /></div>
-    <div class="note info"><b>Saved teams are not available yet (planned for U2).</b> Below is the agent configuration the service resolves today from YAML and Markdown files, in the order built-in → user → project. Nothing here is a persisted team, and these cards do not create processes.</div>
-    {agents.error && !agents.data && <ErrorNote message={agents.error} />}
-    {!agents.data ? <Skeleton rows={4} label="Loading agents" /> : <Card title={`Current agent configuration · ${list.length} agents`} right={<span class="muted" style={{ fontSize: '12.5px' }}>precedence built-in → user → project</span>}
-      foot={<span style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>{planner && implementer && reviewer ? <Chip tone="ok">✓ Ready to run work</Chip> : <Chip tone="warn">⚠ Not ready</Chip>}<span>{planner ? 'planner ✓' : 'no planner'} · {implementer ? 'writable implementer ✓' : 'no writable implementer'} · {reviewer ? 'independent reviewer ✓' : 'no independent reviewer'} · re-checked at submission and plan time</span></span>}>
-      {list.length === 0 ? <Empty title="No agents resolved" /> : <div class="items" style={{ padding: '14px' }}>{list.map(a => <article key={a.id} class="card item">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}><b>{a.name}</b>{a.enabled ? <Chip tone="ok">Enabled</Chip> : <Chip tone="neutral">Disabled</Chip>}</div>
-        <div class="muted wrap-anywhere" style={{ fontSize: '13px' }}>{a.description}{a.delegation.canDelegate ? ' · delegates, does not receive tasks' : ''}</div>
-        <div class="stages">{a.capabilities.map(c => <Chip key={c} tone="neutral">{c}</Chip>)}</div>
-        <div class="muted mono wrap-anywhere">{a.engine === 'default' ? 'codex (default)' : a.engine} · {a.provider === 'default' ? 'openai (default)' : a.provider} · model {a.model} · {a.permissions.writePaths.length ? `write ${a.permissions.writePaths.join(', ')}` : 'read only'} · shell {a.permissions.allowCommands ? 'on' : 'off'} · concurrency {a.concurrency}</div>
-        <div class="muted" style={{ fontSize: '12px' }}>source <span class="mono wrap-anywhere">{a.source.replace(/^.*\/agents\//, 'agents/')}</span></div>
-      </article>)}</div>}
-    </Card>}
-  </>;
+/** Sets or clears a project's default team under the project's version; a stale version reloads instead of overwriting. */
+function DefaultTeam({ project, teams, onChanged }: { project: Project; teams: TeamSummary[] | undefined; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false); const [note, setNote] = useState<{ tone: 'warn' | 'bad'; text: string } | undefined>();
+  const current = teams?.find(t => t.id === project.defaultTeamId);
+  const choose = async (teamId: string | null) => {
+    setBusy(true); setNote(undefined);
+    try { await api(`/projects/${encodeURIComponent(project.id)}/default-team`, { method: 'PUT', body: { teamId, expectedVersion: project.version } }); onChanged(); }
+    catch (e) { setNote(e instanceof ApiError && e.code === 'stale_project' ? { tone: 'warn', text: 'Project settings changed elsewhere; the current value is shown again. Choose once more if you still want it.' } : { tone: 'bad', text: e instanceof Error ? e.message : String(e) }); onChanged(); }
+    finally { setBusy(false); }
+  };
+  const id = `default-team-${project.id}`;
+  return <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
+    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+      <label class="sr-only" for={id}>Default team for {project.id}</label>
+      <select id={id} value={project.defaultTeamId ?? ''} disabled={busy || !teams} onChange={e => { const v = (e.target as HTMLSelectElement).value; void choose(v || null); }} style={{ minHeight: '34px', borderRadius: '8px', border: '1px solid var(--btn-border)', background: '#fff', font: 'inherit', padding: '0 10px', maxWidth: '100%' }}>
+        <option value="">None · legacy agent configuration</option>
+        {(teams ?? []).filter(t => !t.archived || t.id === project.defaultTeamId).map(t => <option key={t.id} value={t.id} disabled={t.archived}>{t.name} · revision {t.revision}{t.archived ? ' · archived' : t.readiness.ready ? '' : ' · draft'}</option>)}
+      </select>
+      {current ? current.archived ? <Chip tone="bad">✕ Archived · submissions fail until changed</Chip> : current.readiness.ready ? <Chip tone="ok">✓ Ready</Chip> : <Chip tone="warn">⚠ Draft · submissions fail until ready</Chip> : null}
+      {project.defaultTeamId && !current && teams && <Chip tone="bad">Unknown team</Chip>}
+    </div>
+    <span class="muted" style={{ fontSize: '12px' }}>{current ? <>Applies to tasks submitted without an explicit team; each task freezes revision {current.revision} at submission. <a href={`/ui/teams/${current.id}`}>Open team</a></> : 'Tasks without an explicit team use the resolved YAML agents (legacy).'}</span>
+    {note && <span class={`note ${note.tone}`} role="alert" style={{ fontSize: '12.5px' }}>{note.text}</span>}
+  </div>;
 }
 export function ProjectsPage() {
   const projects = usePoll(resources.projects.key, resources.projects.load, resources.projects.intervalMs);
+  const teams = usePoll(resources.teams.key, resources.teams.load, resources.teams.intervalMs);
   const status = usePoll(resources.status.key, resources.status.load, resources.status.intervalMs).data;
   const docker = status?.service.dataDir === '/data';
   return <>
@@ -38,7 +43,7 @@ export function ProjectsPage() {
       <dl class="kv" style={{ gridTemplateColumns: '150px minmax(0, 1fr)' }}>
         <dt>Registered</dt><dd>{formatTime(p.registeredAt)} · base <span class="mono">{p.baseSha.slice(0, 7)}</span></dd>
         <dt>Default mode</dt><dd>{p.defaultMode ?? <span class="muted">None · each task asks once</span>}</dd>
-        <dt>Default team</dt><dd><span class="muted">None · legacy agent configuration</span> <Chip tone="neutral">set in U2</Chip></dd>
+        <dt>Default team</dt><dd><DefaultTeam project={p} teams={teams.data} onChanged={() => { projects.reload(); teams.reload(); }} /></dd>
         <dt>Path check</dt><dd class="muted">Verified at registration; live access diagnostics arrive with U3 registration.</dd>
       </dl>
       <a href={`/ui/tasks`} style={{ fontWeight: 700, fontSize: '13.5px' }}>History →</a>
@@ -69,7 +74,7 @@ export function SettingsPage() {
       <Card title="Engine and model defaults"><div style={{ padding: '14px 16px' }}><dl class="kv" style={{ gridTemplateColumns: '140px minmax(0, 1fr)' }}>
         <dt>Default engine</dt><dd class="mono">{status.defaults.engine}</dd>
         <dt>Default provider</dt><dd class="mono">{status.defaults.provider}</dd>
-        <dt>Default model</dt><dd>runtime default (not pinned)</dd>
+        <dt>Default model</dt><dd>{status.defaults.model ? <span class="mono">{status.defaults.model}</span> : 'runtime default (not pinned) · set defaultModel in devagents.yaml to pin team snapshots'}</dd>
         <dt>Providers</dt><dd>{status.defaults.providers.map(p => <div key={p.id} class="mono">{p.id} · {p.kind} · {p.auth}{p.apiKeyConfigured !== null ? ` · key ${p.apiKeyConfigured ? 'configured' : 'missing'}` : ''}{p.executable ? '' : ' · configuration only'}</div>)}</dd>
       </dl><div class="muted" style={{ fontSize: '12.5px', marginTop: '8px' }}>Per-agent overrides resolve against these defaults.</div></div></Card>
       <Card title="Execution limits"><div style={{ padding: '14px 16px' }}><dl class="kv" style={{ gridTemplateColumns: '170px minmax(0, 1fr)' }}>

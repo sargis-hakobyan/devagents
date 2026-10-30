@@ -1,4 +1,4 @@
-import { resources } from '../api';
+import { resources, teamLabel } from '../api';
 import { Card, Chip, Empty, ItemChip, Later, Skeleton, StateChip, ErrorNote } from '../components/ui';
 import { finishedStates, relative, taskState, truncate } from '../format';
 import { useNow, usePoll } from '../state';
@@ -7,6 +7,7 @@ export function OverviewPage() {
   const now = useNow();
   const { data: overview, error } = usePoll(resources.overview.key, resources.overview.load, resources.overview.intervalMs);
   const status = usePoll(resources.status.key, resources.status.load, resources.status.intervalMs).data;
+  const teams = usePoll(resources.teams.key, resources.teams.load, resources.teams.intervalMs).data;
   if (!overview && error) return <ErrorNote message={error} />;
   if (!overview) return <><Skeleton rows={2} label="Loading overview" /><Skeleton rows={4} /></>;
   const counts = overview.counts; const n = (...states: string[]) => states.reduce((sum, s) => sum + (counts[s] ?? 0), 0);
@@ -31,7 +32,7 @@ export function OverviewPage() {
           </div>)}
           {attentionCount > overview.attention.length && <div class="card-foot">Showing {overview.attention.length} of {attentionCount}. <a href="/ui/tasks?group=attention">View all tasks needing attention</a></div>}
         </Card>}
-        {running.length === 0 && queued.length === 0 ? <Card title="Currently running"><Empty title="Nothing is running">{status?.codex.signedIn ? 'Submit work with the CLI to start a task.' : 'Sign in to Codex and register a project to start.'}</Empty></Card> : running.concat(queued).slice(0, 2).map(t => <Card key={t.id} title={<span style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}><StateChip task={t} />{truncate(t.request, 80)}<span class="muted mono">{t.projectId} · legacy agent configuration</span></span>} right={<a href={`/ui/tasks/${t.id}`} style={{ fontWeight: 700 }}>Open task →</a>}
+        {running.length === 0 && queued.length === 0 ? <Card title="Currently running"><Empty title="Nothing is running">{status?.codex.signedIn ? 'Submit work with the CLI to start a task.' : 'Sign in to Codex and register a project to start.'}</Empty></Card> : running.concat(queued).slice(0, 2).map(t => <Card key={t.id} title={<span style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}><StateChip task={t} />{truncate(t.request, 80)}<span class="muted" style={{ fontSize: '12.5px', fontWeight: 500 }}><span class="mono">{t.projectId}</span> · {teamLabel(t.team)}</span></span>} right={<a href={`/ui/tasks/${t.id}`} style={{ fontWeight: 700 }}>Open task →</a>}
           foot={t.workItems.length ? `Measured: ${t.workItems.filter(i => i.state === 'completed').length} of ${t.workItems.length} items integrated · updated ${relative(t.updatedAt, now)}. Combined validation, independent review and one local commit follow.` : `No work items yet · updated ${relative(t.updatedAt, now)}`}>
           {t.workItems.length > 0 ? <div class="scroll-x"><table>
             <thead><tr><th>Item</th><th>Agent</th><th>Depends</th><th>Stage</th><th>Repairs</th><th>Updated</th></tr></thead>
@@ -57,7 +58,7 @@ export function OverviewPage() {
             <dt>Awaiting mode</dt><dd style={{ color: n('awaiting_mode') ? 'var(--warn-text)' : undefined }}>{n('awaiting_mode')}</dd>
             <dt>Finished</dt><dd>{n(...finishedStates)}</dd>
           </dl>
-          <div class="muted" style={{ fontSize: '12px', marginTop: '10px' }}>Saved teams arrive in U2; agents today come from YAML templates.</div>
+          <div class="muted" style={{ fontSize: '12px', marginTop: '10px' }}>{teams ? <>{teams.filter(t => !t.archived).length} saved team{teams.filter(t => !t.archived).length === 1 ? '' : 's'} · {teams.filter(t => !t.archived && t.readiness.ready).length} ready · <a href="/ui/teams">Teams</a></> : 'Loading teams…'}</div>
         </div></Card>
         <Card title="Connection"><div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {status ? <>

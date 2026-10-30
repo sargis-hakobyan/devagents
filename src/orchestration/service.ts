@@ -6,7 +6,7 @@ import { terminalStates } from '../domain/lifecycle.js';
 import { AppError } from '../domain/errors.js';
 import { inspectProject, WorkspaceManager } from '../workspace/git.js';
 import { builtinCapabilities, builtinDirectory, loadRegistry } from '../agents/registry.js';
-import { resolveEngine, resolveProviderId, teamReadiness, type RuntimeSupport } from '../domain/readiness.js';
+import { providerExecutable, resolveEngine, resolveProviderId, teamReadiness, type RuntimeSupport } from '../domain/readiness.js';
 import { validatePlan } from '../domain/plan.js';
 import { isWithin } from '../workspace/paths.js';
 
@@ -40,6 +40,18 @@ export class TaskService {
     return this.store.teams(filter).map(t => ({ id: t.id, name: t.name, description: t.description, revision: t.revision, archived: t.archived, createdAt: t.createdAt, updatedAt: t.updatedAt, members: t.members.length, enabledMembers: t.members.filter(m => m.enabled).length, readiness: teamReadiness(t.members, this.support) }));
   }
   team(id: string) { return { ...this.withReadiness(this.store.team(id)), revisions: this.store.teamRevisions(id) }; }
+  /** What the member editor may offer, with the reason for everything it must disable. */
+  teamOptions() {
+    const executable = (id: string) => this.executableEngines.has(id);
+    return {
+      platform: this.platform,
+      defaults: { engine: this.config.defaultEngine, provider: this.config.defaultProvider, model: this.config.defaultModel ?? null },
+      capabilities: [...builtinCapabilities].sort(),
+      engines: ['codex', 'claude-code'].map(id => ({ id, executable: executable(id), reason: executable(id) ? null : 'not available until M4 (no adapter in this build)' })),
+      providers: this.config.providers.map(p => ({ id: p.id, kind: p.kind, auth: p.auth, executable: providerExecutable(p), reason: providerExecutable(p) ? null : 'configuration only; execution needs the official OpenAI provider' })),
+      limits: { members: 12, instructions: 16000, capabilities: 20 },
+    };
+  }
   /** Server-side diagnostics for an unsaved draft; the browser never computes readiness itself. */
   checkTeam(input: unknown): { readiness: TeamReadiness } { return { readiness: teamReadiness(TeamInput.parse(input).members, this.support) }; }
   createTeam(input: unknown) { const team = TeamInput.parse(input); teamReadiness(team.members, this.support); return this.withReadiness(this.store.createTeam(team)); }

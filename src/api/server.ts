@@ -127,6 +127,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       if (req.method === 'GET' && path === '/teams') return send(res, 200, service.teams(z.enum(['active', 'archived', 'all']).parse(url.searchParams.get('filter') ?? 'active')));
       if (req.method === 'POST' && path === '/teams') return send(res, 201, service.createTeam(await body(req)));
       if (req.method === 'POST' && path === '/teams/check') return send(res, 200, service.checkTeam(await body(req)));
+      if (req.method === 'GET' && path === '/teams/options') return send(res, 200, service.teamOptions());
       if (req.method === 'GET' && path === '/teams/templates') return send(res, 200, await service.templates(url.searchParams.get('projectId') ?? undefined));
       const teamMatch = /^\/teams\/([a-f0-9-]{36})(?:\/(archive|duplicate))?$/.exec(path);
       if (teamMatch) {

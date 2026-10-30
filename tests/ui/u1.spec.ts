@@ -147,11 +147,8 @@ test('disconnection shows a banner with the last update and reconnecting appends
 test('teams, projects and settings are honest about what exists today', async ({ page }) => {
   await signIn(page);
   await page.goto(`${base}/ui/teams`);
-  await expect(page.getByText('Saved teams are not available yet (planned for U2).')).toBeVisible();
-  await expect(page.getByText('Current agent configuration · 6 agents')).toBeVisible();
-  await expect(page.getByText('✓ Ready to run work')).toBeVisible();
-  await expect(page.getByRole('button', { name: /New team/ })).toBeDisabled();
-  await page.screenshot({ path: join(shots, 'u1-teams.png'), fullPage: true });
+  await expect(page.getByRole('link', { name: 'New team' })).toBeVisible();
+  await expect(page.getByText('Teams freeze at submission.')).toBeVisible();
   await page.goto(`${base}/ui/projects`);
   await expect(page.locator('article.item b', { hasText: /^fixture$/ })).toBeVisible();
   await expect(page.locator('article.item b', { hasText: /^website$/ })).toBeVisible();

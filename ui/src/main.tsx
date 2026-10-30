@@ -8,7 +8,8 @@ import { Shell } from './components/Shell';
 import { OverviewPage } from './pages/Overview';
 import { TasksPage } from './pages/Tasks';
 import { TaskDetailPage } from './pages/TaskDetail';
-import { ProjectsPage, SettingsPage, SignedOutPage, TeamsPage } from './pages/Simple';
+import { ProjectsPage, SettingsPage, SignedOutPage } from './pages/Simple';
+import { TeamEditorPage, TeamsPage } from './pages/Teams';
 
 function App() {
   const { path, route } = useLocation();
@@ -28,6 +29,7 @@ function Authenticated() {
       <Route path="/ui/tasks" component={TasksPage} />
       <Route path="/ui/tasks/:id" component={({ id }: { id: string }) => <TaskDetailPage id={id} />} />
       <Route path="/ui/teams" component={TeamsPage} />
+      <Route path="/ui/teams/:id" component={({ id }: { id: string }) => <TeamEditorPage id={id} />} />
       <Route path="/ui/projects" component={ProjectsPage} />
       <Route path="/ui/settings" component={SettingsPage} />
       <Route default component={() => <div class="note info">Unknown page. <a href="/ui/">Back to the overview</a></div>} />
