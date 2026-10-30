@@ -68,7 +68,7 @@ Both exited successfully on their first attempt. M2 verified planning, implement
 
 ## U1–U3 — Local browser UI (U1 and U2 implemented; U3 planned)
 
-Design and implementation owner: Claude, reconfirmed by the owner on 2026-10-30. Product scope and acceptance are in [the frontend brief](FRONTEND_BRIEF.md); start with [the implementation instructions](../IMPLEMENTATION_PROMPT.md) and [UI implementation plan](UI_IMPLEMENTATION_PLAN.md). The post-review live gate is satisfied for the baseline above. U2 was implemented on 2026-10-30 from the handoff in the implementation plan; U3 and M4 remain separate increments.
+Ownership clarified by the owner on 2026-10-30: Codex handles implementation fixes, including frontend bugs; involve Claude when new design is needed. Product scope and acceptance are in [the frontend brief](FRONTEND_BRIEF.md); start with [the implementation instructions](../IMPLEMENTATION_PROMPT.md) and [UI implementation plan](UI_IMPLEMENTATION_PLAN.md). The post-review live gate is satisfied for the baseline above. U2 was implemented on 2026-10-30 from the handoff in the implementation plan; U3 and M4 remain separate increments.
 
 - [x] Product brief, implementation handoff and roadmap alignment.
 - [x] Full screen/state design: Overview, Teams, Projects, Tasks and Settings. Direction A was chosen with its Overview restructured for density. The selected source boards live in `design/ui/` (see its README).
@@ -79,6 +79,7 @@ Design and implementation owner: Claude, reconfirmed by the owner on 2026-10-30.
 - [x] U1 browser workflow/security tests, responsive layout, regenerable screenshots in ignored `test-results/ui-screenshots/` and native/Docker packaging. Repeat for U2 and U3.
 - [x] U2 as above (18 browser workflows pass in full; Docker smoke re-run for the in-image UI).
 - [x] Codex U2 review fixes F1–F5 plus the team-backed DAG snapshot test (`CLAUDE_REVIEW_U2_FIXES.md`): readiness reuses plan-validation role rules, template copies are complete under a 192,000-byte team budget, and the editor keeps typed grants, ignores stale readiness responses and keeps Restore/member selection usable on archived teams. `npm run check` passed 122 tests; all 21 browser workflows passed. Docker/protocol/M2/M3 standalone suites were not repeated (no runtime, sandbox or adapter code changed).
+- [x] U2 follow-up F6: template/custom additions are disabled and guarded while saving, including menus already open. The regression failed against the old UI, then passed with the fix and verified additions persist after saving resumes. `npm run check` passed 122 tests (no skips), typechecks and build; the final browser run passed all 22 workflows. The first browser run had an existing F2 timeout and an ambiguous F6 status locator when a connection banner appeared; the F6 locator now selects the save notice, and the full rerun passed in 37.2 seconds. Browser runs used an empty temporary credential runtime. U2 is accepted with the existing limitations; the mode-default idempotency follow-up remains separate. No authenticated fixtures, credential inspection, Docker rebuild or push was performed for this fix.
 - [ ] U3 as above.
 
 U1 is the first integrated UI increment before M4. Keep U2/U3 and M4 as separately reviewed work; a team editor must not claim unavailable engines or capabilities work.

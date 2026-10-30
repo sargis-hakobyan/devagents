@@ -100,7 +100,11 @@ export function TeamEditorPage({ id }: { id: string }) {
   }, [draft, dirty]);
   const update = (fn: (d: TeamDraft) => TeamDraft) => { setDraft(fn); setDirty(true); setNotice(undefined); };
   const updateMember = (index: number, patch: Partial<TeamMember>) => update(d => ({ ...d, members: d.members.map((m, i) => i === index ? { ...m, ...patch } : m) }));
-  const addMember = (m: TeamMember) => { const member = { ...m, id: uniqueId(m.id, draft.members) }; update(d => ({ ...d, members: [...d.members, member] })); setSelected(draft.members.length); };
+  const addMember = (m: TeamMember) => {
+    // The save response replaces the submitted draft; additions must wait until it settles.
+    if (saving || loaded?.archived) return;
+    const member = { ...m, id: uniqueId(m.id, draft.members) }; update(d => ({ ...d, members: [...d.members, member] })); setSelected(draft.members.length);
+  };
   const removeMember = (index: number) => { update(d => ({ ...d, members: d.members.filter((_, i) => i !== index) })); setSelected(undefined); };
   const save = async (expectedRevision?: number) => {
     setSaving(true); setSaveError(undefined); setConflict(undefined);
@@ -141,9 +145,9 @@ export function TeamEditorPage({ id }: { id: string }) {
               {!archived && <details class="menu"><summary class="btn primary" role="button" aria-haspopup="menu">Add member ▾</summary>
                 <div class="menu-list" role="menu" aria-label="Add member">
                   <div class="h" style={{ padding: '6px 10px 2px' }}>From template</div>
-                  {!templates ? <span class="muted" style={{ padding: '6px 10px' }}>Loading templates…</span> : templates.map(t => <button key={t.id} type="button" role="menuitem" onClick={e => { addMember(t); (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; }}><b>{t.name}</b><span class="muted"> · {t.id} · copied, not linked</span></button>)}
+                  {!templates ? <span class="muted" style={{ padding: '6px 10px' }}>Loading templates…</span> : templates.map(t => <button key={t.id} type="button" role="menuitem" disabled={readOnly} onClick={e => { addMember(t); (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; }}><b>{t.name}</b><span class="muted"> · {t.id} · copied, not linked</span></button>)}
                   <div class="h" style={{ padding: '8px 10px 2px', borderTop: '1px solid var(--row)' }}>Custom</div>
-                  <button type="button" role="menuitem" onClick={e => { addMember(customMember(draft.members)); (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; }}><b>Custom member</b><span class="muted"> · blank role, read-only until you grant more</span></button>
+                  <button type="button" role="menuitem" disabled={readOnly} onClick={e => { addMember(customMember(draft.members)); (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; }}><b>Custom member</b><span class="muted"> · blank role, read-only until you grant more</span></button>
                 </div></details>}
               {!isNew && <button type="button" class="btn" onClick={() => void duplicate()} disabled={saving}>Duplicate</button>}
               {!isNew && !archived && <button type="button" class="btn" onClick={() => void archive(true)} disabled={saving || dirty} title={dirty ? 'Save or discard your edits first' : 'Hides the team from new submissions; existing tasks keep their snapshot'}>Archive</button>}

@@ -151,3 +151,9 @@ Keep source, tests, reproducible compatibility/smoke scripts, current product/im
 - Readiness reuses the role-selection rules of plan validation: a reviewer must be a different eligible member from an implementer, and its own write grants do not disqualify it because review always runs read-only. A dedicated read-only reviewer is not a product requirement.
 - Template copies are complete. Per-member instructions share the registry's 64 KB limit and a team is bounded at 192,000 bytes of instructions in total, refused with the total stated; nothing is truncated silently.
 - The editor keeps raw scope text while typing, drops readiness responses that belong to an older draft, and disables only editable controls on archived teams. The review report is preserved as `CODEX_REVIEW_U2.md`; the fixes are recorded in `CLAUDE_REVIEW_U2_FIXES.md`.
+
+## U2 follow-up and implementation ownership — 2026-10-30
+
+- The owner clarified that Codex handles implementation fixes, including frontend bugs; involve Claude when new design is needed. This supersedes the earlier blanket frontend ownership rule and does not start U3 or M4.
+- The follow-up review closed F1–F5 and the principal DAG snapshot coverage gap, but found that adding a member while saving silently lost the addition when the response replaced the draft (F6). Both template and custom menu actions now disable during saving, and the shared addition handler also refuses mutations while saving or archived. Member selection and archived Restore/Duplicate retain their existing behaviour.
+- The browser regression holds a real save request with the menu already open, checks both kinds of addition remain disabled after reopening, then releases the request and verifies ordinary additions persist through a second save and reload. The original and follow-up review reports remain unchanged; verification of this fix is recorded in `MILESTONES.md`.

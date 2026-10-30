@@ -70,7 +70,7 @@ test('a team is created from a template copy plus a custom member, saved as a dr
   await expect(page.locator('.card-foot')).toContainText('implementer ✓');
   await expect(page.getByRole('button', { name: 'Save team' })).toBeEnabled();
   await page.getByRole('button', { name: 'Save team' }).click();
-  await expect(page.getByRole('status')).toContainText('Saved revision 2');
+  await expect(page.getByRole('status').filter({ hasText: 'Saved revision 2' })).toBeVisible();
   saved = await teamNamed('Docs team <b>bold</b> & "quotes"');
   expect(saved.revision).toBe(2); expect(saved.readiness.ready).toBe(true);
   expect(saved.members[2]!.capabilities).toEqual(['filesystem-read', 'implementation', 'filesystem-write']);
@@ -254,4 +254,53 @@ test('an archived team can be inspected member by member and restored from its o
   await page.getByRole('button', { name: 'Archive' }).click();
   await expect(page.getByText('Archived.', { exact: false })).toBeVisible();
   expect((await teamNamed('Old platform team')).archived).toBe(true);
+});
+
+test('template and custom additions are blocked during save and work again afterwards (F6)', async ({ page }) => {
+  await signIn(page);
+  const website = await teamNamed('Website team');
+  const { status, json: copy } = await apiCall<Team>(`/teams/${website.id}/duplicate`, 'POST', { name: 'Pending save team' });
+  expect(status).toBe(201);
+  await page.goto(`${base}/ui/teams/${copy.id}`);
+  await page.getByLabel(/^Description/).fill('Save held while the member menu is open');
+  const menu = page.getByRole('button', { name: 'Add member ▾' });
+  await menu.click();
+  const template = page.getByRole('menuitem', { name: /Backend Developer/ });
+  const custom = page.getByRole('menuitem', { name: /Custom member/ });
+  await expect(template).toBeEnabled();
+  await expect(custom).toBeEnabled();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route(`**/teams/${copy.id}`, async route => {
+    if (route.request().method() === 'PUT') await gate;
+    await route.continue();
+  });
+  const pending = page.waitForRequest(request => request.url() === `${base}/teams/${copy.id}` && request.method() === 'PUT');
+  await page.getByRole('button', { name: 'Save team' }).click();
+  await pending;
+  try {
+    // An already-open menu must become read-only along with the rest of the form.
+    await expect(template).toBeDisabled();
+    await expect(custom).toBeDisabled();
+    await menu.click();
+    await menu.click();
+    await expect(template).toBeDisabled();
+    await expect(custom).toBeDisabled();
+    await expect(page.locator('.members > li')).toHaveCount(copy.members.length);
+  } finally { release(); }
+  await expect(page.getByRole('status')).toContainText('Saved revision 2');
+  expect((await teamNamed('Pending save team')).members).toEqual(copy.members);
+  await expect(template).toBeEnabled();
+  await expect(custom).toBeEnabled();
+  await template.click();
+  await menu.click();
+  await custom.click();
+  await expect(page.locator('.members > li')).toHaveCount(copy.members.length + 2);
+  await page.getByRole('button', { name: 'Save team' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Saved revision 3' })).toBeVisible();
+  const saved = await teamNamed('Pending save team');
+  expect(saved.members).toHaveLength(copy.members.length + 2);
+  expect(saved.members.slice(-2).map(member => member.origin)).toEqual(['template', 'custom']);
+  await page.reload();
+  await expect(page.locator('.members > li')).toHaveCount(saved.members.length);
 });
