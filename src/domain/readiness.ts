@@ -1,6 +1,7 @@
 import type { AppConfig, TeamDiagnostic, TeamMember, TeamReadiness } from './schemas.js';
 import { assertGrantShape, assertSupportedWriteGrant } from './ownership.js';
 import { AppError } from './errors.js';
+import { independentReviewer, selectImplementer } from './roles.js';
 
 export type RuntimeSupport = {
   config: AppConfig;
@@ -41,11 +42,14 @@ export function teamReadiness(members: TeamMember[], support: RuntimeSupport): T
     if (m.enabled && m.model === 'default' && !support.config.defaultModel) add('warning', 'model_not_pinned', `${m.name}: no model is pinned; the runtime default is chosen at execution and recorded as such`, m.id);
     if (!m.enabled) add('warning', 'member_disabled', `${m.name} is disabled and will not be selected`, m.id);
   }
+  // Role coverage uses the same selection rules as plan validation and execution: an implementer is
+  // any enabled writable worker, and a reviewer must be a different eligible member from the
+  // implementer (review runs read-only regardless of the reviewer's own write grants).
   const enabled = members.filter(m => m.enabled);
   if (!enabled.some(m => m.delegation.canDelegate && m.capabilities.includes('planning'))) add('error', 'no_planner', 'No enabled planner: add a member that delegates with the planning capability (Tech Lead template)');
-  if (!enabled.some(m => m.delegation.canReceiveTasks && m.permissions.writePaths.length > 0)) add('error', 'no_implementer', 'No enabled implementer: add a member that receives tasks and has write permissions');
-  const reviewers = enabled.filter(m => m.delegation.canReceiveTasks && m.capabilities.includes('review'));
-  if (!reviewers.length) add('error', 'no_reviewer', 'No enabled reviewer: add a member with the review capability');
-  else if (!reviewers.some(m => m.permissions.writePaths.length === 0)) add('error', 'no_independent_reviewer', 'No independent reviewer: every reviewer can also implement; add a review member without write permissions');
+  const implementers = enabled.filter(m => selectImplementer([m], { requiredCapabilities: [] }));
+  if (!implementers.length) add('error', 'no_implementer', 'No enabled implementer: add a member that receives tasks and has write permissions');
+  if (!independentReviewer(enabled, [])) add('error', 'no_reviewer', 'No enabled reviewer: add a member with the review capability');
+  else if (implementers.length && !implementers.some(i => independentReviewer(enabled, [i.id]))) add('error', 'no_independent_reviewer', 'No independent reviewer: the only reviewer is also the only implementer; add a second worker so review is done by a different member');
   return { ready: !diagnostics.some(d => d.level === 'error'), diagnostics };
 }

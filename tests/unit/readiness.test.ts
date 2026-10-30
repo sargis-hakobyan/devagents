@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { Config, MemberInput, TeamInput } from '../../src/domain/schemas.js';
 import { developer, lead, member, reviewer } from '../fixtures/team-members.js';
 import { teamReadiness, type RuntimeSupport } from '../../src/domain/readiness.js';
+import { validatePlan } from '../../src/domain/plan.js';
 import { builtinCapabilities } from '../../src/agents/registry.js';
 
 const support = (config: Record<string, unknown> = {}): RuntimeSupport => ({ config: Config.parse({ schemaVersion: 1, ...config }), capabilities: builtinCapabilities, executableEngines: new Set(['codex']), platform: 'darwin' });
@@ -18,8 +19,15 @@ test('a complete roster is ready and readiness never depends on sign-in or model
 });
 test('incomplete rosters are drafts with one diagnostic per missing role', () => {
   assert.deepEqual(teamReadiness([], support()).diagnostics.map(d => d.code), ['no_planner', 'no_implementer', 'no_reviewer']);
-  const noIndependent = teamReadiness([lead(), developer(), member({ id: 'writing-reviewer', capabilities: ['review', 'filesystem-write'] })], support());
-  assert.equal(noIndependent.ready, false); assert.ok(noIndependent.diagnostics.some(d => d.code === 'no_independent_reviewer'));
+  // The same member cannot implement and review its own work; a distinct reviewer may hold write grants (F5).
+  const solo = teamReadiness([lead(), member({ id: 'solo', capabilities: ['implementation', 'review', 'filesystem-write'] })], support());
+  assert.equal(solo.ready, false); assert.ok(solo.diagnostics.some(d => d.code === 'no_independent_reviewer'));
+  const writableReviewer = member({ id: 'test-reviewer', capabilities: ['review', 'implementation', 'filesystem-write'], permissions: { readPaths: ['project:/**'], writePaths: ['project:/tests/**'], allowCommands: false, allowPush: false } });
+  const distinct = teamReadiness([lead(), developer(), writableReviewer], support());
+  assert.equal(distinct.ready, true); assert.ok(!distinct.diagnostics.some(d => d.level === 'error'));
+  const asAgents = [lead(), developer(), writableReviewer].map(m => ({ ...m, schemaVersion: 1 as const, instructionsFile: 'x', source: 'test' }));
+  assert.ok(validatePlan({ summary: 's', risks: [], items: [{ id: 'one', title: 't', description: 'd', acceptanceCriteria: ['a'], dependsOn: [], requiredCapabilities: ['implementation'], projectId: 'fixture', branch: 'codex/one', validation: [{ executable: 'node', args: ['--test'] }], assignedAgent: 'dev' }] }, 'fixture', asAgents, { platform: 'darwin' }), 'plan validation accepts the same roster readiness accepts');
+  assert.throws(() => validatePlan({ summary: 's', risks: [], items: [{ id: 'one', title: 't', description: 'd', acceptanceCriteria: ['a'], dependsOn: [], requiredCapabilities: ['implementation'], projectId: 'fixture', branch: 'codex/one', validation: [{ executable: 'node', args: ['--test'] }] }] }, 'fixture', asAgents.filter(a => a.id !== 'dev'), { platform: 'darwin' }), /independent/, 'the writable reviewer selected as implementer leaves no reviewer, as before');
   const disabled = teamReadiness([lead(), { ...developer(), enabled: false }, reviewer()], support());
   assert.equal(disabled.ready, false); assert.ok(disabled.diagnostics.some(d => d.code === 'no_implementer')); assert.ok(disabled.diagnostics.some(d => d.code === 'member_disabled' && d.memberId === 'dev'));
 });
