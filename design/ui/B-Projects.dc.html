@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents Projects — Direction B</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#F7F5F0;color:#1E1B16;font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:14px;line-height:1.5}
+a{color:#2F4BD9}a:hover{color:#1F35A6}
+.nav a{display:flex;align-items:center;gap:10px;padding:8px 12px;border-left:3px solid transparent;color:#4A463F;text-decoration:none;font-weight:500;font-size:14px}
+.nav a:hover{background:#EFEBE3;color:#1E1B16}.nav a.on{border-left-color:#2F4BD9;background:#EFEBE3;color:#1E1B16;font-weight:600}
+.panel{background:#FFFFFF;border:1px solid #E6E1D8;border-radius:8px}
+.tag{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:0 14px;border-radius:6px;border:1px solid #CFC8BC;background:#FFFFFF;color:#1E1B16;font:inherit;font-weight:600;font-size:13px;cursor:pointer}
+.btn.primary{background:#2F4BD9;border-color:#2F4BD9;color:#FFFFFF}
+.btn:focus-visible,.nav a:focus-visible{outline:3px solid #1E1B16;outline-offset:2px}
+.muted{color:#5F5A52}.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:12.5px}
+.h{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#5F5A52;font-weight:600}
+code{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:12px;background:#F7F5F0;border:1px solid #E6E1D8;border-radius:4px;padding:2px 6px}
+table{border-collapse:collapse;width:100%}th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#5F5A52;padding:8px 12px;border-bottom:1px solid #E6E1D8;font-weight:600}td{padding:10px 12px;border-bottom:1px solid #EFEBE3;vertical-align:top}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-wrap: wrap">
+  <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 232px; background: #F1EDE5; border-right: 1px solid #E6E1D8; display: flex; flex-direction: column; padding: 16px 0">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 4px 16px 18px"><span class="mono" style="display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 7px; background: #2F4BD9; color: #FFFFFF; font-weight: 600; font-size: 13px" aria-hidden="true">da</span><span style="font-weight: 700; font-size: 16px; letter-spacing: -0.01em">devagents</span></div>
+    <a href="B-Overview.dc.html">Overview</a><a href="B-Tasks.dc.html">Tasks</a><a href="B-Teams.dc.html">Teams</a><a href="B-Projects.dc.html" class="on" aria-current="page">Projects</a><a href="B-Settings.dc.html">Settings</a>
+  </nav>
+  <main style="flex: 999 1 560px; min-width: 0; padding: 24px 32px 40px; display: flex; flex-direction: column; gap: 16px">
+    <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid #E6E1D8; padding-bottom: 14px">
+      <div><div class="h">Projects</div><h1 style="margin: 2px 0 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em">Registered repositories <span class="muted mono" style="font-size: 14px; font-weight: 500">2</span></h1><div class="muted" style="font-size: 13px">Existing Git checkouts by absolute path. Work happens in managed worktrees; the original checkout is never modified.</div></div>
+      <button class="btn primary" type="button" disabled aria-disabled="true" title="Browser registration arrives in U3. CLI: devagents projects add <id> <absolute-path>" style="opacity: .55; cursor: not-allowed">+ Register repository · U3</button>
+    </div>
+    <section class="panel" style="overflow: hidden">
+      <div style="overflow-x: auto"><table>
+        <thead><tr><th>Project</th><th>Path</th><th>Access</th><th>Base</th><th>Default mode</th><th>Default team</th><th>Overrides</th><th>Worktrees</th><th>Recent tasks</th></tr></thead>
+        <tbody>
+          <tr><td><b>website</b><div class="muted" style="font-size: 12px">registered Mon 14:20</div></td><td class="mono" style="word-break: break-all">/Users/sargis/Projects/website</td><td><span class="tag" style="background: #E6F3EA; color: #1E7A46">✓ Git root</span></td><td class="mono">feee8db</td><td>plan-approval</td><td class="muted">none · legacy <span class="tag" style="background: #EFEBE3; color: #4A463F">U2</span></td><td class="mono">.devagents/agents · 1</td><td class="mono">2 · 1 to clean</td><td style="font-size: 13px">Add input validation <span class="tag" style="background: #FBEFD2; color: #8A5A00">awaiting</span><br>Rename helper <span class="tag" style="background: #EFEBE3; color: #4A463F">cancelled</span></td></tr>
+          <tr><td><b>fixture</b><div class="muted" style="font-size: 12px">registered today 09:40</div></td><td class="mono" style="word-break: break-all">/private/tmp/devagents-m3-k2Qx/project</td><td><span class="tag" style="background: #E6F3EA; color: #1E7A46">✓ Git root</span></td><td class="mono">2b7a01c</td><td class="muted">none · asks once</td><td class="muted">none · legacy</td><td class="muted">none</td><td class="mono">4 · 1 running</td><td style="font-size: 13px">Three modules <span class="tag" style="background: #E9ECFB; color: #1F35A6">running</span><br>Fix greeting <span class="tag" style="background: #E6F3EA; color: #1E7A46">completed</span></td></tr>
+        </tbody></table></div>
+    </section>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+      <section class="panel" aria-label="Native registration" style="padding: 14px; display: flex; flex-direction: column; gap: 8px"><span class="h">Native</span><span style="font-size: 13px">Register the absolute path of an existing checkout. The service verifies it is a Git root with at least one commit and that the path has not moved.</span><code>devagents projects add website /Users/sargis/Projects/website</code></section>
+      <section class="panel" aria-label="Docker registration" style="padding: 14px; display: flex; flex-direction: column; gap: 8px"><span class="h">Docker</span><span style="font-size: 13px">Mount the checkout explicitly in <span class="mono">compose.override.yaml</span>, then register its <b>container</b> path. Home directories and the Docker socket are never mounted; there is no filesystem browser.</span><code>docker compose exec devagents node dist/cli/main.js projects add website /projects/website</code></section>
+    </div>
+    <section class="panel" aria-label="Path diagnostics" style="padding: 14px; display: flex; flex-direction: column; gap: 6px; border-color: #E8C979">
+      <span class="h">Diagnostics shown when a path fails</span>
+      <ul style="margin: 0; padding-left: 18px; font-size: 13px"><li><b>Not accessible</b> — ENOENT or permission denied at the registered path; tasks stay readable, submissions blocked.</li><li><b>Moved</b> — the canonical path changed since registration; re-register at the new location.</li><li><b>Not a Git root</b> — the path is inside a repository; register the checkout root.</li><li><b>Docker UID</b> — the container’s non-root UID 1000 cannot read the mount; adjust ownership/ACLs on the host.</li></ul>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

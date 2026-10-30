@@ -62,7 +62,7 @@
 Design and implementation owner: Claude, using its frontend design tools. Product scope and acceptance are in [the frontend brief](FRONTEND_BRIEF.md); start with [the implementation handoff](FRONTEND_IMPLEMENTATION_PROMPT.md). Design and deterministic UI development may proceed while the live gate is pending; do not declare release acceptance or start M4 until it is satisfied.
 
 - [x] Product brief, implementation handoff and roadmap alignment.
-- [ ] Full screen/state design: Overview, Teams, Projects, Tasks and Settings.
+- [x] Full screen/state design: Overview, Teams, Projects, Tasks and Settings. Two directions were designed; Direction A was chosen with its Overview restructured for density. Source boards live in `design/ui/` (see its README).
 - [ ] U1: same-origin app shell, protected browser session, real read-only progress/history/results, safe content rendering and browser/CLI compatibility.
 - [ ] U2: persisted reusable teams, custom/template members, revisions, readiness, archive/duplicate, project defaults, submission snapshots and legacy compatibility.
 - [ ] U3: guided setup, project registration, task submission/mode, version-bound plan approval, cancellation and safe diff inspection.

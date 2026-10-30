@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents Settings — Direction B</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#F7F5F0;color:#1E1B16;font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:14px;line-height:1.5}
+a{color:#2F4BD9}a:hover{color:#1F35A6}
+.nav a{display:flex;align-items:center;gap:10px;padding:8px 12px;border-left:3px solid transparent;color:#4A463F;text-decoration:none;font-weight:500;font-size:14px}
+.nav a:hover{background:#EFEBE3;color:#1E1B16}.nav a.on{border-left-color:#2F4BD9;background:#EFEBE3;color:#1E1B16;font-weight:600}
+.panel{background:#FFFFFF;border:1px solid #E6E1D8;border-radius:8px}
+.tag{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:0 14px;border-radius:6px;border:1px solid #CFC8BC;background:#FFFFFF;color:#1E1B16;font:inherit;font-weight:600;font-size:13px;cursor:pointer}
+.btn:focus-visible,.nav a:focus-visible{outline:3px solid #1E1B16;outline-offset:2px}
+.muted{color:#5F5A52}.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:12.5px}
+.h{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#5F5A52;font-weight:600}
+code{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:12px;background:#F7F5F0;border:1px solid #E6E1D8;border-radius:4px;padding:2px 6px}
+dl.kv{margin:0;display:grid;grid-template-columns:170px minmax(0,1fr);gap:7px 14px;font-size:13px}dl.kv dt{color:#5F5A52}dl.kv dd{margin:0}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-wrap: wrap">
+  <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 232px; background: #F1EDE5; border-right: 1px solid #E6E1D8; display: flex; flex-direction: column; padding: 16px 0">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 4px 16px 18px"><span class="mono" style="display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 7px; background: #2F4BD9; color: #FFFFFF; font-weight: 600; font-size: 13px" aria-hidden="true">da</span><span style="font-weight: 700; font-size: 16px; letter-spacing: -0.01em">devagents</span></div>
+    <a href="B-Overview.dc.html">Overview</a><a href="B-Tasks.dc.html">Tasks</a><a href="B-Teams.dc.html">Teams</a><a href="B-Projects.dc.html">Projects</a><a href="B-Settings.dc.html" class="on" aria-current="page">Settings</a>
+  </nav>
+  <main style="flex: 999 1 560px; min-width: 0; padding: 24px 32px 40px; display: flex; flex-direction: column; gap: 16px">
+    <div style="border-bottom: 1px solid #E6E1D8; padding-bottom: 14px"><div class="h">Settings</div><h1 style="margin: 2px 0 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em">Connection, engine and limits</h1><div class="muted" style="font-size: 13px">Read-only in U1. Values come from the running service; edit <span class="mono">devagents.yaml</span> and restart, or use the terminal setup below.</div></div>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start">
+      <section class="panel" aria-label="Codex connection" style="padding: 14px; display: flex; flex-direction: column; gap: 10px; grid-column: span 2">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap"><span class="h">Codex connection</span><span style="display: flex; gap: 6px"><span class="tag" style="background: #E6F3EA; color: #1E7A46">✓ sign-in saved · ChatGPT</span><span class="tag" style="background: #FBEFD2; color: #8A5A00">⚠ model access not verified</span></span></div>
+        <dl class="kv">
+          <dt>Runtime</dt><dd>Codex CLI 0.160.1 (pinned) · installed · dedicated profile</dd>
+          <dt>Credential store</dt><dd>OS keychain (native). Docker: encrypted vault in the data volume, unlocked by <span class="mono">./devagents start</span>. Secrets are never displayed; a replacement is write-only.</dd>
+          <dt>Model access</dt><dd>A saved sign-in does not establish quota or access to every model. The optional connection test sends one small request on your allowance and never runs automatically.</dd>
+          <dt>Claude Code</dt><dd>installed 2.1.229 · <span class="tag" style="background: #EFEBE3; color: #4A463F">not enabled · adapter planned for M4</span></dd>
+        </dl>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; border-top: 1px solid #EFEBE3; padding-top: 10px"><button class="btn" type="button" disabled aria-disabled="true" title="Guided browser setup arrives in U3" style="opacity: .55; cursor: not-allowed">Change sign-in · U3</button><button class="btn" type="button" disabled aria-disabled="true" title="Opt-in paid test; arrives with U3 and always asks first" style="opacity: .55; cursor: not-allowed">Test connection · uses allowance</button><span class="muted" style="font-size: 12.5px">Terminal today: <code>npm run cli -- auth setup</code> or <code>./devagents start</code></span></div>
+      </section>
+      <section class="panel" aria-label="Engine and model defaults" style="padding: 14px; display: flex; flex-direction: column; gap: 10px"><span class="h">Engine and model defaults</span><dl class="kv" style="grid-template-columns: 130px minmax(0, 1fr)"><dt>Default engine</dt><dd class="mono">codex</dd><dt>Default provider</dt><dd class="mono">openai · auth login</dd><dt>Default model</dt><dd>runtime default (not pinned)</dd><dt>Other providers</dt><dd class="mono">anthropic (api-key ANTHROPIC_API_KEY) · local (ollama) <span class="muted" style="font-family: 'IBM Plex Sans', sans-serif">— configuration only</span></dd></dl><span class="muted" style="font-size: 12.5px">Per-agent overrides resolve against these defaults.</span></section>
+      <section class="panel" aria-label="Execution limits" style="padding: 14px; display: flex; flex-direction: column; gap: 10px"><span class="h">Execution limits</span><dl class="kv" style="grid-template-columns: 150px minmax(0, 1fr)"><dt>Global concurrency</dt><dd class="mono">2 items / wave</dd><dt>Repair cycles</dt><dd class="mono">1 per item · 1 shared integration</dd><dt>Execution timeout</dt><dd class="mono">600 s / engine run</dd><dt>Validation timeout</dt><dd class="mono">120 s / command · output ≤ 1 MiB</dd><dt>Workspace scan limit</dt><dd class="mono">200000 entries</dd><dt>Scheduling</dt><dd>one top-level request · deterministic waves</dd></dl></section>
+      <section class="panel" aria-label="Service and browser session" style="padding: 14px; display: flex; flex-direction: column; gap: 10px; grid-column: span 2"><span class="h">Service and browser session</span><dl class="kv"><dt>Listening</dt><dd class="mono">127.0.0.1:4310 · native · data ~/Projects/.devagents (0700)</dd><dt>Browser session</dt><dd>signed in via one-time launcher link at 09:38 · expires after 12 h idle · <a href="B-States.dc.html">Sign out</a></dd><dt>CLI access</dt><dd>bearer token in <span class="mono">api-token</span>, never sent to the browser</dd><dt>Version</dt><dd class="mono">devagents 0.1.0 · node 24.18 · darwin/arm64</dd></dl></section>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
