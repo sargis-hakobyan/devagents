@@ -1,7 +1,8 @@
+import { z } from 'zod';
 import { join } from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { Store } from '../persistence/store.js';
-import { Mode, TaskInput, TeamInput, type AgentDefinition, type AppConfig, type Task, type TaskTeam, type TeamMember, type TeamRecord, type TeamReadiness, type TeamSummary } from '../domain/schemas.js';
+import { Mode, TaskInput, TeamInput, TEAM_INSTRUCTION_BYTES, type AgentDefinition, type AppConfig, type Task, type TaskTeam, type TeamMember, type TeamRecord, type TeamReadiness, type TeamSummary } from '../domain/schemas.js';
 import { terminalStates } from '../domain/lifecycle.js';
 import { AppError } from '../domain/errors.js';
 import { inspectProject, WorkspaceManager } from '../workspace/git.js';
@@ -49,7 +50,7 @@ export class TaskService {
       capabilities: [...builtinCapabilities].sort(),
       engines: ['codex', 'claude-code'].map(id => ({ id, executable: executable(id), reason: executable(id) ? null : 'not available until M4 (no adapter in this build)' })),
       providers: this.config.providers.map(p => ({ id: p.id, kind: p.kind, auth: p.auth, executable: providerExecutable(p), reason: providerExecutable(p) ? null : 'configuration only; execution needs the official OpenAI provider' })),
-      limits: { members: 12, instructions: 16000, capabilities: 20 },
+      limits: { members: 12, instructions: 64000, instructionBytes: TEAM_INSTRUCTION_BYTES, capabilities: 20 },
     };
   }
   /** Server-side diagnostics for an unsaved draft; the browser never computes readiness itself. */
@@ -57,11 +58,11 @@ export class TaskService {
   createTeam(input: unknown) { const team = TeamInput.parse(input); teamReadiness(team.members, this.support); return this.withReadiness(this.store.createTeam(team)); }
   updateTeam(id: string, expectedRevision: number, input: unknown) { const team = TeamInput.parse(input); teamReadiness(team.members, this.support); return this.withReadiness(this.store.updateTeam(id, expectedRevision, team)); }
   setTeamArchived(id: string, expectedRevision: number, archived: boolean) { return this.withReadiness(this.store.setTeamArchived(id, expectedRevision, archived)); }
-  duplicateTeam(id: string, name: unknown) { return this.withReadiness(this.store.duplicateTeam(id, TeamInput.shape.name.parse(name))); }
+  duplicateTeam(id: string, name: unknown) { return this.withReadiness(this.store.duplicateTeam(id, z.string().min(1).max(100).parse(name))); }
   setProjectDefaultTeam(projectId: string, teamId: string | null, expectedVersion: number) { return this.store.setProjectDefaultTeam(projectId, teamId, expectedVersion); }
-  /** Registry agents offered as member templates: explicit copies, never links back to the YAML. */
+  /** Registry agents offered as member templates: complete explicit copies, never links back to the YAML and never truncated. */
   async templates(projectId?: string): Promise<TeamMember[]> {
-    return (await this.agents(projectId)).map(a => ({ id: a.id, name: a.name, description: a.description, enabled: a.enabled, engine: a.engine, provider: a.provider, model: a.model, capabilities: [...a.capabilities], instructions: a.instructions.slice(0, 16000), delegation: { ...a.delegation }, permissions: { readPaths: [...a.permissions.readPaths], writePaths: [...a.permissions.writePaths], allowCommands: a.permissions.allowCommands, allowPush: false as const }, concurrency: a.concurrency, origin: 'template' as const, templateId: a.id }));
+    return (await this.agents(projectId)).map(a => ({ id: a.id, name: a.name, description: a.description, enabled: a.enabled, engine: a.engine, provider: a.provider, model: a.model, capabilities: [...a.capabilities], instructions: a.instructions, delegation: { ...a.delegation }, permissions: { readPaths: [...a.permissions.readPaths], writePaths: [...a.permissions.writePaths], allowCommands: a.permissions.allowCommands, allowPush: false as const }, concurrency: a.concurrency, origin: 'template' as const, templateId: a.id }));
   }
   /**
    * Resolves the team for a new task: explicit team, then project default, then the legacy registry

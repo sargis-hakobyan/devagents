@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { fixture } from '../helpers.js';
 import { Store } from '../../src/persistence/store.js';
@@ -152,5 +153,29 @@ test('a configured default model pins the snapshot and a member model overrides 
     const task = service.submit({ projectId: 'fixture', request: 'Pinned', mode: 'autonomous', teamId: team.id }, 'pinned');
     assert.equal(task.team!.modelPinned, true); assert.equal(task.team!.defaultModel, 'gpt-5-codex');
     assert.deepEqual(task.team!.members.map(m => m.model), ['gpt-5-codex', 'gpt-5-codex', 'o4-mini']);
+  } finally { await f.cleanup(); }
+});
+
+test('template copies keep complete instructions and the roster total is bounded explicitly (F4)', async () => {
+  const f = await fixture();
+  try {
+    const dir = join(f.dataDir, 'agents'); await mkdir(dir, { recursive: true });
+    const body = `# Long role\n\n${'Follow the acceptance criteria. '.repeat(500)}`.slice(0, 16000);
+    await writeFile(join(dir, 'long-role.md'), `${body}\nREQUIRED TAIL RULE: never delete tests.\n`);
+    await writeFile(join(dir, 'long-role.yaml'), 'schemaVersion: 1\nid: long-role\nname: Long role\ndescription: Long instructions\ncapabilities: [implementation, filesystem-write]\ninstructionsFile: ./long-role.md\ndelegation: {canReceiveTasks: true, canDelegate: false}\npermissions:\n  readPaths: ["project:/**"]\n  writePaths: ["project:/**"]\n');
+    const loaded = (await f.service.agents()).find(a => a.id === 'long-role')!;
+    assert.ok(loaded.instructions.length > 16000);
+    const template = (await f.service.templates()).find(t => t.id === 'long-role')!;
+    assert.equal(template.instructions, loaded.instructions, 'the copy is complete');
+    assert.match(template.instructions, /REQUIRED TAIL RULE: never delete tests/);
+    const base = await templateTeam(f.service, ['tech-lead', 'code-reviewer'], 'Long');
+    const team = f.service.createTeam({ ...base, members: [...base.members, template] });
+    assert.match(f.store.team(team.id).members.find(m => m.id === 'long-role')!.instructions, /REQUIRED TAIL RULE/);
+    assert.equal(team.readiness.ready, true);
+    // Too much in total is refused with the budget stated, never trimmed.
+    const huge = { ...template, instructions: 'x'.repeat(60000) };
+    assert.throws(() => f.service.createTeam({ ...base, members: [...base.members, huge, { ...huge, id: 'h2' }, { ...huge, id: 'h3' }, { ...huge, id: 'h4' }] }), /bytes; a team may hold 192,000 bytes in all/);
+    assert.throws(() => f.service.createTeam({ ...base, members: [{ ...huge, instructions: 'x'.repeat(64001) }] }));
+    assert.equal(f.service.teams('all').length, 1);
   } finally { await f.cleanup(); }
 });

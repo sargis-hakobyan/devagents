@@ -49,7 +49,7 @@ export type Diagnostic = { level: 'error' | 'warning'; code: string; message: st
 export type Readiness = { ready: boolean; diagnostics: Diagnostic[] };
 export type TeamSummary = { id: string; name: string; description: string; revision: number; archived: boolean; createdAt: string; updatedAt: string; members: number; enabledMembers: number; readiness: Readiness };
 export type TeamDetail = TeamDraft & { id: string; revision: number; archived: boolean; createdAt: string; updatedAt: string; readiness: Readiness; revisions: { revision: number; createdAt: string; reason: string }[] };
-export type TeamOptions = { platform: string; defaults: { engine: string; provider: string; model: string | null }; capabilities: string[]; engines: { id: string; executable: boolean; reason: string | null }[]; providers: { id: string; kind: string; auth: string; executable: boolean; reason: string | null }[]; limits: { members: number; instructions: number; capabilities: number } };
+export type TeamOptions = { platform: string; defaults: { engine: string; provider: string; model: string | null }; capabilities: string[]; engines: { id: string; executable: boolean; reason: string | null }[]; providers: { id: string; kind: string; auth: string; executable: boolean; reason: string | null }[]; limits: { members: number; instructions: number; instructionBytes: number; capabilities: number } };
 export type Status = {
   service: { version: string; host: string; port: number; platform: string; node: string; dataDir: string; executionEnabled: boolean; startedAt: string; checkedAt: string };
   codex: { installed: boolean; version?: string; signedIn: boolean; credentialStore: 'keyring' | 'file'; vaultLocked: boolean; modelAccessVerified: false };

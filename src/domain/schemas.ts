@@ -72,13 +72,18 @@ export const TeamId = z.string().uuid();
 export const MemberInput = z.strictObject({
   id: Id, name: z.string().min(1).max(100), description: z.string().min(1).max(4000), enabled: z.boolean().default(true),
   engine: Id.default('default'), provider: Id.default('default'), model: z.string().min(1).max(200).default('default'),
-  capabilities: z.array(Id).min(1).max(20), instructions: z.string().min(1).max(16000),
+  capabilities: z.array(Id).min(1).max(20), instructions: z.string().min(1).max(64000),
   delegation: z.strictObject({ canReceiveTasks: z.boolean(), canDelegate: z.boolean() }),
   permissions: Permissions, concurrency: z.number().int().min(1).max(8).default(1),
   origin: z.enum(['template', 'custom']).default('custom'), templateId: Id.optional(),
 });
 export type TeamMember = z.infer<typeof MemberInput>;
-export const TeamInput = z.strictObject({ name: z.string().min(1).max(100), description: z.string().max(4000).default(''), members: z.array(MemberInput).max(12).default([]) });
+/** Per-member instructions match the registry limit (64 KB); the roster as a whole must fit one request, so the total is capped in bytes. */
+export const TEAM_INSTRUCTION_BYTES = 192000;
+export const TeamInput = z.strictObject({ name: z.string().min(1).max(100), description: z.string().max(4000).default(''), members: z.array(MemberInput).max(12).default([]) }).superRefine((team, ctx) => {
+  const total = team.members.reduce((sum, m) => sum + Buffer.byteLength(m.instructions), 0);
+  if (total > TEAM_INSTRUCTION_BYTES) ctx.addIssue({ code: 'custom', path: ['members'], message: `Member instructions total ${total.toLocaleString()} bytes; a team may hold ${TEAM_INSTRUCTION_BYTES.toLocaleString()} bytes in all. Shorten or remove copied instructions explicitly` });
+});
 export type TeamRecord = z.infer<typeof TeamInput> & { id: string; revision: number; archived: boolean; createdAt: string; updatedAt: string };
 export type TeamDiagnostic = { level: 'error' | 'warning'; code: string; message: string; memberId?: string };
 export type TeamReadiness = { ready: boolean; diagnostics: TeamDiagnostic[] };
