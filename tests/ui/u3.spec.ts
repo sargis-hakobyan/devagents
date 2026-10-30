@@ -1,0 +1,39 @@
+import { test, expect, type Page } from '@playwright/test';
+import { readFile, realpath, mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fixtureDir, port } from './playwright.config.js';
+const base = `http://127.0.0.1:${port}`;
+const shots = join(import.meta.dirname, '..', '..', 'test-results', 'ui-screenshots');
+async function call(path: string, method = 'GET', body?: unknown, headers = {}) {
+  return fetch(`${base}${path}`, { method, headers: { authorization: `Bearer ${(await readFile(join(fixtureDir, 'api-token'), 'utf8')).trim()}`, 'content-type': 'application/json', ...headers }, ...(body ? { body: JSON.stringify(body) } : {}) });
+}
+async function signIn(page: Page) { const { url } = await (await call('/ui/bootstrap', 'POST', {})).json(); await page.goto(url); await expect(page).toHaveURL(`${base}/ui/`); }
+let root: string;
+test.beforeAll(async () => {
+  await mkdir(shots, { recursive: true }); root = await mkdtemp(join(tmpdir(), 'devagents-u3-'));
+  execFileSync('git', ['init', '-q', '-b', 'main', root]);
+  await writeFile(join(root, 'greeting.cjs'), "module.exports=()=> 'broken';\n");
+  await writeFile(join(root, 'greeting.test.cjs'), "const test=require('node:test'),assert=require('node:assert/strict');test('greeting',()=>assert.equal(require('./greeting.cjs')(),'hello'));\n");
+  execFileSync('git', ['-C', root, 'add', '.']);
+  execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'Initial']);
+});
+test.afterAll(async () => { await rm(root, { recursive: true, force: true }); });
+
+test('registration preserves input on backend refusal and registers an existing checkout', async ({ page }) => {
+  await signIn(page); await page.goto(`${base}/ui/projects/new`);
+  await page.getByLabel('Project ID', { exact: true }).fill('browser-project');
+  await page.getByLabel('Absolute path as the service sees it').fill('/projects/not-mounted');
+  await page.getByRole('button', { name: 'Register project', exact: true }).click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByLabel('Project ID', { exact: true })).toHaveValue('browser-project');
+  await expect(page.getByLabel('Absolute path as the service sees it')).toHaveValue('/projects/not-mounted');
+  await page.screenshot({ path: join(shots, 'u3-register-error.png'), fullPage: true });
+  await page.getByLabel('Absolute path as the service sees it').fill(root);
+  await page.getByRole('button', { name: 'Register project', exact: true }).click();
+  await expect(page.getByText('Repository registered', { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Submit work' })).toHaveAttribute('href', '/ui/tasks/new?project=browser-project');
+  expect((await (await call('/projects')).json()).find((p: { id: string }) => p.id === 'browser-project').path).toBe(await realpath(root));
+});
+

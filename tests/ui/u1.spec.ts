@@ -152,7 +152,7 @@ test('teams, projects and settings are honest about what exists today', async ({
   await page.goto(`${base}/ui/projects`);
   await expect(page.locator('article.item b', { hasText: /^fixture$/ })).toBeVisible();
   await expect(page.locator('article.item b', { hasText: /^website$/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Register repository/ })).toBeDisabled();
+  await expect(page.getByRole('link', { name: /Register repository/ })).toHaveAttribute('href', '/ui/projects/new');
   await page.screenshot({ path: join(shots, 'u1-projects.png'), fullPage: true });
   await page.goto(`${base}/ui/settings`);
   await expect(page.getByText('Model access not verified').first()).toBeVisible();

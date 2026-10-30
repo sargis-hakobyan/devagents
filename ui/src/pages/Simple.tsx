@@ -35,7 +35,7 @@ export function ProjectsPage() {
   const status = usePoll(resources.status.key, resources.status.load, resources.status.intervalMs).data;
   const docker = status?.service.dataDir === '/data';
   return <>
-    <div class="page-head"><div><div class="h">Projects</div><h1>Registered repositories</h1><p>Existing Git checkouts registered by absolute path. Work happens in managed worktrees; the original checkout is never modified.</p></div><Later label="Register repository" increment="U3" reason="Browser registration arrives in U3. CLI: devagents projects add <id> <absolute-path>" primary /></div>
+    <div class="page-head"><div><div class="h">Projects</div><h1>Registered repositories</h1><p>Existing Git checkouts registered by absolute path. Work happens in managed worktrees; the original checkout is never modified.</p></div><a class="btn primary" href="/ui/projects/new">Register repository</a></div>
     {projects.error && !projects.data && <ErrorNote message={projects.error} />}
     {!projects.data ? <Skeleton rows={3} label="Loading projects" /> : projects.data.length === 0 ? <Card><Empty title="No projects yet"><span>Register an existing Git checkout by its absolute path. DevAgents never clones or imports.</span><Code>devagents projects add my-project /absolute/path</Code></Empty></Card> : <div class="items" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))' }}>{projects.data.map(p => <article key={p.id} class="card item" style={{ padding: '18px 20px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}><b style={{ fontSize: '17px' }}>{p.id}</b><Chip tone="ok">✓ Registered Git root</Chip></div>
@@ -44,7 +44,7 @@ export function ProjectsPage() {
         <dt>Registered</dt><dd>{formatTime(p.registeredAt)} · base <span class="mono">{p.baseSha.slice(0, 7)}</span></dd>
         <dt>Default mode</dt><dd>{p.defaultMode ?? <span class="muted">None · each task asks once</span>}</dd>
         <dt>Default team</dt><dd><DefaultTeam project={p} teams={teams.data} onChanged={() => { projects.reload(); teams.reload(); }} /></dd>
-        <dt>Path check</dt><dd class="muted">Verified at registration; live access diagnostics arrive with U3 registration.</dd>
+        <dt>Path check</dt><dd class="muted">Verified at registration; execution rechecks access.</dd>
       </dl>
       <a href={`/ui/tasks`} style={{ fontWeight: 700, fontSize: '13.5px' }}>History →</a>
     </article>)}</div>}
