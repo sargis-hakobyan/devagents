@@ -14,6 +14,8 @@ The launcher builds a local image on first use or when source files change, star
 - **Terminal**: the same Codex connection flow with hidden API-key input, followed by optional project registration.
 - **Later**: leaves the service running and prints the setup link.
 
+Use ↑/↓ and Enter in the startup menu, or type a number and press Enter. Limited terminals retain plain numbered input. Ctrl+C cancels setup and leaves the service running.
+
 No host Node.js installation is needed for Docker. Once a connection and project are saved, normal startup prints a dashboard link without repeating setup. `./devagents setup` always offers the setup menu. `--browser`, `--terminal` and `--later` select a route directly. Noninteractive default startup prints a link and never prompts or makes a model request.
 
 ## Connect Codex

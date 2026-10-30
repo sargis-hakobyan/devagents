@@ -120,11 +120,8 @@ if [ -z "$place" ] && [ "$command_name" = start ] && [ "$(cli setup-status)" = r
 fi
 if [ -z "$place" ]; then
   if [ -t 0 ]; then
-    printf '\nWhere would you like to continue setup?\n1. Browser (recommended)\n2. Terminal\n3. Later\n'
-    while :; do
-      printf 'Choose [1/2/3, Enter = 1]: '; IFS= read -r answer
-      case "$answer" in ''|1) place=browser; break ;; 2) place=terminal; break ;; 3) place=later; break ;; *) echo 'Choose 1, 2 or 3.' ;; esac
-    done
+    answer=$(bash scripts/select-option.sh 'Where would you like to continue setup?' 'Browser (recommended)' 'Terminal' 'Later')
+    case "$answer" in 1) place=browser ;; 2) place=terminal ;; 3) place=later ;; *) exit 2 ;; esac
   else place=later; fi
 fi
 case "$place" in

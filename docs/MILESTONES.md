@@ -174,3 +174,9 @@ Delivered before M4:
 Verification: `npm run check` passes 140 tests, backend/UI typechecks and build; `npm run test:ui` passes all 34 workflows, preserving U1/U2/U3 coverage. Deterministic native M2/M3 pass. The Docker suite passes encrypted synthetic browser-key save/reuse across restart, authentication/session checks, sandbox containment, deterministic M2/M3 and two concurrent real-runtime protocol fixtures against a loopback server. Upload-race admission and cancellation-drain checks have regression coverage. The connected setup screenshot at 390 px was inspected in ignored `test-results/ui-screenshots/`.
 
 Limits: first start still builds locally and requires Docker plus a desktop OS credential store. Public prebuilt-image distribution remains release work. Host folder mounting stays in the terminal. Tests do not claim live acceptance of the new device-login UI, paid model access or a real OS keychain interaction; all credentials used in this increment's tests are synthetic. No authenticated fixture or push was performed.
+
+## Startup menu keyboard navigation — 2026-10-30
+
+The host setup menu supports up/down arrows, wraparound, number shortcuts and Enter, without requiring host Node.js. Limited terminals retain numbered input; cancellation restores the terminal settings. The existing authentication prompts are unchanged.
+
+Verification: launcher and plain-menu regression tests passed; eight real pseudo-terminal checks covered default selection, arrows/wraparound, numbers, invalid keys, EOF and SIGINT with restored terminal settings. Shell syntax checks passed. Backend, browser and Docker suites were not rerun for this host-menu-only change. No credentials, model calls or push.
