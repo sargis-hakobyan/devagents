@@ -180,3 +180,9 @@ Limits: first start still builds locally and requires Docker plus a desktop OS c
 The host setup menu supports up/down arrows, wraparound, number shortcuts and Enter, without requiring host Node.js. Limited terminals retain numbered input; cancellation restores the terminal settings. The existing authentication prompts are unchanged.
 
 Verification: launcher and plain-menu regression tests passed; eight real pseudo-terminal checks covered default selection, arrows/wraparound, numbers, invalid keys, EOF and SIGINT with restored terminal settings. Shell syntax checks passed. Backend, browser and Docker suites were not rerun for this host-menu-only change. No credentials, model calls or push.
+
+## Arrow navigation throughout terminal setup — 2026-10-30
+
+Provider selection, optional connection testing, the post-setup project choice and mount confirmation now all support arrows and Enter. The Node CLI uses a reusable selector; host prompts reuse the startup selector. Saved login, skipping a model test and declining a mount retain safe defaults. Only project names, paths and hidden API-key entry remain free text; limited terminals keep numbered fallback input. Noninteractive commands and explicit flags are unchanged.
+
+Verification: `npm run check` passed 143 tests, typechecks and production build. Interactive saved-login and test-skip menus passed in both native and isolated network-disabled Docker terminals with synthetic status and no credentials/model requests. Arrow/number/default selection, cancellation, signal-listener cleanup and raw-mode restoration have regression coverage. Shell syntax checks passed. Browser and full Docker/M2/M3 suites were not repeated for this terminal-input change. Nothing pushed.

@@ -1,7 +1,8 @@
 import { AppError } from '../domain/errors.js';
+import type { ChoiceOption } from './choice-prompt.js';
 
 import type { AuthMethod, AuthChoice, AuthSetup } from '../domain/auth.js';
-export type SetupUI = { interactive: boolean; write(message: string): void; ask(question: string): Promise<string> };
+export type SetupUI = { interactive: boolean; write(message: string): void; select<T extends string>(question: string, choices: readonly ChoiceOption<T>[], defaultValue: T): Promise<T> };
 const label = (method: AuthMethod) => ({ chatgpt: 'ChatGPT account', 'api-key': 'OpenAI API key', unknown: 'Codex login (method not recognized)' })[method];
 
 export async function onboard(auth: AuthSetup, ui: SetupUI, options: { auth?: AuthChoice; testConnection?: boolean } = {}): Promise<boolean> {
@@ -9,14 +10,10 @@ export async function onboard(auth: AuthSetup, ui: SetupUI, options: { auth?: Au
   ui.write(status.saved ? `Saved sign-in: ${label(status.method)}.` : 'Welcome to DevAgents. Choose how to connect Codex.');
   let choice = options.auth;
   if (!choice && ui.interactive) {
-    ui.write('1. ChatGPT account — uses your plan’s Codex allowance; access and usage limits apply.');
-    ui.write('2. OpenAI API key — uses separate API billing; key input is hidden.');
-    if (status.saved) ui.write('3. Continue with saved login (default).');
-    do {
-      const answer = await ui.ask(status.saved ? 'Choose [1/2/3, Enter = 3]: ' : 'Choose [1/2]: ');
-      choice = answer === '1' ? 'chatgpt' : answer === '2' ? 'api-key' : status.saved && (answer === '3' || answer === '') ? 'saved' : undefined;
-      if (!choice) ui.write('Please enter one of the displayed numbers.');
-    } while (!choice);
+    ui.write('ChatGPT uses your plan’s Codex allowance. API keys use separate API billing; key input is hidden.');
+    const choices: ChoiceOption<AuthChoice>[] = [{ value: 'chatgpt', label: 'Sign in with ChatGPT' }, { value: 'api-key', label: 'Use an OpenAI API key' }];
+    if (status.saved) choices.push({ value: 'saved', label: 'Continue with saved login (recommended)' });
+    choice = await ui.select('How would you like to connect Codex?', choices, status.saved ? 'saved' : 'chatgpt');
   }
   choice ??= 'saved';
   if (choice === 'saved' && !status.saved) throw new AppError('missing_auth', 'No saved login. Run ./devagents start in your terminal to sign in.');
@@ -36,12 +33,7 @@ export async function onboard(auth: AuthSetup, ui: SetupUI, options: { auth?: Au
   let test = options.testConnection ?? false;
   if (!test && ui.interactive) {
     ui.write('The optional test sends a small request to the default Codex model. It uses your selected plan’s allowance or API credits. No project files are sent.');
-    for (;;) {
-      const answer = (await ui.ask('Test connection now? [y/N]: ')).toLowerCase();
-      if (['', 'n', 'no'].includes(answer)) break;
-      if (['y', 'yes'].includes(answer)) { test = true; break; }
-      ui.write('Enter y or n.');
-    }
+    test = await ui.select('Test connection now?', [{ value: 'skip', label: 'Skip the test (default)' }, { value: 'test', label: 'Test connection — uses allowance or API credits' }], 'skip') === 'test';
   }
   if (!test) { ui.write('Connection test skipped. Model access will be checked when you run a task.'); return true; }
   ui.write('Testing the default Codex model…');

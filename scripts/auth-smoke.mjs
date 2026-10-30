@@ -18,7 +18,7 @@ try {
     status: () => codexAuthStatus(root, { store: 'file' }),
     login: async () => { throw new Error('Must not repeat login'); },
     test: async () => { throw new Error('Must not make a model request'); },
-  }, { interactive: false, write: () => {}, ask: async () => { throw new Error('Must not prompt'); } }), true);
+  }, { interactive: false, write: () => {}, select: async () => { throw new Error('Must not prompt'); } }), true);
   assert.equal((await stat(join(root, 'engines', 'codex', 'auth.json'))).mode & 0o777, 0o600);
   console.log('PASS: real Codex saves credentials privately and subsequent setup skips the prompt.');
 } finally { await rm(root, { recursive: true, force: true }); }

@@ -10,26 +10,26 @@ function fixture(initial: AuthStatus, answers: string[] = [], interactive = true
     login: async method => { logins.push(method); status = { saved: true, method }; },
     test: async method => { checks.push(method); return { ok: true, message: 'Verified fixture' }; },
   };
-  const ui: SetupUI = { interactive, write: text => messages.push(text), ask: async text => {
-    messages.push(text); assert.ok(answers.length, 'unexpected prompt'); return answers.shift()!;
+  const ui: SetupUI = { interactive, write: text => messages.push(text), select: async (text, choices, defaultValue) => {
+    messages.push(text); assert.ok(answers.length, 'unexpected prompt'); const answer = answers.shift()! || defaultValue; const selected = choices.find(c => c.value === answer); assert.ok(selected, 'answer must be a displayed choice'); return selected.value;
   } };
   return { auth, ui, messages, logins, checks };
 }
 test('new user can choose ChatGPT; no model call on skip and no API-key fallback', async () => {
-  const f = fixture({ saved: false }, ['wrong', '1', '']);
+  const f = fixture({ saved: false }, ['chatgpt', 'skip']);
   assert.equal(await onboard(f.auth, f.ui), true);
   assert.deepEqual(f.logins, ['chatgpt']); assert.deepEqual(f.checks, []);
   assert.ok(f.messages.some(m => m.includes('settings/Security')));
   assert.ok(f.messages.some(m => m.includes('not been checked')));
 });
 test('saved API-key user can switch to ChatGPT and opt in to a model test', async () => {
-  const f = fixture({ saved: true, method: 'api-key' }, ['1', 'maybe', 'y']);
+  const f = fixture({ saved: true, method: 'api-key' }, ['chatgpt', 'test']);
   assert.equal(await onboard(f.auth, f.ui), true);
   assert.deepEqual(f.logins, ['chatgpt']); assert.deepEqual(f.checks, ['chatgpt']);
 });
 test('saved login default does not repeat sign-in or make a model request', async () => {
   for (const method of ['chatgpt', 'api-key', 'unknown'] as const) {
-    const f = fixture({ saved: true, method }, ['', 'n']);
+    const f = fixture({ saved: true, method }, ['', '']);
     assert.equal(await onboard(f.auth, f.ui), true);
     assert.deepEqual(f.logins, []); assert.deepEqual(f.checks, []);
   }

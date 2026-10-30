@@ -92,8 +92,8 @@ add_project() {
   checkout_root=$(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --mount "type=bind,source=$project_path,target=/project,readonly" --entrypoint git devagents:local -c safe.directory=/project -c core.fsmonitor=false -c core.hooksPath=/dev/null -C /project rev-parse --show-toplevel) || { echo 'Choose the root of an existing Git checkout.' >&2; return 1; }
   [ "$checkout_root" = /project ] || { echo 'Choose the Git checkout root.' >&2; return 1; }
   echo "Mount $project_path as project $project_id? This restarts DevAgents; work stays in isolated worktrees."
-  printf 'Continue? [y/N]: '; IFS= read -r answer
-  case "$answer" in y|Y|yes) ;; *) echo 'Project setup cancelled.'; return 0 ;; esac
+  answer=$(bash scripts/select-option.sh 'Apply this project mount and restart DevAgents?' 'Cancel (default)' 'Mount and register project')
+  case "$answer" in 2) ;; *) echo 'Project setup cancelled.'; return 0 ;; esac
   compose config --format json | compose exec -T devagents node dist/cli/project-mount.js --check "$project_id" "$project_path"
   mount_file=.devagents/compose.projects.yaml
   if [ -f "$mount_file" ]; then cp "$mount_file" "$mount_file.backup"; else : > "$mount_file.backup"; fi
@@ -130,14 +130,17 @@ case "$place" in
     open_link "$(cli ui --setup)"
     if [ -t 0 ]; then
       echo 'Finish provider sign-in in the browser. Return here to add a project folder.'
-      printf 'Add a project now, or leave the service running? [a/Enter = later]: '; IFS= read -r answer
-      case "$answer" in a|A) add_project ;; esac
+      answer=$(bash scripts/select-option.sh 'What would you like to do next?' 'Leave the service running (default)' 'Add a project')
+      case "$answer" in 2) add_project ;; esac
     fi ;;
   terminal)
     set --
     if [ -n "$auth" ]; then set -- "$@" --auth "$auth"; fi
     if [ -n "$test_connection" ]; then set -- "$@" --test-connection; fi
     if [ -t 0 ]; then compose exec devagents node dist/cli/main.js auth setup "$@"; else cli auth setup "$@"; fi
-    if [ -t 0 ]; then printf 'Add a project? [y/N]: '; IFS= read -r answer; case "$answer" in y|Y|yes) add_project ;; esac; fi
+    if [ -t 0 ]; then
+      answer=$(bash scripts/select-option.sh 'Add a project?' 'Not now (default)' 'Add a project')
+      case "$answer" in 2) add_project ;; esac
+    fi
     printf '\nDashboard: %s\n' "$(cli ui)" ;;
 esac

@@ -28,7 +28,7 @@ import { codexAuthStatus } from '../engines/codex/setup.js';
 import { testCodexConnection } from '../engines/codex/connection-test.js';
 import { onboard } from './onboarding.js';
 import type { AuthChoice } from '../domain/auth.js';
-import { readChoice } from './choice-prompt.js';
+import { selectChoice } from './choice-prompt.js';
 import { configuredVault } from '../security/credential-vault.js';
 
 const print = (data: unknown) => console.log(JSON.stringify(redactValues(data, environmentSecrets()), null, 2));
@@ -190,7 +190,7 @@ auth.command('setup').description('Choose ChatGPT, an API key, or a saved login;
           await sharedLogin(method, method === 'api-key' ? await readHiddenKey() : undefined);
         },
         test: method => testCodexConnection(dataDir, method),
-      }, { interactive: Boolean(process.stdin.isTTY), write: message => console.log(message), ask: readChoice }, {
+      }, { interactive: Boolean(process.stdin.isTTY), write: message => console.log(message), select: selectChoice }, {
         ...((opts.replaceKey || opts.auth) ? { auth: opts.replaceKey ? 'api-key' : opts.auth! } : {}),
         ...(opts.testConnection ? { testConnection: true } : {}),
       });
