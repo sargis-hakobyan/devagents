@@ -195,3 +195,24 @@ test('mode choice has no preselection, rejection cancels, and resubmission prefi
   expect(await page.evaluate(() => sessionStorage.getItem('devagents.submission.v1'))).toBeNull();
 });
 
+test('guided setup uses status and terminal commands without credential fields or automatic tests', async ({ page }) => {
+  await signIn(page);
+  const posts: string[] = []; page.on('request', r => { if (r.method() === 'POST') posts.push(r.url()); });
+  await page.route(`${base}/status`, async route => {
+    const response = await route.fetch(); const status = await response.json();
+    await route.fulfill({ response, json: { ...status, codex: { ...status.codex, installed: false, signedIn: false, vaultLocked: true } } });
+  });
+  await page.goto(`${base}/ui/settings/setup`);
+  await expect(page.getByRole('heading', { name: 'Get ready to run work' })).toBeVisible();
+  await expect(page.getByText('Credentials locked', { exact: true })).toBeVisible();
+  await expect(page.getByText('✕ Not installed', { exact: true })).toBeVisible();
+  await expect(page.getByText('npm run cli -- auth setup', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Test connection · terminal only' })).toBeDisabled();
+  await expect(page.locator('input')).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: join(shots, 'u3-setup-narrow.png'), fullPage: true });
+  await page.getByRole('link', { name: 'Submit work', exact: true }).click();
+  await expect(page.getByLabel('What should the team do?')).toBeEnabled();
+  expect(posts).toEqual([]);
+});

@@ -15,6 +15,7 @@ export function OverviewPage() {
   const attentionCount = n('awaiting_mode', 'awaiting_plan_approval');
   const headline = attentionCount ? `${attentionCount} task${attentionCount > 1 ? 's' : ''} waiting for you` : running.length ? 'Work is running' : queued.length ? 'Work is queued' : 'Nothing is running';
   return <>
+    <div class="note info"><a href="/ui/settings/setup">Finish setup</a> · Check connection availability, register a project and choose a team.</div>
     <div class="page-head">
       <div><div class="h">Overview</div><h1>Workspace</h1><p>{headline}{running[0] ? ` · ${running[0].workItems.filter(i => i.state === 'completed').length} of ${running[0].workItems.length || '?'} items integrated on the running task` : ''}.</p></div>
       <a class="btn primary" href="/ui/tasks/new">Submit work</a>

@@ -51,6 +51,7 @@ export function TaskDetailPage({ id }: { id: string }) {
           </div>
         </div>
         <div class={`note ${summary.tone}`} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}><span aria-hidden="true" style={{ fontSize: '16px' }}>{state.icon}</span><div><b>{summary.title}</b><div class="muted" style={{ fontSize: '13.5px' }}>{summary.detail}</div></div></div>
+        {task.state === 'failed' && <a href="/ui/settings/setup">Check setup before submitting a new task</a>}
         {task.state === 'awaiting_plan_approval' && <div class="note warn"><b>Approval binds to version {task.version}.</b> If the plan changes before you approve, the page refreshes and asks again. Approving a plan is not permission to push, merge or run destructive commands.</div>}
       </div>
     </Card>

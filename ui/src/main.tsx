@@ -9,6 +9,7 @@ import { OverviewPage } from './pages/Overview';
 import { TasksPage } from './pages/Tasks';
 import { TaskDetailPage } from './pages/TaskDetail';
 import { ProjectsPage, SettingsPage, SignedOutPage } from './pages/Simple';
+import { SetupPage } from './pages/Setup';
 import { SubmitTaskPage } from './pages/SubmitTask';
 import { RegisterProjectPage } from './pages/RegisterProject';
 import { TeamEditorPage, TeamsPage } from './pages/Teams';
@@ -35,6 +36,7 @@ function Authenticated() {
       <Route path="/ui/teams/:id" component={({ id }: { id: string }) => <TeamEditorPage id={id} />} />
       <Route path="/ui/projects/new" component={RegisterProjectPage} />
       <Route path="/ui/projects" component={ProjectsPage} />
+      <Route path="/ui/settings/setup" component={SetupPage} />
       <Route path="/ui/settings" component={SettingsPage} />
       <Route default component={() => <div class="note info">Unknown page. <a href="/ui/">Back to the overview</a></div>} />
     </Router>
