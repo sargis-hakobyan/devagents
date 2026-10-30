@@ -52,6 +52,6 @@ test('malformed and forbidden members cannot be saved at all', () => {
   assert.throws(() => teamReadiness([member({ id: 'both', delegation: { canReceiveTasks: true, canDelegate: true } })], support()), /nested delegation/i);
   assert.throws(() => teamReadiness([developer(), developer()], support()), /Duplicate member/);
   assert.throws(() => TeamInput.parse({ name: 'Too many', members: Array.from({ length: 13 }, (_, i) => member({ id: `m${i}` })) }));
-  assert.throws(() => MemberInput.parse({ ...developer(), instructions: 'x'.repeat(16001) }));
+  assert.throws(() => MemberInput.parse({ ...developer(), instructions: 'x'.repeat(64001) }));
   assert.throws(() => MemberInput.parse({ ...developer(), extra: true }));
 });

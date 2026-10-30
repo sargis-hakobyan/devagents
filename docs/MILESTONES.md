@@ -78,6 +78,7 @@ Design and implementation owner: Claude, reconfirmed by the owner on 2026-10-30.
 - [ ] U3: guided setup, project registration, task submission/mode, version-bound plan approval, cancellation and safe diff inspection.
 - [x] U1 browser workflow/security tests, responsive layout, regenerable screenshots in ignored `test-results/ui-screenshots/` and native/Docker packaging. Repeat for U2 and U3.
 - [x] U2 as above (18 browser workflows pass in full; Docker smoke re-run for the in-image UI).
+- [x] Codex U2 review fixes F1–F5 plus the team-backed DAG snapshot test (`CLAUDE_REVIEW_U2_FIXES.md`): readiness reuses plan-validation role rules, template copies are complete under a 192,000-byte team budget, and the editor keeps typed grants, ignores stale readiness responses and keeps Restore/member selection usable on archived teams. `npm run check` passed 122 tests; all 21 browser workflows passed. Docker/protocol/M2/M3 standalone suites were not repeated (no runtime, sandbox or adapter code changed).
 - [ ] U3 as above.
 
 U1 is the first integrated UI increment before M4. Keep U2/U3 and M4 as separately reviewed work; a team editor must not claim unavailable engines or capabilities work.
@@ -105,7 +106,7 @@ Before the M2 live fixture, configure the dedicated account with `npm run cli --
 
 ## Acceptance commands
 
-- `npm run check`: 120 tests, backend and UI typecheck, production build of service and UI (one real-sandbox containment test runs only when the pinned Codex is installed).
+- `npm run check`: 122 tests, backend and UI typecheck, production build of service and UI (one real-sandbox containment test runs only when the pinned Codex is installed).
 - `npm run test:m2`: deterministic planning/implementation/review with real sandboxed validation and a local commit.
 - `npm run test:m3`: deterministic three-item DAG with isolated branches, dependency integration, actual sandboxed validation and a combined commit.
 - `npm run test:m3-live`: opt-in authenticated three-item fixture; equivalent container command passed with saved ChatGPT sign-in. Native authenticated execution remains unverified.

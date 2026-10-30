@@ -145,3 +145,9 @@ Keep source, tests, reproducible compatibility/smoke scripts, current product/im
 - The team is frozen inside the task-creation transaction after the idempotency check, with concrete engine, provider and model plus secret-free provider configuration. The runner resolves nothing from the live config for team tasks, so edits, archiving and default changes cannot affect queued, awaiting, running or recovering work; legacy tasks keep the worktree-creation snapshot and live defaults. `model: default` stays an unpinned runtime choice recorded as `modelPinned: false`; an explicit `defaultModel` or member override is required for a fully pinned snapshot, and no model ID is guessed or discovered.
 - Precedence is explicit team, then project default, then legacy registry. An archived default fails submission with an actionable message instead of a silent fallback. Plan validation remains a separate gate on the frozen roster.
 - No authenticated model calls were made for U2; acceptance rests on deterministic engines, the API/session suites, Playwright against the labelled fixture and the Docker smoke.
+
+## Codex U2 review fixes — 2026-10-30
+
+- Readiness reuses the role-selection rules of plan validation: a reviewer must be a different eligible member from an implementer, and its own write grants do not disqualify it because review always runs read-only. A dedicated read-only reviewer is not a product requirement.
+- Template copies are complete. Per-member instructions share the registry's 64 KB limit and a team is bounded at 192,000 bytes of instructions in total, refused with the total stated; nothing is truncated silently.
+- The editor keeps raw scope text while typing, drops readiness responses that belong to an older draft, and disables only editable controls on archived teams. The review report is preserved as `CODEX_REVIEW_U2.md`; the fixes are recorded in `CLAUDE_REVIEW_U2_FIXES.md`.
