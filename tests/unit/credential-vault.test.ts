@@ -94,3 +94,28 @@ test('a torn read of the runtime credential file is retried instead of failing t
     assert.equal(await readFile(f.vault.auth, 'utf8'), plain);
   } finally { await f.cleanup(); }
 });
+
+test('seals through separate vault instances on the same files are serialized and keep the newest credentials', async () => {
+  const f = await fixture();
+  try {
+    await f.vault.unlock(master); await mkdir(join(f.runtime, 'codex'), { recursive: true });
+    await writeFile(f.vault.auth, plain);
+    // Production creates a new CredentialVault per adapter call; every call must still take the same lock.
+    const instances = Array.from({ length: 4 }, () => new CredentialVault(f.data, f.runtime));
+    let active = 0; let maxActive = 0;
+    for (const instance of instances) {
+      const original = (instance as unknown as { sealNow(): Promise<void> }).sealNow.bind(instance);
+      (instance as unknown as { sealNow(): Promise<void> }).sealNow = async () => { active++; maxActive = Math.max(maxActive, active); try { await new Promise(r => setTimeout(r, 15)); await original(); } finally { active--; } };
+    }
+    const seals: Promise<void>[] = [];
+    for (const [i, instance] of instances.entries()) {
+      seals.push(instance.seal());
+      await writeFile(`${f.vault.auth}.next`, JSON.stringify({ tokens: { access_token: `fixture-instance-${i}` } })); await rename(`${f.vault.auth}.next`, f.vault.auth);
+    }
+    await Promise.all(seals);
+    assert.equal(maxActive, 1, 'never more than one seal in flight across instances');
+    await new CredentialVault(f.data, f.runtime).seal();
+    await rm(f.runtime, { recursive: true }); await f.vault.unlock(master);
+    assert.equal(await readFile(f.vault.auth, 'utf8'), JSON.stringify({ tokens: { access_token: 'fixture-instance-3' } }));
+  } finally { await f.cleanup(); }
+});

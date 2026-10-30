@@ -19,6 +19,8 @@ async function atomic(path: string, bytes: Buffer): Promise<void> {
     try { await directory.sync(); } finally { await directory.close(); }
   } finally { await rm(temporary, { force: true }); }
 }
+/** Seal serialization shared by all instances, keyed by the canonical encrypted-file path. */
+const sealing = new Map<string, Promise<void>>();
 export class CredentialVault {
   readonly encrypted: string; readonly auth: string; readonly master: string;
   constructor(readonly dataDir: string, readonly runtimeDir: string) {
@@ -72,15 +74,18 @@ export class CredentialVault {
     const key = await optional(this.master);
     if (!key || key.length !== 32) throw new AppError('vault_locked', 'Credentials are locked. Start DevAgents with ./devagents start to unlock them from your OS keychain.');
   }
-  private sealing: Promise<void> = Promise.resolve();
   /**
-   * Re-encrypts the runtime credential file. Calls are serialized so concurrent workers finishing
-   * together cannot interleave reads and renames and persist a stale refreshed token, and an
-   * unchanged file is not rewritten.
+   * Re-encrypts the runtime credential file. Calls are serialized across every CredentialVault
+   * instance that targets the same encrypted file (configuredVault creates a fresh instance per
+   * caller), so concurrent workers finishing together cannot interleave reads and renames and
+   * persist a stale refreshed token. An unchanged file is not rewritten.
    */
   seal(): Promise<void> {
-    const run = this.sealing.then(() => this.sealNow());
-    this.sealing = run.catch(() => undefined);
+    const key = resolve(this.encrypted);
+    const previous = sealing.get(key) ?? Promise.resolve();
+    const run = previous.catch(() => undefined).then(() => this.sealNow());
+    const settled = run.catch(() => undefined); sealing.set(key, settled);
+    void settled.then(() => { if (sealing.get(key) === settled) sealing.delete(key); });
     return run;
   }
   private async sealNow(): Promise<void> {
