@@ -1,45 +1,146 @@
 #!/bin/sh
 set -eu
 cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-
-usage() { echo 'Usage: ./devagents start [--auth chatgpt|api-key|saved] [--test-connection] [--replace-key]'; }
-case "${1:-start}" in
-  start) if [ "$#" -gt 0 ]; then shift; fi ;;
+umask 077
+usage() { echo 'Usage: ./devagents [start|setup|project add] [--browser|--terminal|--later] [--build] [--auth chatgpt|api-key|saved] [--test-connection]'; }
+command_name=${1:-start}
+case "$command_name" in
+  start|setup) if [ "$#" -gt 0 ]; then shift; fi ;;
+  project) shift; [ "${1:-}" = add ] || { usage >&2; exit 2; }; shift ;;
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
-auth=''; test_connection=''; replace_key=''
+place=''; auth=''; test_connection=''; build=''
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --auth)
-      [ "$#" -ge 2 ] || { usage >&2; exit 2; }
-      case "$2" in chatgpt|api-key|saved) auth=$2 ;; *) usage >&2; exit 2 ;; esac
-      shift 2 ;;
+    --browser) place=browser; shift ;;
+    --terminal) place=terminal; shift ;;
+    --later) place=later; shift ;;
+    --build) build=yes; shift ;;
+    --auth) [ "$#" -ge 2 ] || { usage >&2; exit 2; }; case "$2" in chatgpt|api-key|saved) auth=$2 ;; *) usage >&2; exit 2 ;; esac; shift 2 ;;
+    --replace-key) auth=api-key; shift ;;
     --test-connection) test_connection=yes; shift ;;
-    --replace-key) replace_key=yes; shift ;;
     --help|-h) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
   esac
 done
-if [ -n "$replace_key" ]; then
-  case "$auth" in ''|api-key) auth=api-key ;; *) echo '--replace-key conflicts with --auth' >&2; exit 2 ;; esac
+if [ -n "$auth$test_connection" ]; then
+  case "$place" in ''|terminal) place=terminal ;; *) echo 'Authentication flags and connection tests require --terminal.' >&2; exit 2 ;; esac
 fi
-set --
-if [ -n "$auth" ]; then set -- "$@" --auth "$auth"; fi
-if [ -n "$test_connection" ]; then set -- "$@" --test-connection; fi
-
-command -v docker >/dev/null 2>&1 || { echo 'Install Docker with Compose, then run ./devagents start again.' >&2; exit 1; }
-docker info >/dev/null 2>&1 || { echo 'Start Docker, then run ./devagents start again.' >&2; exit 1; }
-
-docker compose up -d --build --wait
-vault_exists=$(docker compose exec -T devagents node dist/cli/main.js auth vault-exists)
-vault_id="devagents-vault-$(printf '%s' "$PWD" | openssl dgst -sha256 | awk '{print $NF}')"
-master=$(./scripts/vault-key.sh "$vault_id" "$vault_exists")
-printf '%s\n' "$master" | docker compose exec -T devagents node dist/cli/main.js auth unlock
-unset master
-if [ -t 0 ]; then
-  docker compose exec devagents node dist/cli/main.js auth setup "$@"
+command -v docker >/dev/null 2>&1 || { echo 'Install and start Docker with Compose, then run ./devagents start.' >&2; exit 1; }
+docker info >/dev/null 2>&1 || { echo 'Start Docker, then run ./devagents start.' >&2; exit 1; }
+mkdir -p .devagents
+if ! mkdir .devagents/launcher.lock 2>/dev/null; then
+  old_pid=$(cat .devagents/launcher.lock/pid 2>/dev/null || true)
+  case "$old_pid" in ''|*[!0-9]*) echo 'Another launcher is starting. Try again shortly.' >&2; exit 1 ;; esac
+  if kill -0 "$old_pid" 2>/dev/null; then echo 'Another launcher is running. Finish setup in that terminal first.' >&2; exit 1; fi
+  rm -f .devagents/launcher.lock/pid
+  rmdir .devagents/launcher.lock
+  mkdir .devagents/launcher.lock
+fi
+printf '%s\n' "$$" > .devagents/launcher.lock/pid
+trap 'rm -f .devagents/launcher.lock/pid; rmdir .devagents/launcher.lock 2>/dev/null || true' 0
+trap 'exit 130' INT
+trap 'exit 143' TERM
+compose() {
+  if [ -f compose.override.yaml ]; then
+    if [ -f .devagents/compose.projects.yaml ]; then docker compose -f compose.yaml -f compose.override.yaml -f .devagents/compose.projects.yaml "$@"; else docker compose -f compose.yaml -f compose.override.yaml "$@"; fi
+  else
+    if [ -f .devagents/compose.projects.yaml ]; then docker compose -f compose.yaml -f .devagents/compose.projects.yaml "$@"; else docker compose -f compose.yaml "$@"; fi
+  fi
+}
+cli() { compose exec -T devagents node dist/cli/main.js "$@"; }
+unlock() {
+  vault_exists=$(cli auth vault-exists)
+  vault_id="devagents-vault-$(printf '%s' "$PWD" | openssl dgst -sha256 | awk '{print $NF}')"
+  if master=$(./scripts/vault-key.sh "$vault_id" "$vault_exists"); then
+    printf '%s\n' "$master" | compose exec -T devagents node dist/cli/main.js auth unlock
+    unset master
+  else
+    echo 'The service is running, but credentials remain locked. Unlock your OS keychain and run ./devagents start again.' >&2
+  fi
+}
+open_link() {
+  printf '\nBrowser: %s\n' "$1"
+  case "$(uname -s)" in
+    Darwin) open "$1" >/dev/null 2>&1 || echo 'Open the browser link above manually.' ;;
+    Linux) if command -v xdg-open >/dev/null 2>&1; then xdg-open "$1" >/dev/null 2>&1 || echo 'Open the browser link above manually.'; fi ;;
+  esac
+}
+# Build on first use or source changes, not every start. No host Node.js is needed.
+fingerprint=$({ cksum Dockerfile package.json package-lock.json tsconfig.json tsconfig.build.json; find src ui agents scripts -type f ! -path '*/node_modules/*' -exec cksum {} \; | LC_ALL=C sort; } | cksum)
+previous=$(cat .devagents/build.fingerprint 2>/dev/null || true)
+if [ "$build" = yes ] || [ "$fingerprint" != "$previous" ] || ! docker image inspect devagents:local >/dev/null 2>&1; then
+  echo 'Preparing DevAgents (the first build can take a few minutes)…'
+  compose up -d --build --wait
+  printf '%s\n' "$fingerprint" > .devagents/build.fingerprint
 else
-  docker compose exec -T devagents node dist/cli/main.js auth setup "$@"
+  compose up -d --wait
 fi
-echo "DevAgents service is running at http://127.0.0.1:${DEVAGENTS_PORT:-4310}/health"
+unlock
+echo 'DevAgents is running.'
+add_project() {
+  [ -t 0 ] || { echo 'Run ./devagents project add in an interactive terminal.' >&2; return 1; }
+  printf 'Project name (lowercase letters, digits and dashes): '; IFS= read -r project_id
+  case "$project_id" in ''|*[!a-z0-9-]*|[!a-z]*) echo 'Invalid project name.' >&2; return 1 ;; esac
+  [ "${#project_id}" -le 64 ] || { echo 'Project name is too long.' >&2; return 1; }
+  printf 'Absolute path to your existing Git checkout: '; IFS= read -r project_path
+  case "$project_path" in /*) ;; *) echo 'Enter an absolute folder path.' >&2; return 1 ;; esac
+  [ -d "$project_path" ] || { echo 'That directory does not exist.' >&2; return 1; }
+  project_path=$(CDPATH= cd -- "$project_path" && pwd -P)
+  case "$project_path" in /|"$HOME"|*,*) echo 'Choose a project folder, not your home/root directory; commas are unsupported.' >&2; return 1 ;; esac
+  checkout_root=$(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --mount "type=bind,source=$project_path,target=/project,readonly" --entrypoint git devagents:local -c safe.directory=/project -c core.fsmonitor=false -c core.hooksPath=/dev/null -C /project rev-parse --show-toplevel) || { echo 'Choose the root of an existing Git checkout.' >&2; return 1; }
+  [ "$checkout_root" = /project ] || { echo 'Choose the Git checkout root.' >&2; return 1; }
+  echo "Mount $project_path as project $project_id? This restarts DevAgents; work stays in isolated worktrees."
+  printf 'Continue? [y/N]: '; IFS= read -r answer
+  case "$answer" in y|Y|yes) ;; *) echo 'Project setup cancelled.'; return 0 ;; esac
+  compose config --format json | compose exec -T devagents node dist/cli/project-mount.js --check "$project_id" "$project_path"
+  mount_file=.devagents/compose.projects.yaml
+  if [ -f "$mount_file" ]; then cp "$mount_file" "$mount_file.backup"; else : > "$mount_file.backup"; fi
+  if ! compose exec -T devagents node dist/cli/project-mount.js "$project_id" "$project_path" < "$mount_file.backup" > "$mount_file.new"; then rm -f "$mount_file.new" "$mount_file.backup"; return 1; fi
+  if ! cli mount-ready; then rm -f "$mount_file.new" "$mount_file.backup"; return 1; fi
+  mv "$mount_file.new" "$mount_file"
+  if ! compose up -d --wait; then
+    if [ -s "$mount_file.backup" ]; then mv "$mount_file.backup" "$mount_file"; else rm -f "$mount_file" "$mount_file.backup"; fi
+    compose up -d --wait || true
+    cli mount-done || true
+    echo 'Mount could not be applied; previous configuration restored.' >&2; return 1
+  fi
+  rm -f "$mount_file.backup"
+  cli mount-done
+  unlock
+  cli projects ensure "$project_id" "/projects/$project_id"
+  echo 'Project registered. Continue in the browser to choose your team.'
+  open_link "$(cli ui --setup)"
+}
+if [ "$command_name" = project ]; then add_project; exit; fi
+if [ -z "$place" ] && [ "$command_name" = start ] && [ "$(cli setup-status)" = ready ]; then
+  printf '\nSaved connection restored. Dashboard: %s\n' "$(cli ui)"
+  echo 'Change setup anytime with ./devagents setup.'; exit
+fi
+if [ -z "$place" ]; then
+  if [ -t 0 ]; then
+    printf '\nWhere would you like to continue setup?\n1. Browser (recommended)\n2. Terminal\n3. Later\n'
+    while :; do
+      printf 'Choose [1/2/3, Enter = 1]: '; IFS= read -r answer
+      case "$answer" in ''|1) place=browser; break ;; 2) place=terminal; break ;; 3) place=later; break ;; *) echo 'Choose 1, 2 or 3.' ;; esac
+    done
+  else place=later; fi
+fi
+case "$place" in
+  later) printf '\nContinue setup: %s\n' "$(cli ui --setup)" ;;
+  browser)
+    open_link "$(cli ui --setup)"
+    if [ -t 0 ]; then
+      echo 'Finish provider sign-in in the browser. Return here to add a project folder.'
+      printf 'Add a project now, or leave the service running? [a/Enter = later]: '; IFS= read -r answer
+      case "$answer" in a|A) add_project ;; esac
+    fi ;;
+  terminal)
+    set --
+    if [ -n "$auth" ]; then set -- "$@" --auth "$auth"; fi
+    if [ -n "$test_connection" ]; then set -- "$@" --test-connection; fi
+    if [ -t 0 ]; then compose exec devagents node dist/cli/main.js auth setup "$@"; else cli auth setup "$@"; fi
+    if [ -t 0 ]; then printf 'Add a project? [y/N]: '; IFS= read -r answer; case "$answer" in y|Y|yes) add_project ;; esac; fi
+    printf '\nDashboard: %s\n' "$(cli ui)" ;;
+esac

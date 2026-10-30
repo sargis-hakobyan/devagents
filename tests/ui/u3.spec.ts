@@ -206,7 +206,7 @@ test('mode choice has no preselection, rejection cancels, and resubmission prefi
   expect(await page.evaluate(() => sessionStorage.getItem('devagents.submission.v1'))).toBeNull();
 });
 
-test('guided setup uses status and terminal commands without credential fields or automatic tests', async ({ page }) => {
+test('locked or unavailable setup keeps terminal recovery and makes no automatic auth or model calls', async ({ page }) => {
   await signIn(page);
   const posts: string[] = []; page.on('request', r => { if (r.method() === 'POST') posts.push(r.url()); });
   await page.route(`${base}/status`, async route => {
@@ -216,7 +216,8 @@ test('guided setup uses status and terminal commands without credential fields o
   await page.goto(`${base}/ui/settings/setup`);
   await expect(page.getByRole('heading', { name: 'Get ready to run work' })).toBeVisible();
   await expect(page.getByText('Credentials locked', { exact: true })).toBeVisible();
-  await expect(page.getByText('✕ Not installed', { exact: true })).toBeVisible();
+  await expect(page.getByText('✕ Not installed ·', { exact: true })).toBeVisible();
+  await page.getByText('Continue in your terminal', { exact: true }).click();
   await expect(page.getByText('npm run cli -- auth setup', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Test connection · terminal only' })).toBeDisabled();
   await expect(page.locator('input')).toHaveCount(0);
