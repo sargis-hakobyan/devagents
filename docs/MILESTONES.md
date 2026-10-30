@@ -66,18 +66,19 @@ docker compose exec -T devagents node scripts/m3-smoke.mjs --live
 
 Both exited successfully on their first attempt. M2 verified planning, implementation, real sandboxed validation, independent review and a local commit. M3 verified three items, two parallel workers, dependency integration, real sandboxed validation, independent item/combined reviews and the final local commit. Both fixtures verified that their original checkout remained unchanged and cleaned up their temporary projects. This closes the post-review live gate for the named baseline; it does not claim native authenticated or AMD64 acceptance, or acceptance of future U2/M4 code. The documentation-only handoff update did not repeat the already recorded non-live suites.
 
-## U1–U3 — Local browser UI (U1 implemented; U2/U3 planned)
+## U1–U3 — Local browser UI (U1 and U2 implemented; U3 planned)
 
-Design and implementation owner: Claude, reconfirmed by the owner on 2026-10-30. Product scope and acceptance are in [the frontend brief](FRONTEND_BRIEF.md); start with [the implementation instructions](../IMPLEMENTATION_PROMPT.md) and [UI implementation plan](UI_IMPLEMENTATION_PLAN.md). The post-review live gate is now satisfied for the baseline above. U2 is next; U3 and M4 remain separate increments. The implementation plan includes the U2 handoff and regression checklist; no U2 implementation was added in this acceptance pass.
+Design and implementation owner: Claude, reconfirmed by the owner on 2026-10-30. Product scope and acceptance are in [the frontend brief](FRONTEND_BRIEF.md); start with [the implementation instructions](../IMPLEMENTATION_PROMPT.md) and [UI implementation plan](UI_IMPLEMENTATION_PLAN.md). The post-review live gate is satisfied for the baseline above. U2 was implemented on 2026-10-30 from the handoff in the implementation plan; U3 and M4 remain separate increments.
 
 - [x] Product brief, implementation handoff and roadmap alignment.
 - [x] Full screen/state design: Overview, Teams, Projects, Tasks and Settings. Direction A was chosen with its Overview restructured for density. The selected source boards live in `design/ui/` (see its README).
 - [x] U1: same-origin app shell, protected browser session, real read-only progress/history/results, safe content rendering and browser/CLI compatibility. Verified natively with 9 Playwright workflows against the labelled fixture (sign-in, overview, list, completed/approval/failed/cancelled/mode-wait detail, hostile content, disconnect and reconnect, narrow screen, sign-out) plus API/session regression tests; Docker smoke covers the in-image UI and bootstrap exchange.
 - [x] U1 status review fixes: category-first overview queries, state filters before pagination, history-derived plan approval, and bounded structured facts alongside evidence previews. Three new API tests and four new browser regressions. The full check passed 107 tests; all 13 browser workflows passed across the full run and a targeted rerun after correcting an exact-text test selector. Docker/protocol/standalone smoke suites were not repeated for that status-only fix pass.
-- [ ] U2: persisted reusable teams, custom/template members, revisions, readiness, archive/duplicate, project defaults, submission snapshots and legacy compatibility.
+- [x] U2: persisted reusable teams (schema 3, append-only revisions), template/custom members, server readiness diagnostics, archive/duplicate, versioned project defaults, atomic submission snapshots with concrete engine/provider/model, frozen runner configuration and legacy compatibility; browser list/editor/default-team controls following `design/ui/A-Teams`. Verified with 13 new deterministic tests (schema-2 upgrade, CRUD/revisions/conflicts, precedence/idempotency/archived defaults, pinned vs runtime-default model, frozen roster through edits/archive/config change/awaiting mode/restart recovery, excluded agent in single-item and DAG plans, API routes with missing CSRF and foreign origin) and 5 new Playwright workflows (list/readiness/filters, template+custom creation to ready, forbidden grants and disabled options, stale save/duplicate/archive/restore/project default conflicts, team labels and keyboard use on a narrow screen). Limits: `model: default` is recorded as unpinned unless `defaultModel` is configured; choosing a team in the browser waits for U3 submission; Claude/non-OpenAI members save only as drafts until M4.
 - [ ] U3: guided setup, project registration, task submission/mode, version-bound plan approval, cancellation and safe diff inspection.
 - [x] U1 browser workflow/security tests, responsive layout, regenerable screenshots in ignored `test-results/ui-screenshots/` and native/Docker packaging. Repeat for U2 and U3.
-- [ ] U2/U3 as above.
+- [x] U2 as above (18 browser workflows pass in full; Docker smoke re-run for the in-image UI).
+- [ ] U3 as above.
 
 U1 is the first integrated UI increment before M4. Keep U2/U3 and M4 as separately reviewed work; a team editor must not claim unavailable engines or capabilities work.
 
@@ -104,7 +105,7 @@ Before the M2 live fixture, configure the dedicated account with `npm run cli --
 
 ## Acceptance commands
 
-- `npm run check`: 107 tests, backend and UI typecheck, production build of service and UI (one real-sandbox containment test runs only when the pinned Codex is installed).
+- `npm run check`: 120 tests, backend and UI typecheck, production build of service and UI (one real-sandbox containment test runs only when the pinned Codex is installed).
 - `npm run test:m2`: deterministic planning/implementation/review with real sandboxed validation and a local commit.
 - `npm run test:m3`: deterministic three-item DAG with isolated branches, dependency integration, actual sandboxed validation and a combined commit.
 - `npm run test:m3-live`: opt-in authenticated three-item fixture; equivalent container command passed with saved ChatGPT sign-in. Native authenticated execution remains unverified.
