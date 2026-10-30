@@ -160,3 +160,6 @@ fieldset:disabled .field input, fieldset:disabled .field select, fieldset:disabl
 .form-stack{display:flex;flex-direction:column;gap:14px;padding:20px;min-width:0}.form-stack .form-stack{padding:0}.command{display:flex;flex-direction:column;gap:6px;align-items:flex-start;min-width:0}.command pre{width:100%}
 .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.choice{display:flex;gap:10px;align-items:baseline}.criterion-row{display:flex;gap:8px;align-items:center}.criterion-row .field{min-width:0;flex:1}
 @media(max-width:800px){.workflow-grid{grid-template-columns:minmax(0,1fr)}.form-stack{padding:16px}}
+
+.task-actions{display:flex;flex-direction:column;gap:10px;min-width:0;max-width:620px}.task-actions .note{overflow-wrap:anywhere}
+

@@ -1,3 +1,4 @@
+import { TaskActions } from '../components/TaskActions';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { api, evidenceFacts, type Evidence, type ItemProgress, type Task, type TaskEvent } from '../api';
 import { Card, Chip, ErrorNote, ItemChip, Later, Pre, Skeleton, Stage, StateChip, pretty } from '../components/ui';
@@ -45,10 +46,7 @@ export function TaskDetailPage({ id }: { id: string }) {
             <div class="muted" style={{ fontSize: '13.5px' }}>Project <span class="mono">{task.projectId}</span> · Team: {task.team ? <><a href={`/ui/teams/${task.team.id}`}><b>{task.team.name}</b></a> revision {task.team.revision} · {task.team.members.filter(m => m.enabled).length} enabled members frozen at submission{task.team.modelPinned ? '' : ' · model: runtime default (not pinned)'}</> : <><b>Legacy agent configuration</b>{task.agents ? ` (${task.agents.length} agents snapshotted at worktree creation)` : ' (snapshotted when the worktree is created)'}</>}{task.workspace && <> · Branch <span class="mono">{task.workspace.branch}</span></>}</div>
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            {task.state === 'awaiting_mode' && <Later label="Choose mode" increment="U3" reason={`Mode selection from the browser arrives in U3. CLI: devagents tasks mode ${task.id} autonomous|plan-approval`} primary />}
-            {task.state === 'awaiting_plan_approval' && <><Later label="Reject plan" increment="U3" reason={`Rejection from the browser arrives in U3. CLI: devagents tasks cancel ${task.id}`} /><Later label={`Approve version ${task.version}`} increment="U3" reason={`Approval from the browser arrives in U3. CLI: devagents tasks approve ${task.id} --version ${task.version}`} primary /></>}
-            {!terminal && task.state !== 'awaiting_mode' && task.state !== 'awaiting_plan_approval' && task.state !== 'committing' && <Later label="Cancel task" increment="U3" reason={`Cancellation from the browser arrives in U3. CLI: devagents tasks cancel ${task.id}`} />}
-            {task.state === 'committing' && <span class="chip neutral" title="The final local commit is a non-cancellable boundary">Committing · not cancellable</span>}
+            <TaskActions key={task.id} task={task} reload={detail.reload} showPlan={() => setTab('plan')} />
           </div>
         </div>
         <div class={`note ${summary.tone}`} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}><span aria-hidden="true" style={{ fontSize: '16px' }}>{state.icon}</span><div><b>{summary.title}</b><div class="muted" style={{ fontSize: '13.5px' }}>{summary.detail}</div></div></div>
@@ -59,7 +57,7 @@ export function TaskDetailPage({ id }: { id: string }) {
       {([['work', `Work · ${items.length}`], ['plan', 'Plan'], ['activity', `Activity · ${events.rows.length + evidence.rows.length}`], ['result', 'Result']] as [Tab, string][]).map(([t, label]) => <button key={t} type="button" role="tab" class="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{label}</button>)}
     </div>
     {tab === 'work' && <WorkTab task={task} items={items} perItem={perItem} now={now} />}
-    {tab === 'plan' && <PlanTab task={task} />}
+    {tab === 'plan' && <><div class="note info">Plan · version {task.version}. Approval applies to this version.</div><PlanTab task={task} /></>}
     {tab === 'activity' && <ActivityTab task={task} events={events.rows} evidence={evidence.rows} />}
     {tab === 'result' && <ResultTab task={task} evidence={evidence.rows} />}
   </>;
@@ -196,7 +194,7 @@ function ResultTab({ task, evidence }: { task: Task; evidence: Evidence[] }) {
   const validations = evidence.filter(e => e.kind === 'validation');
   if (task.state !== 'completed') return <Card tone={task.state === 'failed' ? 'bad' : undefined}><div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
     <b>Result</b>
-    {task.state === 'failed' || task.state === 'cancelled' ? <><div class="wrap-anywhere">{task.outcome?.error ?? 'No commit was created.'}</div><div class="muted" style={{ fontSize: '13px' }}>Worktrees are preserved for inspection{task.workspace ? <> under <span class="mono">{task.workspace.path}</span></> : null}. Resubmitting creates a new task. Cleanup is a separate, previewed action.</div><div style={{ display: 'flex', gap: '8px' }}><Later label="Resubmit" increment="U3" reason="Resubmission from the browser arrives in U3" /><Later label="Clean up worktrees" increment="U3" reason="Cleanup with a preview arrives in U3. CLI: devagents tasks cleanup" /></div></> : <div class="muted">Not available yet. Completion means one reviewed local commit{task.workspace ? <> on <span class="mono">{task.workspace.branch}</span></> : null}; you merge it yourself. Changed files, test evidence and the review outcome appear here afterwards.</div>}
+    {task.state === 'failed' || task.state === 'cancelled' ? <><div class="wrap-anywhere">{task.outcome?.error ?? 'No commit was created.'}</div><div class="muted" style={{ fontSize: '13px' }}>Worktrees are preserved for inspection{task.workspace ? <> under <span class="mono">{task.workspace.path}</span></> : null}. Resubmitting creates a new task. Cleanup is a separate, previewed action.</div><div style={{ display: 'flex', gap: '8px' }}><a class="btn" href={`/ui/tasks/new?from=${task.id}`}>Submit a new task from this request</a><Later label="Clean up worktrees" increment="U3" reason="Cleanup with a preview arrives in U3. CLI: devagents tasks cleanup" /></div></> : <div class="muted">Not available yet. Completion means one reviewed local commit{task.workspace ? <> on <span class="mono">{task.workspace.branch}</span></> : null}; you merge it yourself. Changed files, test evidence and the review outcome appear here afterwards.</div>}
   </div></Card>;
   return <div class="stack">
     <Card title="Result · completed"><div style={{ padding: '14px 16px' }}><dl class="kv">

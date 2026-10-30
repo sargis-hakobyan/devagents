@@ -89,7 +89,7 @@ test('approval-wait, failed and cancelled tasks explain themselves and keep clea
   await page.goto(`${base}/ui/tasks/${waiting.id}`);
   await expect(page.getByText('Waiting for you: approve plan version', { exact: false })).toBeVisible();
   await expect(page.getByText('Approval binds to version', { exact: false })).toBeVisible();
-  const approve = page.getByRole('button', { name: /Approve version/ }); await expect(approve).toBeDisabled(); await expect(approve).toHaveAttribute('title', /devagents tasks approve/);
+  const approve = page.getByRole('button', { name: /Approve version/ }); await expect(approve).toBeEnabled();
   await page.screenshot({ path: join(shots, 'u1-task-approval.png'), fullPage: true });
   const failed = await find('[fail-review]');
   await page.goto(`${base}/ui/tasks/${failed.id}`);

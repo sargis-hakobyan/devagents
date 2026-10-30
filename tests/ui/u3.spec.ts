@@ -1,3 +1,4 @@
+import { Store } from '../../src/persistence/store.js';
 import { test, expect, type Page } from '@playwright/test';
 import { readFile, realpath, mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
@@ -113,3 +114,81 @@ test('abandon is explicit and unavailable tab storage prevents sending', async (
   await page.getByRole('button', { name: 'Submit task', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('No request was sent'); expect(posts).toBe(0);
 });
+
+async function stopInitialHold(page: Page) {
+  const held = (await (await call('/tasks?limit=200')).json()).tasks.find((t: { request: string; state: string }) => t.request.includes('Long-running') && t.state === 'running');
+  if (held) {
+    await page.goto(`${base}/ui/tasks/${held.id}`);
+    await page.getByRole('button', { name: 'Cancel task…', exact: true }).click();
+    await page.getByRole('button', { name: 'Confirm cancellation' }).click();
+    await expect(page.getByText('Cancelled by you', { exact: true }).first()).toBeVisible();
+  }
+}
+
+test('browser workflow registers, submits, rejects stale approval, approves and completes reviewed work', async ({ page }) => {
+  await signIn(page); await stopInitialHold(page);
+  const before = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
+  const existing = (await (await call('/projects')).json()).find((p: { path: string }) => p.path === root || p.path === `/private${root}`);
+  const projectId = existing?.id ?? 'workflow-project';
+  if (!existing) {
+    await page.goto(`${base}/ui/projects/new`); await page.getByLabel('Project ID', { exact: true }).fill(projectId);
+    await page.getByLabel('Absolute path as the service sees it').fill(root); await page.getByRole('button', { name: 'Register project', exact: true }).click();
+    await expect(page.getByText('Repository registered', { exact: true })).toBeVisible();
+  }
+  await page.goto(`${base}/ui/tasks/new?project=${projectId}`);
+  await page.getByLabel('What should the team do?').fill('Fix greeting through the browser [u3-e2e]');
+  const team = (await (await call('/teams')).json()).find((t: { name: string }) => t.name === 'Website team');
+  await page.getByLabel('Team', { exact: true }).selectOption(team.id);
+  await page.getByRole('radio', { name: 'Plan approval · wait for my approval', exact: true }).check();
+  await page.getByRole('button', { name: 'Submit task', exact: true }).click();
+  await page.getByRole('link', { name: 'Open task' }).click();
+  const id = page.url().split('/').pop()!;
+  const approve = page.getByRole('button', { name: /^Approve version/ });
+  await expect(approve).toBeEnabled();
+  await page.screenshot({ path: join(shots, 'u3-approval.png'), fullPage: true });
+  // A second writer changes the durable version after the page rendered, before POST arrives.
+  await page.route(`${base}/tasks/${id}/approve`, async route => {
+    const store = new Store(join(fixtureDir, 'devagents.db'), []);
+    try { const t = store.task(id); store.checkpoint(id, t.version, {}, 'Fixture stale approval'); } finally { store.close(); }
+    await route.continue();
+  });
+  await approve.click();
+  await expect(page.getByRole('alert')).toContainText('Task changed; reload before retrying');
+  await expect(approve).toBeDisabled();
+  expect((await (await call(`/tasks/${id}`)).json()).state).toBe('awaiting_plan_approval');
+  await page.unroute(`${base}/tasks/${id}/approve`);
+  await page.getByRole('button', { name: 'Review updated plan' }).click();
+  await expect(page.getByRole('tab', { name: 'Plan', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await approve.click();
+  await expect(page.getByText('Completed: one reviewed local commit on the task branch', { exact: true })).toBeVisible({ timeout: 20000 });
+  await page.getByRole('tab', { name: 'Result', exact: true }).click();
+  const done = await (await call(`/tasks/${id}`)).json();
+  expect(done.team.id).toBe(team.id); expect(done.approval.status).toBe('approved');
+  expect(done.outcome.commit).toMatch(/^[a-f0-9]{40}$/);
+  const evidence = await (await call(`/tasks/${id}/evidence`)).json();
+  expect(evidence.some((e: { kind: string; data: { exitCode?: number } }) => e.kind === 'validation' && e.data.exitCode === 0)).toBe(true);
+  expect(execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' })).toBe(before);
+  expect(execFileSync('git', ['-C', root, 'status', '--porcelain'], { encoding: 'utf8' })).toBe('');
+  await page.screenshot({ path: join(shots, 'u3-diff.png'), fullPage: true });
+});
+
+test('mode choice has no preselection, rejection cancels, and resubmission prefills only text', async ({ page }) => {
+  await signIn(page); await stopInitialHold(page);
+  const task = await (await call('/tasks', 'POST', { projectId: 'fixture', request: 'Choose then reject', acceptanceCriteria: ['Keep history'] }, { 'idempotency-key': crypto.randomUUID() })).json();
+  await page.goto(`${base}/ui/tasks/${task.id}`);
+  await expect(page.getByRole('button', { name: 'Choose plan approval' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Choose autonomous' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Choose plan approval' }).click();
+  await expect(page.getByRole('button', { name: 'Reject plan · cancels the task' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Reject plan · cancels the task' }).click();
+  await page.getByRole('button', { name: 'Reject and cancel', exact: true }).click();
+  await expect(page.getByText('Cancelled by you', { exact: true }).first()).toBeVisible();
+  await page.getByRole('tab', { name: 'Result', exact: true }).click();
+  await expect(page.getByRole('button', { name: /Clean up worktrees/ })).toBeDisabled();
+  await page.getByRole('link', { name: 'Submit a new task from this request' }).click();
+  await expect(page.getByLabel('What should the team do?')).toHaveValue('Choose then reject');
+  await expect(page.getByLabel('Criterion 1', { exact: true })).toHaveValue('Keep history');
+  await expect(page.getByLabel('Project', { exact: true })).toHaveValue('');
+  expect(await page.evaluate(() => sessionStorage.getItem('devagents.submission.v1'))).toBeNull();
+});
+
