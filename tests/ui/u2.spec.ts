@@ -5,7 +5,7 @@ import { fixtureDir, port } from './playwright.config.js';
 
 const base = `http://127.0.0.1:${port}`;
 const shots = process.env.DEVAGENTS_UI_SCREENSHOT_DIR ?? join(import.meta.dirname, '..', '..', 'test-results', 'ui-screenshots');
-type Team = { id: string; name: string; revision: number; archived: boolean; members: { id: string; name: string; origin: string; capabilities: string[]; instructions: string }[]; readiness: { ready: boolean; diagnostics: { code: string; memberId?: string }[] } };
+type Team = { id: string; name: string; revision: number; archived: boolean; members: { id: string; name: string; origin: string; capabilities: string[]; instructions: string; permissions: { readPaths: string[]; writePaths: string[] } }[]; readiness: { ready: boolean; diagnostics: { code: string; memberId?: string }[] } };
 type Summary = { id: string; name: string; revision: number; archived: boolean };
 async function bearer(): Promise<string> { return (await readFile(join(fixtureDir, 'api-token'), 'utf8')).trim(); }
 async function apiCall<T>(path: string, method = 'GET', body?: unknown): Promise<{ status: number; json: T }> {
@@ -185,4 +185,29 @@ test('tasks show the frozen team or the legacy configuration, and the editor wor
   await expect(page.getByLabel(/^Member ID/)).toHaveValue('backend-developer');
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ path: join(shots, 'u2-narrow-editor.png'), fullPage: true });
+});
+
+test('multiple scope grants can be typed line by line and survive save and reload (F1)', async ({ page }) => {
+  await signIn(page);
+  const website = await teamNamed('Website team');
+  await page.goto(`${base}/ui/teams/${website.id}`);
+  await page.getByRole('button', { name: 'Developer' }).click();
+  await page.getByText('Advanced · capabilities, scope, commands, concurrency').click();
+  const write = page.getByLabel(/^Write scope/); const read = page.getByLabel(/^Read scope/);
+  await write.click(); await write.press('End'); await write.press('Enter'); await write.pressSequentially('project:/docs/**');
+  await expect(write).toHaveValue('project:/**\nproject:/docs/**');
+  await read.click(); await read.press('End'); await read.press('Enter'); await read.pressSequentially('project:/README.md');
+  await expect(read).toHaveValue('project:/**\nproject:/README.md');
+  await page.getByRole('button', { name: 'Save team' }).click();
+  await expect(page.getByRole('status')).toContainText('Saved revision');
+  const developer = (await teamNamed('Website team')).members.find(m => m.id === 'general-developer')!;
+  expect(developer.permissions.writePaths).toEqual(['project:/**', 'project:/docs/**']); expect(developer.permissions.readPaths).toEqual(['project:/**', 'project:/README.md']);
+  await page.reload();
+  await page.getByRole('button', { name: 'Developer' }).click();
+  await page.getByText('Advanced · capabilities, scope, commands, concurrency').click();
+  await expect(page.getByLabel(/^Write scope/)).toHaveValue('project:/**\nproject:/docs/**');
+  // Discard resets the raw text as well as the member.
+  await page.getByLabel(/^Write scope/).fill('project:/**\nproject:/other/**');
+  await page.getByRole('button', { name: 'Discard' }).click();
+  await expect(page.getByLabel(/^Write scope/)).toHaveValue('project:/**\nproject:/docs/**');
 });

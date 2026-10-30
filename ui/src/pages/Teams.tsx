@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { api, ApiError, resources, type Diagnostic, type Readiness, type TeamDetail, type TeamDraft, type TeamMember, type TeamOptions } from '../api';
 import { Card, Chip, Empty, ErrorNote, Skeleton } from '../components/ui';
@@ -182,6 +182,11 @@ function MemberForm({ member, others, options, diagnostics, readOnly, onChange, 
   const provider = options.providers.find(p => p.id === providerId);
   const model = member.model === 'default' ? (options.defaults.model ? `${options.defaults.model} (configured default)` : 'runtime default model, not pinned') : member.model;
   const lines = (value: string[]) => value.join('\n'); const parse = (text: string) => text.split('\n').map(s => s.trim()).filter(Boolean);
+  // Scope fields keep the raw text while typing (an empty line is how a second grant starts) and
+  // normalize into the member on every change; a discard or reload that changes the member resets them.
+  const [readText, setReadText] = useState(lines(member.permissions.readPaths)); const [writeText, setWriteText] = useState(lines(member.permissions.writePaths));
+  useEffect(() => { if (parse(readText).join('\n') !== member.permissions.readPaths.join('\n')) setReadText(lines(member.permissions.readPaths)); }, [member.permissions.readPaths]);
+  useEffect(() => { if (parse(writeText).join('\n') !== member.permissions.writePaths.join('\n')) setWriteText(lines(member.permissions.writePaths)); }, [member.permissions.writePaths]);
   const toggleCapability = (c: string) => onChange({ capabilities: member.capabilities.includes(c) ? member.capabilities.filter(x => x !== c) : [...member.capabilities, c] });
   const unknown = member.capabilities.filter(c => !options.capabilities.includes(c));
   return <Card title={<span style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>{member.name || 'Member'}<Chip tone="neutral">{member.origin === 'template' ? `copied from ${member.templateId ?? 'template'}` : 'custom'}</Chip></span>} right={!readOnly && <button type="button" class="btn small" onClick={onRemove}>Remove from team</button>}>
@@ -217,8 +222,8 @@ function MemberForm({ member, others, options, diagnostics, readOnly, onChange, 
             </div><span class="hint">Only capabilities with a real backend can be saved as ready. Naming a role does not install tools.</span></div>
           <div class="form-grid">
             <label class="field"><span>Concurrency</span><input type="number" min={1} max={8} value={member.concurrency} onInput={e => { const n = Number((e.target as HTMLInputElement).value); if (Number.isInteger(n) && n >= 1 && n <= 8) onChange({ concurrency: n }); }} /></label>
-            <label class="field"><span>Read scope <span class="hint">one grant per line</span></span><textarea rows={3} value={lines(member.permissions.readPaths)} onInput={e => onChange({ permissions: { ...member.permissions, readPaths: parse((e.target as HTMLTextAreaElement).value) } })} /></label>
-            <label class="field"><span>Write scope <span class="hint">one grant per line</span></span><textarea rows={3} value={lines(member.permissions.writePaths)} onInput={e => onChange({ permissions: { ...member.permissions, writePaths: parse((e.target as HTMLTextAreaElement).value) } })} /><span class="hint">project:/dir/** subtrees or exact files; Linux runtimes reject exact-file writes. Empty means read only.</span></label>
+            <label class="field"><span>Read scope <span class="hint">one grant per line</span></span><textarea rows={3} value={readText} onInput={e => { const v = (e.target as HTMLTextAreaElement).value; setReadText(v); onChange({ permissions: { ...member.permissions, readPaths: parse(v) } }); }} /></label>
+            <label class="field"><span>Write scope <span class="hint">one grant per line</span></span><textarea rows={3} value={writeText} onInput={e => { const v = (e.target as HTMLTextAreaElement).value; setWriteText(v); onChange({ permissions: { ...member.permissions, writePaths: parse(v) } }); }} /><span class="hint">project:/dir/** subtrees or exact files; Linux runtimes reject exact-file writes. Empty means read only.</span></label>
           </div>
           <label class="check"><input type="checkbox" checked={member.permissions.allowCommands} onChange={e => onChange({ permissions: { ...member.permissions, allowCommands: (e.target as HTMLInputElement).checked } })} /><span>Allow sandboxed commands (read-only project, no network)</span></label>
           <span class="hint">Push is never granted; reviewed changes stay local commits you integrate yourself.</span>
