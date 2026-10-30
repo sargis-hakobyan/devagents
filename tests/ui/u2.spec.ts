@@ -232,3 +232,26 @@ test('a late readiness response never overrides the verdict for the current draf
   await expect(page.locator('.note.bad')).toHaveCount(0); await expect(page.getByText('✓ Ready')).toBeVisible();
   await expect(save).toBeDisabled(); await expect(page.locator('body')).not.toContainText('· edited');
 });
+
+test('an archived team can be inspected member by member and restored from its own page (F3)', async ({ page }) => {
+  await signIn(page);
+  const old = await teamNamed('Old platform team'); expect(old.archived).toBe(true);
+  await page.goto(`${base}/ui/teams/${old.id}`);
+  await expect(page.getByText('Archived.', { exact: false })).toBeVisible();
+  await expect(page.getByLabel('Team name')).toBeDisabled();
+  await page.getByRole('button', { name: 'Code Reviewer' }).click();
+  await expect(page.getByRole('button', { name: 'Code Reviewer' })).toHaveAttribute('aria-current', 'true');
+  await expect(page.getByLabel(/^Instructions/)).toHaveValue(/# Code Reviewer/); await expect(page.getByLabel(/^Instructions/)).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Remove from team' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Add member ▾' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Duplicate' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Restore' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Restore' }).click();
+  await expect(page.getByText('Archived.', { exact: false })).toHaveCount(0);
+  await expect(page.getByLabel('Team name')).toBeEnabled();
+  expect((await teamNamed('Old platform team')).archived).toBe(false);
+  // Leave the fixture as the other workflows expect it.
+  await page.getByRole('button', { name: 'Archive' }).click();
+  await expect(page.getByText('Archived.', { exact: false })).toBeVisible();
+  expect((await teamNamed('Old platform team')).archived).toBe(true);
+});

@@ -125,14 +125,13 @@ export function TeamEditorPage({ id }: { id: string }) {
   const canSave = dirty && nameOk && !saving && !check.invalid && !check.pending && !archived;
   return <>
     <a href="/ui/teams" class="back">← All teams</a>
-    <fieldset disabled={readOnly} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, display: 'contents' }}>
     <Card>
       <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
-          <div style={{ display: 'grid', gap: '10px', flex: '1 1 320px', minWidth: 0 }}>
+          <fieldset disabled={readOnly} class="plain" style={{ display: 'grid', gap: '10px', flex: '1 1 320px', minWidth: 0 }}>
             <label class="field"><span>Team name</span><input value={draft.name} maxLength={100} required aria-invalid={!nameOk && dirty ? 'true' : undefined} onInput={e => update(d => ({ ...d, name: (e.target as HTMLInputElement).value }))} placeholder="Website team" style={{ fontSize: '18px', fontWeight: 800 }} /></label>
             <label class="field"><span>Description <span class="hint">optional</span></span><input value={draft.description} maxLength={4000} onInput={e => update(d => ({ ...d, description: (e.target as HTMLInputElement).value }))} placeholder="What this roster is for" /></label>
-          </div>
+          </fieldset>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end' }}>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
               {readiness ? <ReadinessChip readiness={readiness} archived={archived} /> : <Chip tone="neutral">Not checked yet</Chip>}
@@ -151,7 +150,7 @@ export function TeamEditorPage({ id }: { id: string }) {
             </div>
           </div>
         </div>
-        {archived && <div class="note info" style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}><span><b>Archived.</b> This team cannot be edited or chosen for new tasks; tasks that already froze it are unaffected.</span><button type="button" class="btn small" disabled={saving} onClick={() => void archive(false)} style={{ pointerEvents: 'auto' }}>Restore</button></div>}
+        {archived && <div class="note info" style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}><span><b>Archived.</b> This team cannot be edited or chosen for new tasks; tasks that already froze it are unaffected.</span><button type="button" class="btn small" disabled={saving} onClick={() => void archive(false)}>Restore</button></div>}
         {conflict && <div class="note warn" role="alert"><b>Saved elsewhere as revision {conflict.latest.revision}</b> ({formatTime(conflict.latest.updatedAt)}: {conflict.latest.revisions[conflict.latest.revisions.length - 1]?.reason ?? 'changed'}). Your edits are still here and nothing was overwritten.
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
             <button type="button" class="btn small" onClick={() => { setLoaded(conflict.latest); setDraft(toDraft(conflict.latest)); setDirty(false); settle({ readiness: conflict.latest.readiness }); setConflict(undefined); }}>Reload revision {conflict.latest.revision} and discard my edits</button>
@@ -165,7 +164,7 @@ export function TeamEditorPage({ id }: { id: string }) {
     <div class="editor">
       <Card title={`Members · ${draft.members.length}`} foot={readiness ? <span style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}><span><b>Readiness:</b> <RoleLine diagnostics={readiness.diagnostics} /></span>{readiness.diagnostics.filter(d => !d.memberId).map((d, i) => <span key={i} class={d.level === 'error' ? 'diag-error' : ''}>{d.level === 'error' ? '✕' : '⚠'} {d.message}</span>)}</span> : check.pending ? 'Checking with the service…' : 'Add members to see the readiness check.'}>
         {draft.members.length === 0 ? <Empty title="No members yet"><span>Use <b>Add member</b> to copy a template or create a custom role. A ready team needs a planner, a writable implementer and an independent reviewer.</span></Empty>
-          : <ul class="members">{draft.members.map((m, i) => { const errors = memberDiagnostics(m.id).filter(d => d.level === 'error').length; return <li key={i}><button type="button" aria-current={i === selected ? 'true' : undefined} onClick={() => setSelected(i)} style={{ pointerEvents: 'auto' }}>
+          : <ul class="members">{draft.members.map((m, i) => { const errors = memberDiagnostics(m.id).filter(d => d.level === 'error').length; return <li key={i}><button type="button" aria-current={i === selected ? 'true' : undefined} onClick={() => setSelected(i)}>
             <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}><b class="wrap-anywhere">{m.name}</b><span class="muted" style={{ fontSize: '12px' }}>{m.origin === 'template' ? `from template ${m.templateId ?? ''}` : 'custom'} · {m.delegation.canDelegate ? 'planner' : 'worker'}</span></span>
             <span style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>{errors > 0 && <Chip tone="warn" title={`${errors} issue${errors === 1 ? '' : 's'}`}>⚠ {errors}</Chip>}{m.enabled ? <Chip tone="ok">On</Chip> : <Chip tone="neutral">Off</Chip>}</span>
           </button></li>; })}</ul>}
@@ -173,7 +172,6 @@ export function TeamEditorPage({ id }: { id: string }) {
       {member && options && selected !== undefined ? <MemberForm key={selected} member={member} others={draft.members.filter((_, i) => i !== selected)} options={options} diagnostics={memberDiagnostics(member.id)} readOnly={readOnly} onChange={patch => updateMember(selected, patch)} onRemove={() => removeMember(selected)} />
         : <Card title="Member"><Empty title={draft.members.length ? 'Select a member to edit it' : 'No member selected'} /></Card>}
     </div>
-    </fieldset>
     {!archived && <div class="card save-bar">
       <span class="muted" style={{ fontSize: '13px' }}>{isNew ? 'Saving creates revision 1.' : `Saving creates revision ${loaded!.revision + 1}.`} Queued and active tasks keep their frozen snapshot; only future submissions use it.{readiness && !readiness.ready ? ' Drafts can be saved but cannot receive work until every error is resolved.' : ''}</span>
       <span style={{ display: 'flex', gap: '8px' }}>
@@ -199,7 +197,7 @@ function MemberForm({ member, others, options, diagnostics, readOnly, onChange, 
   const toggleCapability = (c: string) => onChange({ capabilities: member.capabilities.includes(c) ? member.capabilities.filter(x => x !== c) : [...member.capabilities, c] });
   const unknown = member.capabilities.filter(c => !options.capabilities.includes(c));
   return <Card title={<span style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>{member.name || 'Member'}<Chip tone="neutral">{member.origin === 'template' ? `copied from ${member.templateId ?? 'template'}` : 'custom'}</Chip></span>} right={!readOnly && <button type="button" class="btn small" onClick={onRemove}>Remove from team</button>}>
-    <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+    <fieldset disabled={readOnly} class="plain" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
       {diagnostics.length > 0 && <ul class="diag" aria-label="Member diagnostics">{diagnostics.map((d, i) => <li key={i} class={d.level === 'error' ? 'diag-error' : ''}>{d.level === 'error' ? '✕' : '⚠'} {d.message}</li>)}</ul>}
       <div class="form-grid">
         <label class="field"><span>Member ID <span class="hint">lowercase, used by plans</span></span><input value={member.id} pattern="^[a-z][a-z0-9-]{0,63}$" aria-invalid={idOk ? undefined : 'true'} onInput={e => onChange({ id: (e.target as HTMLInputElement).value })} />{!idOk && <span class="hint diag-error">{idTaken ? 'Another member already uses this ID.' : 'Use a-z, 0-9 and dashes, starting with a letter.'}</span>}</label>
@@ -238,6 +236,6 @@ function MemberForm({ member, others, options, diagnostics, readOnly, onChange, 
           <span class="hint">Push is never granted; reviewed changes stay local commits you integrate yourself.</span>
         </div>
       </details>
-    </div>
+    </fieldset>
   </Card>;
 }
