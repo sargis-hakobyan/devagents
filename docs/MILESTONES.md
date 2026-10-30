@@ -55,11 +55,20 @@
 
 ## Post-review acceptance gate
 
-- [ ] Re-run authenticated M2 and M3 fixtures against the post-review baseline, only when explicitly authorized. Historical live passes above predate the review fixes; the pre-UI follow-up passed 99 tests and deterministic/protocol/Docker suites, but did not run these live reruns.
+- [x] Authenticated M2 and M3 reruns passed on 2026-10-30 after the owner's authorization, against `main` at `db95711cb012a7824c5fdfed7a226a4cb5592b7f`. Rebuilt with `./devagents start --auth saved`; reused the saved ChatGPT account. Environment: Docker Linux ARM64, Node v24.18.0, Codex CLI 0.160.1.
 
-## U1–U3 — Local browser UI (approved 2026-10-30; not implemented)
+Commands run sequentially against that rebuilt service:
 
-Design and implementation owner: Claude, using its frontend design tools. Product scope and acceptance are in [the frontend brief](FRONTEND_BRIEF.md); start with [the implementation instructions](../IMPLEMENTATION_PROMPT.md) and [UI implementation plan](UI_IMPLEMENTATION_PLAN.md). Design and deterministic UI development may proceed while the live gate is pending; do not declare release acceptance or start M4 until it is satisfied.
+```sh
+docker compose exec -T devagents node scripts/m2-smoke.mjs --live
+docker compose exec -T devagents node scripts/m3-smoke.mjs --live
+```
+
+Both exited successfully on their first attempt. M2 verified planning, implementation, real sandboxed validation, independent review and a local commit. M3 verified three items, two parallel workers, dependency integration, real sandboxed validation, independent item/combined reviews and the final local commit. Both fixtures verified that their original checkout remained unchanged and cleaned up their temporary projects. This closes the post-review live gate for the named baseline; it does not claim native authenticated or AMD64 acceptance, or acceptance of future U2/M4 code. The documentation-only handoff update did not repeat the already recorded non-live suites.
+
+## U1–U3 — Local browser UI (U1 implemented; U2/U3 planned)
+
+Design and implementation owner: Claude, reconfirmed by the owner on 2026-10-30. Product scope and acceptance are in [the frontend brief](FRONTEND_BRIEF.md); start with [the implementation instructions](../IMPLEMENTATION_PROMPT.md) and [UI implementation plan](UI_IMPLEMENTATION_PLAN.md). The post-review live gate is now satisfied for the baseline above. U2 is next; U3 and M4 remain separate increments. The implementation plan includes the U2 handoff and regression checklist; no U2 implementation was added in this acceptance pass.
 
 - [x] Product brief, implementation handoff and roadmap alignment.
 - [x] Full screen/state design: Overview, Teams, Projects, Tasks and Settings. Direction A was chosen with its Overview restructured for density. The selected source boards live in `design/ui/` (see its README).
@@ -107,4 +116,4 @@ M3 supports one active top-level request with bounded parallel work items, text 
 
 ## Verification history notes
 
-Detailed completed review reports are retained in Git history; current constraints and fixes are recorded here and in `DECISIONS.md`. Earlier live fixture passes predate the review fixes. During one pre-UI verification window, high host load coincided with a DAG timeout and failures whose output was not captured; subsequent repeated DAG runs and full checks passed. The cause was not established, and wall-clock-sensitive fixtures remain a known testing limitation. Follow-up fixes covered process output bounds and credential seal locking shared across instances.
+Detailed completed review reports are retained in Git history; current constraints and fixes are recorded here and in `DECISIONS.md`. The 2026-10-29 live passes predate the review fixes; the 2026-10-30 reruns above verify the post-review baseline. During one pre-UI verification window, high host load coincided with a DAG timeout and failures whose output was not captured; subsequent repeated DAG runs and full checks passed. The cause was not established, and wall-clock-sensitive fixtures remain a known testing limitation. Follow-up fixes covered process output bounds and credential seal locking shared across instances.
