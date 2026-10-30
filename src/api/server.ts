@@ -164,9 +164,13 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
         const key = z.string().min(1).max(200).parse(req.headers['idempotency-key']);
         return send(res, 201, service.submit(await body(req), key));
       }
-      const match = /^\/tasks\/([a-f0-9-]{36})(?:\/(events|evidence|items|run|mode|plan|approve|cancel|cleanup)(?:\/(\d{1,12}))?)?$/.exec(path);
+      const match = /^\/tasks\/([a-f0-9-]{36})(?:\/(events|evidence|items|diff|run|mode|plan|approve|cancel|cleanup)(?:\/(\d{1,12}))?)?$/.exec(path);
       if (match) {
         const id = match[1]!; const action = match[2]; const sub = match[3];
+        if (req.method === 'GET' && action === 'diff' && !sub) {
+          if (url.search) throw new AppError('invalid_diff_request', 'Diff requests accept a task ID only; no paths, refs or options');
+          return send(res, 200, await service.diff(id));
+        }
         if (req.method === 'GET' && !action) return send(res, 200, { ...service.store.task(id), approval: service.store.planApproval(id) });
         if (req.method === 'GET' && action === 'events') return send(res, 200, service.store.events(id, integer(url.searchParams.get('after'), 0), Math.min(integer(url.searchParams.get('limit'), 500), 1000)));
         if (req.method === 'GET' && action === 'evidence' && sub) return send(res, 200, boundEvidence(service.store.evidenceEntry(id, Number(sub)), EVIDENCE_ENTRY_BYTES));

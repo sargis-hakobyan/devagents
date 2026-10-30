@@ -163,3 +163,4 @@ fieldset:disabled .field input, fieldset:disabled .field select, fieldset:disabl
 
 .task-actions{display:flex;flex-direction:column;gap:10px;min-width:0;max-width:620px}.task-actions .note{overflow-wrap:anywhere}
 
+.diff-file{display:flex;flex-direction:column;align-items:flex-start;white-space:normal;text-align:left}.diff-file[aria-current=true]{border-color:var(--ink);background:var(--bg)}.diff-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:650px;overflow:auto}

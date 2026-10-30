@@ -125,7 +125,7 @@ async function stopInitialHold(page: Page) {
   }
 }
 
-test('browser workflow registers, submits, rejects stale approval, approves and completes reviewed work', async ({ page }) => {
+test('browser workflow registers, submits, rejects stale approval, approves and inspects the completed diff', async ({ page }) => {
   await signIn(page); await stopInitialHold(page);
   const before = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
   const existing = (await (await call('/projects')).json()).find((p: { path: string }) => p.path === root || p.path === `/private${root}`);
@@ -162,6 +162,8 @@ test('browser workflow registers, submits, rejects stale approval, approves and 
   await approve.click();
   await expect(page.getByText('Completed: one reviewed local commit on the task branch', { exact: true })).toBeVisible({ timeout: 20000 });
   await page.getByRole('tab', { name: 'Result', exact: true }).click();
+  await expect(page.getByText('Read-only diff', { exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Selected file diff' })).toContainText("+module.exports = () => 'hello'");
   const done = await (await call(`/tasks/${id}`)).json();
   expect(done.team.id).toBe(team.id); expect(done.approval.status).toBe('approved');
   expect(done.outcome.commit).toMatch(/^[a-f0-9]{40}$/);
@@ -184,6 +186,7 @@ test('mode choice has no preselection, rejection cancels, and resubmission prefi
   await page.getByRole('button', { name: 'Reject and cancel', exact: true }).click();
   await expect(page.getByText('Cancelled by you', { exact: true }).first()).toBeVisible();
   await page.getByRole('tab', { name: 'Result', exact: true }).click();
+  await expect(page.getByText('Diff inspection is offered for completed tasks only.', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /Clean up worktrees/ })).toBeDisabled();
   await page.getByRole('link', { name: 'Submit a new task from this request' }).click();
   await expect(page.getByLabel('What should the team do?')).toHaveValue('Choose then reject');

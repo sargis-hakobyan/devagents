@@ -1,3 +1,4 @@
+import { TaskDiff } from '../components/TaskDiff';
 import { TaskActions } from '../components/TaskActions';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { api, evidenceFacts, type Evidence, type ItemProgress, type Task, type TaskEvent } from '../api';
@@ -193,7 +194,7 @@ function ResultTab({ task, evidence }: { task: Task; evidence: Evidence[] }) {
   const last = reviews[reviews.length - 1]; const review = last ? evidenceFacts(last).output as ReviewFacts | undefined : undefined;
   const validations = evidence.filter(e => e.kind === 'validation');
   if (task.state !== 'completed') return <Card tone={task.state === 'failed' ? 'bad' : undefined}><div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-    <b>Result</b>
+    <b>Result</b><span>Diff inspection is offered for completed tasks only.</span>
     {task.state === 'failed' || task.state === 'cancelled' ? <><div class="wrap-anywhere">{task.outcome?.error ?? 'No commit was created.'}</div><div class="muted" style={{ fontSize: '13px' }}>Worktrees are preserved for inspection{task.workspace ? <> under <span class="mono">{task.workspace.path}</span></> : null}. Resubmitting creates a new task. Cleanup is a separate, previewed action.</div><div style={{ display: 'flex', gap: '8px' }}><a class="btn" href={`/ui/tasks/new?from=${task.id}`}>Submit a new task from this request</a><Later label="Clean up worktrees" increment="U3" reason="Cleanup with a preview arrives in U3. CLI: devagents tasks cleanup" /></div></> : <div class="muted">Not available yet. Completion means one reviewed local commit{task.workspace ? <> on <span class="mono">{task.workspace.branch}</span></> : null}; you merge it yourself. Changed files, test evidence and the review outcome appear here afterwards.</div>}
   </div></Card>;
   return <div class="stack">
@@ -204,10 +205,11 @@ function ResultTab({ task, evidence }: { task: Task; evidence: Evidence[] }) {
       <dt>Repairs used</dt><dd>{task.outcome?.repairCycles ?? 0}</dd>
       <dt>Tests</dt><dd>{validations.length ? `${validations.filter(v => evidenceFacts(v).exitCode === 0 && !evidenceFacts(v).truncated).length} of ${validations.length} validation runs passed; see Activity for output` : 'none recorded'}</dd>
       <dt>Review</dt><dd class="wrap-anywhere">{review ? `${reviewPassed(review) ? 'Approved' : 'Changes requested'} · ${review.summary ?? ''}` : '—'}</dd>
-      <dt>Diff</dt><dd>Read-only diff inspection arrives in U3. Until then: <code>git -C &lt;project&gt; show {task.outcome?.commit?.slice(0, 7) ?? '<commit>'}</code></dd>
+      <dt>Diff</dt><dd>Read the recorded base-to-final change below.</dd>
       <dt>Worktree</dt><dd class="mono wrap-anywhere">{task.workspace?.path ?? '—'}</dd>
     </dl></div>
     <div class="card-foot">Completion is a local reviewed commit, not a merge or deployment. The original checkout was not modified.</div></Card>
+    <TaskDiff id={task.id} />
   </div>;
 }
 

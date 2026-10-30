@@ -131,3 +131,37 @@ test('a published public port replaces the listening port in the Host allowlist 
     assert.equal(await raw(`127.0.0.1:${port}`), 403, 'the internal listening port is not what the browser uses');
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await f.cleanup(); }
 });
+
+test('U3 defaults and diff stay authenticated, mutations keep CSRF/origin checks, and committing refuses cancellation', async () => {
+  const f = await uiFixture();
+  const { TaskRunner } = await import('../../src/orchestration/runner.js');
+  const { FakeEngine, FixtureValidator } = await import('../fixtures/fake-engine.js');
+  const runner = new TaskRunner(f.service, new FakeEngine(), new FixtureValidator()); f.service.attachRunner(runner);
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Browser diff', mode: 'autonomous' }, 'browser-diff');
+    await runner.idle(); assert.equal(f.store.task(task.id).state, 'completed');
+    const { cookie } = await f.cookieFor();
+    const { csrfToken } = await (await fetch(`${f.url}/ui/session`, { headers: { cookie } })).json() as { csrfToken: string };
+    const headers = { cookie, origin: f.url, 'content-type': 'application/json', 'x-csrf-token': csrfToken };
+    assert.deepEqual(await (await fetch(`${f.url}/submission-options`, { headers })).json(), { projects: [{ projectId: 'fixture', mode: null, source: 'none' }] });
+    for (const path of ['/submission-options', `/tasks/${task.id}/diff`]) {
+      assert.equal((await fetch(`${f.url}${path}`)).status, 401);
+      assert.equal((await fetch(`${f.url}${path}`, { headers: { ...headers, origin: 'http://attacker.invalid' } })).status, 403);
+      const code = await new Promise<number>((resolve, reject) => { const r = request({ host: '127.0.0.1', port: f.port, path, headers: { cookie, host: 'attacker.invalid' } }, res => { res.resume(); resolve(res.statusCode!); }); r.on('error', reject); r.end(); });
+      assert.equal(code, 403);
+    }
+    const diff = await fetch(`${f.url}/tasks/${task.id}/diff`, { headers }); assert.equal(diff.status, 200); assert.match(await diff.text(), /greeting/);
+    assert.equal((await fetch(`${f.url}/tasks/${task.id}/diff?path=../../secret&ref=HEAD`, { headers })).status, 400);
+    assert.equal((await fetch(`${f.url}/tasks/00000000-0000-4000-8000-000000000000/diff`, { headers })).status, 404);
+    for (const path of ['/projects', '/tasks', ...['mode', 'approve', 'cancel'].map(a => `/tasks/${task.id}/${a}`)]) {
+      assert.equal((await fetch(`${f.url}${path}`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: '{}' })).status, 403, path);
+      assert.equal((await fetch(`${f.url}${path}`, { method: 'POST', headers: { ...headers, origin: 'http://attacker.invalid' }, body: '{}' })).status, 403, path);
+    }
+    f.service.attachRunner({ enqueue() {}, cancel() {} });
+    let committing = f.service.submit({ projectId: 'fixture', request: 'Committing boundary', mode: 'autonomous' }, 'committing');
+    for (const state of ['ready', 'running', 'validating', 'reviewing', 'committing'] as const) committing = f.store.transition(committing.id, committing.version, state, 'test', 'Fixture transition');
+    const refused = await fetch(`${f.url}/tasks/${committing.id}/cancel`, { method: 'POST', headers, body: '{}' });
+    assert.equal(refused.status, 409); assert.equal((await refused.json() as { error: string }).error, 'commit_in_progress');
+    assert.equal((await fetch(`${f.url}/tasks/${committing.id}/diff`, { headers })).status, 409);
+  } finally { await runner.stop(); await f.close(); }
+});
