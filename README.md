@@ -93,7 +93,7 @@ npm run cli -- ui            # prints a single-use link valid for 10 minutes; ad
 docker compose exec devagents node dist/cli/main.js ui   # same inside the container
 ```
 
-The link sets an `HttpOnly; SameSite=Strict` session cookie. Sessions end on sign-out, after 12 hours idle, 24 hours in total, or whenever the service restarts; mint a new link then. The API token itself is never sent to the browser and the UI stores nothing in browser storage.
+In Docker the link carries the published host port (`DEVAGENTS_PORT`, passed to the container as `DEVAGENTS_PUBLIC_PORT`), not the internal 4310. The link sets an `HttpOnly; SameSite=Strict` session cookie. Sessions end on sign-out, after 12 hours idle, 24 hours in total, or whenever the service restarts; mint a new link then. The API token itself is never sent to the browser and the UI stores nothing in browser storage.
 
 What U1 shows, all from real service data: an overview with attention items (mode choice, plan approval), the running task with its work items, measured counts and recent outcomes; a filterable, paged task list; a task page with header, plain-language status, work items with stages derived from evidence (implementation runs, test results, review outcome, checkpoints, repairs), the frozen plan, chronological activity with bounded evidence previews, and the result (commit, branch, files, review). Teams shows the agent configuration resolved from YAML today and says plainly that saved teams arrive in U2. Settings reports connection availability without secrets; a saved sign-in is never presented as verified model access. Controls for later increments (submit, approve, cancel, register, cleanup, team editing, guided setup) are visible but disabled, each with its CLI alternative.
 

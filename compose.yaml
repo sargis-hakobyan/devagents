@@ -10,6 +10,9 @@ services:
     read_only: true
     environment:
       DEVAGENTS_CREDENTIAL_RUNTIME: /run/devagents-auth
+      # The browser reaches the service through the published host port; sign-in links and the
+      # Host allowlist must use it rather than the container's internal 4310.
+      DEVAGENTS_PUBLIC_PORT: ${DEVAGENTS_PORT:-4310}
     tmpfs:
       - /tmp:size=128m,mode=1777
       - /run/devagents-auth:size=64m,mode=0700,uid=1000,gid=1000,exec

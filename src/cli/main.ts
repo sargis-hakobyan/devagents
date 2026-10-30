@@ -56,15 +56,17 @@ cli.command('serve').description('Start the local API').action(async () => {
   if (!['127.0.0.1', '0.0.0.0'].includes(host)) throw new AppError('invalid_host', 'Unsupported bind address');
   const here = dirname(fileURLToPath(import.meta.url));
   const uiRoot = await findUiRoot([resolve(here, '../ui'), resolve(here, '../../dist/ui'), resolve(here, '../../ui/dist')]);
+  // Docker listens on 4310 inside the container; Compose publishes DEVAGENTS_PORT on the host loopback.
+  const publicPort = z.coerce.number().int().min(1).max(65535).parse(process.env.DEVAGENTS_PUBLIC_PORT ?? port());
   const server = createApi(service, await accessToken(dataDir), {
-    sessions: new BrowserSessions(), uiRoot,
-    status: statusReporter({ dataDir, config, version: '0.1.0', host, port: port, executionEnabled: true }),
+    sessions: new BrowserSessions(), uiRoot, publicPort,
+    status: statusReporter({ dataDir, config, version: '0.1.0', host, port: () => publicPort, executionEnabled: true }),
   });
   await service.agents();
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port(), host, resolve); });
   // Only the process which owns the listening socket may reconcile this service's tasks.
   const recovered = store.recover();
-  log('service_started', { host, port: port(), recovered, projects: store.projects().length, executionEnabled: true, ui: uiRoot ? `http://127.0.0.1:${port()}/ui/` : 'not built' });
+  log('service_started', { host, port: port(), publicPort, recovered, projects: store.projects().length, executionEnabled: true, ui: uiRoot ? `http://127.0.0.1:${publicPort}/ui/` : 'not built' });
   log('setup', { message: 'Register an existing checkout and authenticate Codex. Use tasks submit, show and evidence to follow work. Open the browser UI with a one-time link from: devagents ui' });
   let closing = false;
   const shutdown = () => {

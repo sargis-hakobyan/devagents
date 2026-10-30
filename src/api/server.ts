@@ -50,7 +50,13 @@ export type ApiOptions = {
   uiRoot?: string | undefined;
   status?: () => Promise<unknown>;
   secureCookies?: boolean;
-  /** Host header values that may carry a browser session; defaults to loopback names on the listening port. */
+  /**
+   * The port the browser reaches the service on. In Docker the service listens on 4310 but Compose
+   * publishes a host port, so the Host allowlist and sign-in links must use the published one.
+   * Defaults to the listening port.
+   */
+  publicPort?: number | undefined;
+  /** Host header values that may carry a browser session; defaults to loopback names on the public port. */
   allowedHosts?: (port: number) => string[];
 };
 type Principal = { kind: 'bearer' } | { kind: 'session'; session: BrowserSession };
@@ -58,6 +64,7 @@ type Principal = { kind: 'bearer' } | { kind: 'session'; session: BrowserSession
 export function createApi(service: TaskService, token: string, options: ApiOptions = {}) {
   const sessions = options.sessions ?? new BrowserSessions();
   const allowedHosts = (port: number) => (options.allowedHosts ?? (p => ['127.0.0.1', 'localhost', '[::1]'].map(h => `${h}:${p}`)))(port);
+  const publicPort = (req: IncomingMessage) => options.publicPort ?? req.socket.localPort ?? 0;
   /**
    * Bearer requests keep the original contract: any Origin header is refused, so the CLI path never
    * serves a browser. Cookie requests must come from the same origin on an allowed loopback host and,
@@ -72,8 +79,8 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
     }
     const cookie = parseCookies(req.headers.cookie).get(SESSION_COOKIE);
     if (!cookie) throw new AppError('unauthorized', 'Sign in to the browser UI with the link from: devagents ui', 401);
-    const port = req.socket.localPort ?? 0; const host = (req.headers.host ?? '').toLowerCase();
-    if (!allowedHosts(port).includes(host)) throw new AppError('forbidden_host', 'Browser sessions are only accepted on the local loopback host', 403);
+    const host = (req.headers.host ?? '').toLowerCase();
+    if (!allowedHosts(publicPort(req)).includes(host)) throw new AppError('forbidden_host', 'Browser sessions are only accepted on the local loopback host and published port', 403);
     if (req.headers.origin !== undefined && req.headers.origin !== `http://${host}` && req.headers.origin !== `https://${host}`) throw new AppError('forbidden_origin', 'Cross-origin browser requests are not allowed', 403);
     const site = req.headers['sec-fetch-site'];
     if (typeof site === 'string' && site !== 'same-origin' && site !== 'none') throw new AppError('forbidden_origin', 'Cross-site browser requests are not allowed', 403);
@@ -96,8 +103,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       const principal = authenticate(req);
       if (path === '/ui/bootstrap' && req.method === 'POST') {
         if (principal.kind !== 'bearer') throw new AppError('bearer_required', 'Sign-in links are created through the CLI', 403);
-        const port = req.socket.localPort ?? 0;
-        return send(res, 201, { url: `http://127.0.0.1:${port}/ui/login?code=${sessions.mintCode()}`, expiresInSeconds: 600, singleUse: true });
+        return send(res, 201, { url: `http://127.0.0.1:${publicPort(req)}/ui/login?code=${sessions.mintCode()}`, expiresInSeconds: 600, singleUse: true });
       }
       if (path === '/ui/session' && req.method === 'GET') {
         if (principal.kind !== 'session') throw new AppError('session_required', 'Only browser sessions have a CSRF token', 403);

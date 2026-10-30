@@ -39,11 +39,11 @@ try {
   assert.equal((await fetch(`http://127.0.0.1:${port}/`, { redirect: 'manual' })).status, 302);
   assert.equal((await fetch(`http://127.0.0.1:${port}/tasks`)).status, 401);
   const link = (await docker(['exec', '-T', 'devagents', 'node', 'dist/cli/main.js', 'ui'])).split('\n')[0].trim();
-  assert.match(link, new RegExp(`^http://127\\.0\\.0\\.1:4310/ui/login\\?code=[a-f0-9]{64}$`));
-  const login = await fetch(link.replace(':4310', `:${port}`), { redirect: 'manual' });
+  assert.match(link, new RegExp(`^http://127\\.0\\.0\\.1:${port}/ui/login\\?code=[a-f0-9]{64}$`), 'the link carries the published host port, not the container port');
+  const login = await fetch(link, { redirect: 'manual' });
   assert.equal(login.status, 303); const cookie = login.headers.get('set-cookie').split(';')[0];
   assert.match(login.headers.get('set-cookie'), /HttpOnly; SameSite=Strict/);
-  assert.equal((await fetch(link.replace(':4310', `:${port}`), { redirect: 'manual' })).status, 403, 'links are single use');
+  assert.equal((await fetch(link, { redirect: 'manual' })).status, 403, 'links are single use');
   assert.equal((await fetch(`http://127.0.0.1:${port}/overview`, { headers: { cookie } })).status, 200);
   assert.equal((await fetch(`http://127.0.0.1:${port}/overview`, { headers: { cookie, origin: 'http://localhost:9999' } })).status, 403);
   console.log('PASS: browser UI served from the image with CSP; CLI-minted link establishes a cookie session; cross-origin and anonymous access refused.');

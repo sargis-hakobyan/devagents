@@ -111,3 +111,23 @@ test('browser sessions are bound to the loopback host and same origin, and state
     assert.equal((await fetch(`${f.url}/status`, { headers: f.bearer })).status, 200);
   } finally { await f.close(); }
 });
+
+test('a published public port replaces the listening port in the Host allowlist and in sign-in links', async () => {
+  const f = await fixture(); const sessions = new BrowserSessions();
+  const server = createApi(f.service, 'cli-token', { sessions, publicPort: 4310 });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as AddressInfo).port;
+  try {
+    const link = await (await fetch(`http://127.0.0.1:${port}/ui/bootstrap`, { method: 'POST', headers: { authorization: 'Bearer cli-token', 'content-type': 'application/json' }, body: '{}' })).json() as { url: string };
+    assert.match(link.url, /^http:\/\/127\.0\.0\.1:4310\/ui\/login\?code=/);
+    const login = await fetch(`http://127.0.0.1:${port}/ui/login?code=${new URL(link.url).searchParams.get('code')}`, { redirect: 'manual' });
+    const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+    const raw = (host: string) => new Promise<number>((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port, path: '/tasks', method: 'GET', headers: { cookie, host } }, res => { res.resume(); resolve(res.statusCode ?? 0); });
+      req.once('error', reject); req.end();
+    });
+    assert.equal(await raw('127.0.0.1:4310'), 200, 'the published port is accepted');
+    assert.equal(await raw('localhost:4310'), 200);
+    assert.equal(await raw(`127.0.0.1:${port}`), 403, 'the internal listening port is not what the browser uses');
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await f.cleanup(); }
+});
