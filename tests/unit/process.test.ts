@@ -66,3 +66,21 @@ test('multi-byte and newline-free output is cut on code-point boundaries with ex
   const exact = await budgeted("process.stdout.write('é'.repeat(500))");
   assert.equal(exact.truncated, false); assert.equal(exact.stdout, 'é'.repeat(500));
 });
+
+test('streaming callbacks receive whole lines in order and unfinished lines are bounded by the budget', async () => {
+  const lines: string[] = [];
+  const r = await runProcess(process.execPath, ['-e', "for (let i = 0; i < 5; i++) process.stdout.write(JSON.stringify({ i }) + (i === 2 ? '\\n\\n' : '\\n')); process.stdout.write(JSON.stringify({ i: 'last' }))"], { cwd: process.cwd(), env: { PATH: process.env.PATH }, timeoutMs: 5000, onLine: line => lines.push(line) });
+  assert.equal(r.exitCode, 0);
+  assert.deepEqual(lines.map(l => JSON.parse(l).i), [0, 1, 2, 3, 4, 'last'], 'blank lines are skipped and the final unterminated line is delivered on close');
+  // A newline-free stream longer than the budget: without a consumer it is simply truncated; with a
+  // streaming consumer it is a malformed line and fails closed in both overflow modes.
+  const noConsumer = await budgeted("process.stdout.write('z'.repeat(2000000))", 1000);
+  assert.equal(noConsumer.truncated, true); assert.ok(Buffer.byteLength(noConsumer.stdout) <= 1000); accounted(noConsumer.stdout, 2000000, 'no consumer');
+  for (const overflow of ['truncate', 'fail'] as const) {
+    await assert.rejects(runProcess(process.execPath, ['-e', "process.stdout.write('z'.repeat(2000000))"], { cwd: process.cwd(), env: { PATH: process.env.PATH }, timeoutMs: 10000, maxBytes: 1000, overflow, onLine: () => {} }), /exceeded/, overflow);
+  }
+  // Many short lines in truncate mode stream through the consumer while retained text stays bounded.
+  const seen: string[] = [];
+  const many = await runProcess(process.execPath, ['-e', "for (let i = 0; i < 2000; i++) process.stdout.write('line-' + i + '\\n')"], { cwd: process.cwd(), env: { PATH: process.env.PATH }, timeoutMs: 10000, maxBytes: 1000, overflow: 'truncate', onLine: line => seen.push(line) });
+  assert.equal(seen.length, 2000); assert.equal(seen[1999], 'line-1999'); assert.equal(many.truncated, true); assert.ok(Buffer.byteLength(many.stdout) <= 1000);
+});

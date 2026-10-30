@@ -81,9 +81,13 @@ export async function runProcess(binary: string, args: string[], options: Proces
     };
     child.stdout.on('data', (chunk: string) => {
       if (!account(stdout, chunk)) return;
+      // Line buffering exists only for a streaming consumer, and an unfinished line is bounded by the
+      // budget: an engine emitting a JSONL line longer than that is malformed and fails closed.
+      if (!options.onLine) return;
       pending += chunk;
       const lines = pending.split('\n'); pending = lines.pop()!;
-      try { for (const line of lines) if (line.trim()) options.onLine?.(line); }
+      if (Buffer.byteLength(pending) > limit) return stop(new AppError('output_limit', 'A single output line exceeded the limit'));
+      try { for (const line of lines) if (line.trim()) options.onLine(line); }
       catch (error) { stop(error instanceof Error ? error : new Error(String(error))); }
     });
     child.stderr.on('data', (chunk: string) => { account(stderr, chunk); });
@@ -93,7 +97,7 @@ export async function runProcess(binary: string, args: string[], options: Proces
       clearTimeout(timer); if (escalation) clearTimeout(escalation);
       // Kill any detached descendants even after their immediate parent exits.
       kill('SIGKILL'); options.signal?.removeEventListener('abort', abort);
-      try { if (pending.trim() && !failure) options.onLine?.(pending); }
+      try { if (pending.trim() && !failure) options.onLine!(pending); }
       catch (error) { failure = error instanceof Error ? error : new Error(String(error)); }
       if (failure) reject(failure); else resolve({ stdout: stdout.text(), stderr: stderr.text(), exitCode: code ?? 1, truncated: stdout.dropped + stderr.dropped > 0 });
     });
