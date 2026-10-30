@@ -81,9 +81,11 @@ unlock
 echo 'DevAgents is running.'
 add_project() {
   [ -t 0 ] || { echo 'Run ./devagents project add in an interactive terminal.' >&2; return 1; }
-  printf 'Project name (lowercase letters, digits and dashes): '; IFS= read -r project_id
-  case "$project_id" in ''|*[!a-z0-9-]*|[!a-z]*) echo 'Invalid project name.' >&2; return 1 ;; esac
-  [ "${#project_id}" -le 64 ] || { echo 'Project name is too long.' >&2; return 1; }
+  while :; do
+    printf 'Project name: '; IFS= read -r project_name
+    if project_id=$(sh scripts/project-id.sh "$project_name"); then break; fi
+  done
+  printf 'Project ID: %s\n' "$project_id"
   printf 'Absolute path to your existing Git checkout: '; IFS= read -r project_path
   case "$project_path" in /*) ;; *) echo 'Enter an absolute folder path.' >&2; return 1 ;; esac
   [ -d "$project_path" ] || { echo 'That directory does not exist.' >&2; return 1; }
