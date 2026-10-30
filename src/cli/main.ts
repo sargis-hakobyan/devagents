@@ -9,6 +9,12 @@ import { loadConfig, dataDirectory } from '../config.js';
 import { Store } from '../persistence/store.js';
 import { TaskService } from '../orchestration/service.js';
 import { createApi, accessToken } from '../api/server.js';
+import { BrowserSessions } from '../api/session.js';
+import { findUiRoot } from '../api/static.js';
+import { statusReporter } from '../api/status.js';
+import { spawn } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { engineHealth } from '../engines/health.js';
 import { environmentSecrets, log, redactValues } from '../telemetry/redact.js';
 import { AppError } from '../domain/errors.js';
@@ -45,16 +51,21 @@ cli.command('serve').description('Start the local API').action(async () => {
   const sandbox = { scanLimit: config.workspaceScanLimit };
   const runner = new TaskRunner(service, new CodexAdapter(dataDir, 'codex', sandbox), new CodexValidator(dataDir, 'codex', sandbox));
   service.attachRunner(runner);
-  const server = createApi(service, await accessToken(dataDir));
   // Docker explicitly binds to all container interfaces; Compose exposes only host loopback.
   const host = process.env.DEVAGENTS_HOST ?? '127.0.0.1';
   if (!['127.0.0.1', '0.0.0.0'].includes(host)) throw new AppError('invalid_host', 'Unsupported bind address');
+  const here = dirname(fileURLToPath(import.meta.url));
+  const uiRoot = await findUiRoot([resolve(here, '../ui'), resolve(here, '../../dist/ui'), resolve(here, '../../ui/dist')]);
+  const server = createApi(service, await accessToken(dataDir), {
+    sessions: new BrowserSessions(), uiRoot,
+    status: statusReporter({ dataDir, config, version: '0.1.0', host, port: port, executionEnabled: true }),
+  });
   await service.agents();
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port(), host, resolve); });
   // Only the process which owns the listening socket may reconcile this service's tasks.
   const recovered = store.recover();
-  log('service_started', { host, port: port(), recovered, projects: store.projects().length, executionEnabled: true });
-  log('setup', { message: 'Register an existing checkout and authenticate Codex. Use tasks submit, show and evidence to follow work.' });
+  log('service_started', { host, port: port(), recovered, projects: store.projects().length, executionEnabled: true, ui: uiRoot ? `http://127.0.0.1:${port()}/ui/` : 'not built' });
+  log('setup', { message: 'Register an existing checkout and authenticate Codex. Use tasks submit, show and evidence to follow work. Open the browser UI with a one-time link from: devagents ui' });
   let closing = false;
   const shutdown = () => {
     if (closing) return; closing = true;
@@ -63,6 +74,16 @@ cli.command('serve').description('Start the local API').action(async () => {
     server.closeIdleConnections();
   };
   process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
+});
+cli.command('ui').description('Create a one-time sign-in link for the browser UI (never exposes the CLI token)').option('--open', 'Open the link with the OS browser').action(async (opts: { open?: boolean }) => {
+  const link = await request('/ui/bootstrap', 'POST', {}) as { url: string; expiresInSeconds: number };
+  console.log(link.url);
+  console.error(`Single use, valid for ${Math.round(link.expiresInSeconds / 60)} minutes. Sessions end when the service restarts.`);
+  if (!opts.open) return;
+  const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
+  const child = spawn(opener, [link.url], { stdio: 'ignore', detached: true });
+  child.once('error', () => console.error('Could not open a browser automatically; open the link above manually.'));
+  child.unref();
 });
 cli.command('doctor').description('Report configuration and engine setup').action(async () => {
   const config = await loadConfig();

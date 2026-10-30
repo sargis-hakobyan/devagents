@@ -61,13 +61,31 @@ export class Store {
     return JSON.parse(row.data as string) as Project;
   }
   tasks(): Task[] { return this.db.prepare('SELECT data FROM tasks ORDER BY rowid DESC').all().map(r => JSON.parse(r.data as string) as Task); }
-  /** The list view: no agent snapshots, plans or instructions, which grow to hundreds of kilobytes per task. */
-  summaries(): TaskSummary[] {
-    return this.tasks().map(t => ({
-      id: t.id, projectId: t.projectId, state: t.state, version: t.version, createdAt: t.createdAt, updatedAt: t.updatedAt,
+  private summarize(t: Task, sequence: number): TaskSummary {
+    return {
+      id: t.id, projectId: t.projectId, state: t.state, version: t.version, createdAt: t.createdAt, updatedAt: t.updatedAt, sequence,
+      request: t.request.length > 200 ? `${t.request.slice(0, 200)}…` : t.request,
       ...(t.mode ? { mode: t.mode } : {}), ...(t.workspace ? { branch: t.workspace.branch } : {}), ...(t.plan ? { items: t.plan.items.length } : {}),
       ...(t.outcome?.commit ? { commit: t.outcome.commit } : {}), ...(t.outcome?.error ? { error: t.outcome.error } : {}),
-    }));
+    };
+  }
+  /** The list view: no agent snapshots, plans or instructions, which grow to hundreds of kilobytes per task. Newest first, cursor by row id. */
+  summaries(options: { limit?: number; before?: number; projectId?: string; state?: TaskState } = {}): { tasks: TaskSummary[]; nextBefore?: number } {
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
+    const rows = this.db.prepare('SELECT rowid AS sequence, data FROM tasks WHERE (? IS NULL OR rowid < ?) AND (? IS NULL OR project_id = ?) AND (? IS NULL OR state = ?) ORDER BY rowid DESC LIMIT ?')
+      .all(options.before ?? null, options.before ?? null, options.projectId ?? null, options.projectId ?? null, options.state ?? null, options.state ?? null, limit + 1) as { sequence: number; data: string }[];
+    const page = rows.slice(0, limit).map(r => this.summarize(JSON.parse(r.data) as Task, Number(r.sequence)));
+    return rows.length > limit ? { tasks: page, nextBefore: page[page.length - 1]!.sequence } : { tasks: page };
+  }
+  /** Measured counts and attention items for the Overview; nothing here is estimated. */
+  overview(): { counts: Record<string, number>; attention: TaskSummary[]; active: (TaskSummary & { workItems: Record<string, unknown>[] })[]; recent: TaskSummary[] } {
+    const counts: Record<string, number> = {};
+    for (const row of this.db.prepare('SELECT state, COUNT(*) AS n FROM tasks GROUP BY state').all() as { state: string; n: number }[]) counts[row.state] = Number(row.n);
+    const all = this.summaries({ limit: 200 }).tasks;
+    const attention = all.filter(t => t.state === 'awaiting_mode' || t.state === 'awaiting_plan_approval');
+    const active = all.filter(t => ['planning', 'ready', 'running', 'validating', 'reviewing', 'committing', 'repairing'].includes(t.state)).map(t => ({ ...t, workItems: this.workItems(t.id) }));
+    const recent = all.filter(t => ['completed', 'failed', 'cancelled'].includes(t.state)).slice(0, 8);
+    return { counts, attention, active, recent };
   }
   task(id: string): Task {
     const row = this.db.prepare('SELECT data FROM tasks WHERE id=?').get(id);
@@ -118,9 +136,15 @@ export class Store {
     this.task(id);
     this.db.prepare('INSERT INTO evidence (task_id,kind,data) VALUES (?,?,?)').run(id, kind, this.json({ at: new Date().toISOString(), data }));
   }
-  evidence(id: string): { sequence: number; kind: string; at: string; data: unknown }[] {
+  evidence(id: string, after = 0, limit = 100000): { sequence: number; kind: string; at: string; data: unknown }[] {
     this.task(id);
-    return this.db.prepare('SELECT sequence,kind,data FROM evidence WHERE task_id=? ORDER BY sequence').all(id).map(r => ({ sequence: Number(r.sequence), kind: String(r.kind), ...JSON.parse(String(r.data)) }));
+    return this.db.prepare('SELECT sequence,kind,data FROM evidence WHERE task_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(id, after, limit).map(r => ({ sequence: Number(r.sequence), kind: String(r.kind), ...JSON.parse(String(r.data)) }));
+  }
+  evidenceEntry(id: string, sequence: number): { sequence: number; kind: string; at: string; data: unknown } {
+    this.task(id);
+    const row = this.db.prepare('SELECT sequence,kind,data FROM evidence WHERE task_id=? AND sequence=?').get(id, sequence);
+    if (!row) throw new AppError('not_found', 'Unknown evidence entry', 404);
+    return { sequence: Number(row.sequence), kind: String(row.kind), ...JSON.parse(String(row.data)) };
   }
   workItems(id: string): Record<string, unknown>[] {
     const task = this.task(id);
@@ -141,9 +165,9 @@ export class Store {
   private append(task: Task, actor: string, reason: string): void {
     this.db.prepare('INSERT INTO events (task_id,data) VALUES (?,?)').run(task.id, this.json({ taskId: task.id, runId: task.runId, actor, reason, state: task.state, timestamp: task.updatedAt }));
   }
-  events(id: string): TaskEvent[] {
+  events(id: string, after = 0, limit = 100000): TaskEvent[] {
     this.task(id);
-    return this.db.prepare('SELECT sequence,data FROM events WHERE task_id=? ORDER BY sequence').all(id).map(r => ({ ...JSON.parse(r.data as string), sequence: Number(r.sequence) }) as TaskEvent);
+    return this.db.prepare('SELECT sequence,data FROM events WHERE task_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(id, after, limit).map(r => ({ ...JSON.parse(r.data as string), sequence: Number(r.sequence) }) as TaskEvent);
   }
   recover(): string[] {
     // Never replay a worker or external effect after restart. Approval waits survive intact.
