@@ -6,6 +6,8 @@ You are the principal engineer implementing **DevAgents**, a public open-source,
 
 Read `DEV_AGENTS_SPEC.md` in full before writing code. It captures the product's decisions, assumptions, open questions, architecture, security contract, acceptance criteria and milestones. If the spec conflicts with repository code that already exists, inspect current code, explain the discrepancy and make a safe incremental decision. Do not discard existing work.
 
+For the approved browser UI work, also read `docs/FRONTEND_BRIEF.md` and follow `docs/FRONTEND_IMPLEMENTATION_PROMPT.md`. The 2026-10-30 decision supersedes the earlier custom-UI deferral. M0–M3 are already implemented; inspect the checklist and review records rather than restarting the project. Claude owns UI design/implementation; U1–U3 are separate from M4. Post-review live reruns remain pending and require explicit authorization.
+
 ## Working rules
 
 1. Begin with a quick inventory of the repository and verify its state. Do not assume it is empty or clean.

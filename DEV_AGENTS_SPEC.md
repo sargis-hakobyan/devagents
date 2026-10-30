@@ -1,6 +1,6 @@
 # DevAgents — Product and Engineering Specification
 
-Status: implementation in progress, v0.1 (decisions updated 2026-10-29)
+Status: implementation in progress, v0.1 (decisions updated 2026-10-30)
 
 > DevAgents is a local-first, open-source, configurable AI software development team. It dynamically plans and delegates user requests to specialized agents, executes work with replaceable coding engines, validates results, and prepares reviewable Git changes.
 
@@ -24,7 +24,7 @@ Status: implementation in progress, v0.1 (decisions updated 2026-10-29)
 - Final project name: **DevAgents**; repository name `devagents`.
 - TypeScript/Node.js application; **Mastra** as an initial candidate for agent/workflow orchestration. Keep domain logic framework-independent so replacing it with LangGraph or another orchestrator remains feasible.
 - SQLite for single-user persistence; optional PostgreSQL later.
-- Initial UI: CLI and Mastra Studio for troubleshooting. A purpose-built DevAgents web UI and interactive setup wizard can follow after the core workflow works. For first boot, provide actionable CLI/setup diagnostics.
+- Initial implementation uses CLI/API. A local browser dashboard is now approved in U1–U3: visibility, saved teams/member editing, then browser task workflows and guided setup. See `docs/FRONTEND_BRIEF.md`; Claude will design and implement it. The CLI remains supported. Mastra Studio is not a prerequisite for this UI.
 - Git worktrees for task isolation; development on macOS/Linux initially and Docker multi-arch (`linux/amd64`, `linux/arm64`).
 - One Tech Lead coordinating flat specialist agents in v0.1. Keep delegation schema extensible for nested team hierarchies later.
 - PR creation is allowed only when explicitly configured and authorized; merging/deploying and protected-branch writes are out of default scope.
@@ -63,6 +63,12 @@ Users register one or more project roots, select available coding engines, set a
 ### Agent selection
 
 The Tech Lead sees agent metadata from registry (description, declared capabilities, supported engine, permissions, status, concurrency constraints). Select minimal useful team for a task. Specialized roles are optional, not hardcoded. If a required capability is missing, explain the gap and offer an allowed generalist or request installation; don't assume a new external tool exists.
+
+### Browser dashboard and reusable teams (approved 2026-10-30)
+
+Provide Overview, Teams, Projects, Tasks and Settings views. Saved teams contain configurable named members and can be reused across projects; a project may set a default team. Snapshot the selected team revision and resolved member configuration at submission so edits cannot change queued or active tasks. Preserve legacy YAML/Markdown configuration and task history. The UI displays actual execution state, approvals, tests, review and local Git outcomes. Multiple teams do not expand the current single-active-request scheduler.
+
+`docs/FRONTEND_BRIEF.md` defines the detailed UX, backend/data changes, browser security requirements and U1–U3 acceptance criteria. The browser uses a protected local session; it must not expose the CLI bearer token or remove origin protections without a tested replacement. Same-origin static assets ship with the existing service and Docker image. Browser-based credential setup may initially guide the existing secure terminal flow.
 
 ## 3. Architecture and boundaries
 
@@ -245,13 +251,15 @@ devagents/
 
 **M3 — Dynamic multi-agent:** registry and user roles, DAG scheduler, bounded parallel tasks, isolated worktrees, integration/review/repair loop.
 
+**U1–U3 — Local browser UI (approved addition):** U1 introduces secure browser access and read-only visibility; U2 adds saved teams, member editing and revisioned snapshots; U3 adds project/task workflows and guided setup. Design the full flow, implement U1 as the first integrated increment before M4, then deliver subsequent UI increments separately. See `docs/FRONTEND_BRIEF.md`. Design and deterministic development can proceed while post-review live acceptance remains pending; neither this milestone nor the design handoff authorizes authenticated model calls.
+
 **M4 — Engine portability:** second engine adapter, per-agent engine selection, normalized telemetry/cancellation/failure handling, cross-engine fixture tests.
 
 **M5 — Public release:** GitHub PR integration, recovery hardening, least-privilege policies, multi-arch Docker CI, documentation, example agents and release assets.
 
 **Follow-up phase — Local models:** add and demonstrate local inference providers (for example Ollama or an OpenAI-compatible endpoint) using the same model configuration and a compatible tool-execution harness. Do not equate a model endpoint with a coding engine.
 
-Implement in small reviewed increments. Do not implement a custom UI or nested team hierarchy ahead of core acceptance criteria.
+Implement in small reviewed increments. The approved U1–U3 dashboard supersedes the earlier custom-UI deferral. Preserve core acceptance gates, record pending post-review live reruns, and keep M4 deferred until acceptance is established. Nested team hierarchy remains out of scope.
 
 ## 13. Test strategy
 
@@ -263,7 +271,7 @@ Implement in small reviewed increments. Do not implement a custom UI or nested t
 
 ## 14. Non-goals for v0.1
 
-Local model execution is deferred to a follow-up phase, with provider seams designed now. Other non-goals: production deployment, automatic merges, arbitrary external-system access, hosted multi-tenant service, marketplace/plugin code execution, nested organizational hierarchies, automatic image-generation integration, custom rich dashboard, mobile clients.
+Local model execution is deferred to a follow-up phase, with provider seams designed now. Other non-goals: production deployment, automatic merges, arbitrary external-system access, hosted multi-tenant service, marketplace/plugin code execution, nested organizational hierarchies, automatic image-generation integration, dashboards beyond the focused U1–U3 brief, native mobile clients.
 
 ## 15. Guidance for an implementing coding agent
 

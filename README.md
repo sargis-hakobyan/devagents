@@ -4,6 +4,8 @@ DevAgents is an open-source, local-first AI development-team orchestrator, being
 
 **Current status: M3 multi-agent execution implemented and live container acceptance verified with ChatGPT sign-in.** A dynamic Tech Lead plans a task DAG and selects configured specialists. Independent items run in isolated worktrees with bounded concurrency; dependency results are integrated before downstream work starts. Real sandboxed checks and independent item/combined review gate the final local commit. Approval waits, bounded repairs, cancellation and execution evidence are persisted. Native and Docker checks are documented in [milestones](docs/MILESTONES.md), [compatibility findings](docs/M0_FINDINGS.md), and [decisions](docs/DECISIONS.md).
 
+Browser UI design and implementation is now planned in U1–U3: visibility, reusable teams/member editing, then browser task workflows. It is **not implemented yet**. See the [frontend brief](docs/FRONTEND_BRIEF.md) and [Claude implementation handoff](docs/FRONTEND_IMPLEMENTATION_PROMPT.md). Post-review live reruns remain pending; earlier live acceptance predates the review fixes.
+
 ## Docker quickstart
 
 ```sh

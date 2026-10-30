@@ -53,6 +53,23 @@
 - [x] Pre-M4 review fixes: value-only redaction for model prompts and task data; plan-time executability checks shared with execution; hidden-file integrity around implementation; shutdown recorded as failed with reason; bounded, collapsing sandbox scan; content-based conflict resolution; explicit worktree cleanup; malformed-rejection, output-truncation, protected-path, sealing, worktree-creation, list-summary and data-directory hardening.
 - [x] Scoped shell/patch containment and two concurrent runtime fixtures under Compose CPU/memory/PID limits; Linux exact-file writes fail before inference.
 
+## Post-review acceptance gate
+
+- [ ] Re-run authenticated M2 and M3 fixtures against the post-review baseline, only when explicitly authorized. Historical live passes above predate the review fixes; the final follow-up record reports 99 tests and deterministic/protocol/Docker suites passing, but not these live reruns.
+
+## U1–U3 — Local browser UI (approved 2026-10-30; not implemented)
+
+Design and implementation owner: Claude, using its frontend design tools. Product scope and acceptance are in [the frontend brief](FRONTEND_BRIEF.md); start with [the implementation handoff](FRONTEND_IMPLEMENTATION_PROMPT.md). Design and deterministic UI development may proceed while the live gate is pending; do not declare release acceptance or start M4 until it is satisfied.
+
+- [x] Product brief, implementation handoff and roadmap alignment.
+- [ ] Full screen/state design: Overview, Teams, Projects, Tasks and Settings.
+- [ ] U1: same-origin app shell, protected browser session, real read-only progress/history/results, safe content rendering and browser/CLI compatibility.
+- [ ] U2: persisted reusable teams, custom/template members, revisions, readiness, archive/duplicate, project defaults, submission snapshots and legacy compatibility.
+- [ ] U3: guided setup, project registration, task submission/mode, version-bound plan approval, cancellation and safe diff inspection.
+- [ ] Browser workflow/security tests, accessible responsive layouts, visual verification and native/Docker packaging for each delivered increment.
+
+U1 is the first integrated UI increment before M4. Keep U2/U3 and M4 as separately reviewed work; a team editor must not claim unavailable engines or capabilities work.
+
 ## Later
 - [ ] M4: Claude adapter, per-agent routing, shared engine fixtures.
 - [ ] M5: authorized GitHub integration, recovery hardening, multi-arch CI/release.
