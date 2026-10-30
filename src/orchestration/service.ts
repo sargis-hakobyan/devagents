@@ -85,7 +85,8 @@ export class TaskService {
     const providers = this.config.providers.filter(p => used.has(p.id)).map(p => ({ id: p.id, kind: p.kind, auth: p.auth, ...(p.apiKeyEnv ? { apiKeyEnv: p.apiKeyEnv } : {}), ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}) }));
     return { id: team.id, revision: team.revision, name: team.name, snapshotAt: new Date().toISOString(), members, providers, ...(this.config.defaultModel ? { defaultModel: this.config.defaultModel } : {}), modelPinned: members.filter(m => m.enabled).every(m => m.model !== 'default') };
   }
-  diff(id: string) { const task = this.store.task(id); return readTaskDiff(this.store.project(task.projectId), task, this.dataDir); }
+  /** Diff text is redacted with the same secret list the store applies at rest, not only the environment heuristic. */
+  diff(id: string) { const task = this.store.task(id); return readTaskDiff(this.store.project(task.projectId), task, this.dataDir, this.store.secrets); }
   submissionOptions() {
     return { projects: this.store.projects().map(p => ({ projectId: p.id, mode: p.defaultMode ?? this.config.defaultMode ?? null, source: p.defaultMode ? 'project' : this.config.defaultMode ? 'service' : 'none' })) };
   }

@@ -9,7 +9,8 @@ import { environmentSecrets, redact, redactValues } from '../telemetry/redact.js
 
 export class Store {
   private readonly db: DatabaseSync;
-  constructor(path: string, private readonly secrets = environmentSecrets()) {
+  /** Known secret values (environment heuristic plus configured provider keys); shared with every response and diff path. */
+  constructor(path: string, readonly secrets: readonly string[] = environmentSecrets()) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');

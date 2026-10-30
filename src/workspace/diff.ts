@@ -12,7 +12,7 @@ export type TaskDiff = { base: string; final: string; state: 'complete' | 'empty
 const unavailable = (message: string): never => { throw new AppError('diff_unavailable', message, 409); };
 function prefix(text: string, budget: number): string { const b = Buffer.from(text); let end = Math.min(b.length, budget); while (end > 0 && end < b.length && (b[end]! & 0xc0) === 0x80) end--; return b.subarray(0, end).toString('utf8'); }
 /** Reads immutable Git objects only, after checking the recorded task branch and base. No client paths/refs. */
-export async function readTaskDiff(project: Project, task: Task, dataDir: string, secrets = environmentSecrets()): Promise<TaskDiff> {
+export async function readTaskDiff(project: Project, task: Task, dataDir: string, secrets: readonly string[] = environmentSecrets()): Promise<TaskDiff> {
   const workspace = task.workspace; const final = task.outcome?.commit;
   if (task.state !== 'completed' || !workspace || !final) return unavailable('Diffs are offered only for completed tasks with a recorded final commit.');
   if (!/^[a-f0-9-]{36}$/.test(task.id) || workspace.branch !== `codex/devagents-${task.id}` || !/^[a-f0-9]{40}$/.test(workspace.baseSha) || !/^[a-f0-9]{40}$/.test(final)) return unavailable('Recorded commit or branch identity does not belong to this task.');

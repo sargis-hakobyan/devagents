@@ -69,3 +69,35 @@ test('diff caps text and file counts and omits over-read-cap text without exposi
   const many = await completed(Object.fromEntries(Array.from({ length: 201 }, (_, i) => [`file-${i}`, 'x'])));
   try { await assert.rejects(many.read(), /exceeds 200 files/); } finally { await many.f.cleanup(); }
 });
+
+test('configured provider secrets outside the environment-name heuristic are redacted in diffs and responses (review F1)', async () => {
+  const { createApi } = await import('../../src/api/server.js');
+  const { Store } = await import('../../src/persistence/store.js');
+  const { TaskService } = await import('../../src/orchestration/service.js');
+  const { Config } = await import('../../src/domain/schemas.js');
+  const f = await fixture();
+  const value = 'provider-value-9f8e7d6c5b4a';
+  // MYPROV_AUTH does not match the environment heuristic; the service adds its value to the store's secret list at startup.
+  const store = new Store(join(f.dataDir, 'f1.db'), [value]);
+  const service = new TaskService(store, Config.parse({ schemaVersion: 1, providers: [{ id: 'openai', kind: 'openai', auth: 'login' }, { id: 'custom', kind: 'anthropic', auth: 'api-key', apiKeyEnv: 'MYPROV_AUTH' }] }), f.dataDir);
+  const server = createApi(service, 't');
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    await service.registerProject({ id: 'fixture', path: f.project });
+    const task = service.submit({ projectId: 'fixture', request: 'leak', mode: 'autonomous' }, 'leak');
+    const workspace = await new WorkspaceManager(f.dataDir).create(store.project('fixture'), task.id);
+    await writeFile(join(workspace.path, 'leak.txt'), `const k = "${value}";\n`);
+    await git(workspace.path, ['add', '.']); await git(workspace.path, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'leak']);
+    const final = await git(workspace.path, ['rev-parse', 'HEAD']);
+    let t = store.checkpoint(task.id, store.task(task.id).version, { workspace }, 'worktree');
+    for (const state of ['ready', 'running', 'validating', 'reviewing', 'committing'] as const) t = store.transition(task.id, t.version, state, 'test', 'fixture');
+    store.transition(task.id, t.version, 'completed', 'test', 'done', { outcome: { commit: final, repairCycles: 0 } });
+    const diff = await service.diff(task.id);
+    assert.doesNotMatch(JSON.stringify(diff), /provider-value-9f8e7d6c5b4a/);
+    assert.match(diff.files[0]!.text, /\[REDACTED\]/); assert.equal(diff.files[0]!.redacted, true);
+    const { port } = server.address() as import('node:net').AddressInfo;
+    const body = await (await fetch(`http://127.0.0.1:${port}/tasks/${task.id}/diff`, { headers: { authorization: 'Bearer t' } })).text();
+    assert.doesNotMatch(body, /provider-value-9f8e7d6c5b4a/);
+    assert.doesNotMatch(JSON.stringify(store.task(task.id)), /provider-value/);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); store.close(); await f.cleanup(); }
+});

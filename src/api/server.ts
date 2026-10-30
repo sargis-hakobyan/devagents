@@ -32,10 +32,10 @@ async function body(req: IncomingMessage): Promise<unknown> {
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
   catch { throw new AppError('invalid_json', 'Invalid JSON request'); }
 }
-function send(res: ServerResponse, code: number, data: unknown, extra: Record<string, string> = {}): void {
+function respond(res: ServerResponse, code: number, data: unknown, extra: Record<string, string>, secrets: readonly string[]): void {
   res.writeHead(code, { ...securityHeaders, 'content-type': 'application/json', 'cache-control': 'no-store', ...extra });
   // Stored rows are already redacted at rest; responses only strip secret values so plans stay readable.
-  res.end(JSON.stringify(redactValues(data, environmentSecrets())));
+  res.end(JSON.stringify(redactValues(data, secrets)));
 }
 const EVIDENCE_PREVIEW_BYTES = 16 * 1024; const EVIDENCE_ENTRY_BYTES = 1024 * 1024;
 /** List payloads carry a bounded preview of each evidence entry; the single-entry route carries up to 1 MiB. */
@@ -64,6 +64,9 @@ type Principal = { kind: 'bearer' } | { kind: 'session'; session: BrowserSession
 
 export function createApi(service: TaskService, token: string, options: ApiOptions = {}) {
   const sessions = options.sessions ?? new BrowserSessions();
+  // Responses use the store's secret list (environment heuristic plus configured provider keys), the same list applied at rest.
+  const secrets = [...new Set([...environmentSecrets(), ...service.store.secrets])];
+  const send = (res: ServerResponse, code: number, data: unknown, extra: Record<string, string> = {}) => respond(res, code, data, extra, secrets);
   const allowedHosts = (port: number) => (options.allowedHosts ?? (p => ['127.0.0.1', 'localhost', '[::1]'].map(h => `${h}:${p}`)))(port);
   const publicPort = (req: IncomingMessage) => options.publicPort ?? req.socket.localPort ?? 0;
   /**
