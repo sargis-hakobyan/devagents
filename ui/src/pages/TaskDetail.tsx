@@ -148,9 +148,12 @@ function PlanTab({ task }: { task: Task }) {
 }
 function ActivityTab({ task, events, evidence }: { task: Task; events: TaskEvent[]; evidence: Evidence[] }) {
   type Row = { at: string; actor: string; sequence: number; kind: 'event' | 'evidence'; body: string; detail?: unknown; truncated?: boolean; evidenceSequence?: number };
+  // Completed and failed runs carry the run id, not the agent; the start entry names the agent.
+  const agentByRun = new Map<string, string>();
+  for (const e of evidence) { const d = (e.data ?? {}) as Record<string, unknown>; if (e.kind === 'run-started' && typeof d.runId === 'string' && typeof d.agentId === 'string') agentByRun.set(d.runId, d.agentId); }
   const rows: Row[] = [
     ...events.map(e => ({ at: e.timestamp, actor: e.actor, sequence: e.sequence, kind: 'event' as const, body: `${taskState({ state: e.state, error: '' }).label} · ${e.reason}` })),
-    ...evidence.map(e => ({ at: e.at, actor: evidenceActor(e), sequence: e.sequence, kind: 'evidence' as const, body: evidenceTitle(e), detail: e.data, ...(e.truncated ? { truncated: true } : {}), evidenceSequence: e.sequence })),
+    ...evidence.map(e => ({ at: e.at, actor: evidenceActor(e, agentByRun), sequence: e.sequence, kind: 'evidence' as const, body: evidenceTitle(e), detail: e.data, ...(e.truncated ? { truncated: true } : {}), evidenceSequence: e.sequence })),
   ].sort((a, b) => b.at.localeCompare(a.at) || b.sequence - a.sequence);
   const [limit, setLimit] = useState(40);
   return <Card title="Activity" right={<span class="muted" style={{ fontSize: '12.5px' }}>{events.length} events · {evidence.length} evidence entries · newest first · entries bounded to 16 KB</span>}>
@@ -169,7 +172,12 @@ function EvidenceRow({ taskId, row }: { taskId: string; row: { body: string; det
     {row.truncated && !full && <button type="button" class="btn small" disabled={busy} style={{ marginTop: '6px' }} onClick={() => { setBusy(true); api<Evidence>(`/tasks/${taskId}/evidence/${row.evidenceSequence}`).then(e => setFull(e.data)).catch(() => setFull('Could not load the full entry.')).finally(() => setBusy(false)); }}>Load full entry (up to 1 MiB)</button>}
   </details>;
 }
-function evidenceActor(e: Evidence): string { const d = (e.data ?? {}) as Record<string, unknown>; return typeof d.agentId === 'string' ? d.agentId : e.kind.startsWith('run-') || e.kind === 'progress' ? 'engine' : 'orchestrator'; }
+function evidenceActor(e: Evidence, agentByRun: Map<string, string>): string {
+  const d = (e.data ?? {}) as Record<string, unknown>;
+  if (typeof d.agentId === 'string') return d.agentId;
+  if (typeof d.runId === 'string' && agentByRun.has(d.runId)) return agentByRun.get(d.runId)!;
+  return e.kind.startsWith('run-') || e.kind === 'progress' ? 'engine' : 'orchestrator';
+}
 function evidenceTitle(e: Evidence): string {
   const d = (e.data ?? {}) as Record<string, unknown>; const item = typeof d.workItemId === 'string' ? ` · item ${d.workItemId}` : typeof d.itemId === 'string' ? ` · item ${d.itemId}` : '';
   switch (e.kind) {
