@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { z, ZodError } from 'zod';
 import type { TaskService } from '../orchestration/service.js';
 import { AppError } from '../domain/errors.js';
-import { State } from '../domain/schemas.js';
+import { Id, State, TeamId } from '../domain/schemas.js';
 import { environmentSecrets, redactValues, log } from '../telemetry/redact.js';
 import { BrowserSessions, SESSION_COOKIE, parseCookies, sessionCookie, clearedSessionCookie, type BrowserSession } from './session.js';
 import { securityHeaders, serveUi } from './static.js';
@@ -118,6 +118,30 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       if (req.method === 'GET' && path === '/projects') return send(res, 200, service.store.projects());
       if (req.method === 'POST' && path === '/projects') return send(res, 201, await service.registerProject(await body(req)));
       if (req.method === 'GET' && path === '/agents') return send(res, 200, await service.agents(url.searchParams.get('projectId') ?? undefined));
+      const projectDefault = /^\/projects\/([a-z][a-z0-9-]{0,63})\/default-team$/.exec(path);
+      if (req.method === 'PUT' && projectDefault) {
+        const change = z.strictObject({ teamId: TeamId.nullable(), expectedVersion: z.number().int().nonnegative() }).parse(await body(req));
+        return send(res, 200, service.setProjectDefaultTeam(projectDefault[1]!, change.teamId, change.expectedVersion));
+      }
+      // Saved teams: every mutation is behind the same authentication, CSRF and origin checks as task actions.
+      if (req.method === 'GET' && path === '/teams') return send(res, 200, service.teams(z.enum(['active', 'archived', 'all']).parse(url.searchParams.get('filter') ?? 'active')));
+      if (req.method === 'POST' && path === '/teams') return send(res, 201, service.createTeam(await body(req)));
+      if (req.method === 'POST' && path === '/teams/check') return send(res, 200, service.checkTeam(await body(req)));
+      if (req.method === 'GET' && path === '/teams/templates') return send(res, 200, await service.templates(url.searchParams.get('projectId') ?? undefined));
+      const teamMatch = /^\/teams\/([a-f0-9-]{36})(?:\/(archive|duplicate))?$/.exec(path);
+      if (teamMatch) {
+        const id = teamMatch[1]!; const action = teamMatch[2];
+        if (req.method === 'GET' && !action) return send(res, 200, service.team(id));
+        if (req.method === 'PUT' && !action) {
+          const change = z.strictObject({ expectedRevision: z.number().int().positive(), team: z.unknown() }).parse(await body(req));
+          return send(res, 200, service.updateTeam(id, change.expectedRevision, change.team));
+        }
+        if (req.method === 'POST' && action === 'archive') {
+          const change = z.strictObject({ expectedRevision: z.number().int().positive(), archived: z.boolean() }).parse(await body(req));
+          return send(res, 200, service.setTeamArchived(id, change.expectedRevision, change.archived));
+        }
+        if (req.method === 'POST' && action === 'duplicate') return send(res, 201, service.duplicateTeam(id, z.strictObject({ name: z.unknown() }).parse(await body(req)).name));
+      }
       if (req.method === 'GET' && path === '/overview') return send(res, 200, service.store.overview());
       if (req.method === 'GET' && path === '/status') {
         if (!options.status) throw new AppError('not_found', 'Status reporting is not configured', 404);
@@ -125,7 +149,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       }
       if (req.method === 'GET' && path === '/tasks') {
         const states = z.array(State).max(State.options.length).parse(url.searchParams.getAll('state'));
-        const project = url.searchParams.get('projectId'); const projectId = project ? z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).parse(project) : undefined;
+        const project = url.searchParams.get('projectId'); const projectId = project ? Id.parse(project) : undefined;
         const before = url.searchParams.get('before');
         return send(res, 200, { ...service.store.summaries({
           limit: integer(url.searchParams.get('limit'), 50),

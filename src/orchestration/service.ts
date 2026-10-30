@@ -1,17 +1,20 @@
 import { join } from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { Store } from '../persistence/store.js';
-import { Mode, TaskInput, type AgentDefinition, type AppConfig, type Task } from '../domain/schemas.js';
+import { Mode, TaskInput, TeamInput, type AgentDefinition, type AppConfig, type Task, type TaskTeam, type TeamMember, type TeamRecord, type TeamReadiness, type TeamSummary } from '../domain/schemas.js';
 import { terminalStates } from '../domain/lifecycle.js';
 import { AppError } from '../domain/errors.js';
 import { inspectProject, WorkspaceManager } from '../workspace/git.js';
-import { builtinDirectory, loadRegistry } from '../agents/registry.js';
+import { builtinCapabilities, builtinDirectory, loadRegistry } from '../agents/registry.js';
+import { resolveEngine, resolveProviderId, teamReadiness, type RuntimeSupport } from '../domain/readiness.js';
 import { validatePlan } from '../domain/plan.js';
 import { isWithin } from '../workspace/paths.js';
 
 export class TaskService {
   private runner?: { enqueue(id: string): void; cancel(id: string): void };
-  constructor(readonly store: Store, readonly config: AppConfig, readonly dataDir: string, readonly platform: NodeJS.Platform = process.platform) {}
+  /** `executableEngines` is what this build can actually run; the schema accepts more engines than that. */
+  constructor(readonly store: Store, readonly config: AppConfig, readonly dataDir: string, readonly platform: NodeJS.Platform = process.platform, readonly executableEngines: ReadonlySet<string> = new Set(['codex'])) {}
+  get support(): RuntimeSupport { return { config: this.config, capabilities: builtinCapabilities, executableEngines: this.executableEngines, platform: this.platform }; }
   attachRunner(runner: { enqueue(id: string): void; cancel(id: string): void }): void { this.runner = runner; }
   get executionEnabled(): boolean { return Boolean(this.runner); }
   run(id: string): Task {
@@ -31,10 +34,47 @@ export class TaskService {
     }
     return loadRegistry(directories, this.config);
   }
+  // Saved teams. Validity (throws) and readiness (diagnostics) are separate: a draft can be saved, not run.
+  private withReadiness(team: TeamRecord): TeamRecord & { readiness: TeamReadiness } { return { ...team, readiness: teamReadiness(team.members, this.support) }; }
+  teams(filter: 'active' | 'archived' | 'all' = 'active'): TeamSummary[] {
+    return this.store.teams(filter).map(t => ({ id: t.id, name: t.name, description: t.description, revision: t.revision, archived: t.archived, createdAt: t.createdAt, updatedAt: t.updatedAt, members: t.members.length, enabledMembers: t.members.filter(m => m.enabled).length, readiness: teamReadiness(t.members, this.support) }));
+  }
+  team(id: string) { return { ...this.withReadiness(this.store.team(id)), revisions: this.store.teamRevisions(id) }; }
+  /** Server-side diagnostics for an unsaved draft; the browser never computes readiness itself. */
+  checkTeam(input: unknown): { readiness: TeamReadiness } { return { readiness: teamReadiness(TeamInput.parse(input).members, this.support) }; }
+  createTeam(input: unknown) { const team = TeamInput.parse(input); teamReadiness(team.members, this.support); return this.withReadiness(this.store.createTeam(team)); }
+  updateTeam(id: string, expectedRevision: number, input: unknown) { const team = TeamInput.parse(input); teamReadiness(team.members, this.support); return this.withReadiness(this.store.updateTeam(id, expectedRevision, team)); }
+  setTeamArchived(id: string, expectedRevision: number, archived: boolean) { return this.withReadiness(this.store.setTeamArchived(id, expectedRevision, archived)); }
+  duplicateTeam(id: string, name: unknown) { return this.withReadiness(this.store.duplicateTeam(id, TeamInput.shape.name.parse(name))); }
+  setProjectDefaultTeam(projectId: string, teamId: string | null, expectedVersion: number) { return this.store.setProjectDefaultTeam(projectId, teamId, expectedVersion); }
+  /** Registry agents offered as member templates: explicit copies, never links back to the YAML. */
+  async templates(projectId?: string): Promise<TeamMember[]> {
+    return (await this.agents(projectId)).map(a => ({ id: a.id, name: a.name, description: a.description, enabled: a.enabled, engine: a.engine, provider: a.provider, model: a.model, capabilities: [...a.capabilities], instructions: a.instructions.slice(0, 16000), delegation: { ...a.delegation }, permissions: { readPaths: [...a.permissions.readPaths], writePaths: [...a.permissions.writePaths], allowCommands: a.permissions.allowCommands, allowPush: false as const }, concurrency: a.concurrency, origin: 'template' as const, templateId: a.id }));
+  }
+  /**
+   * Resolves the team for a new task: explicit team, then project default, then the legacy registry
+   * (no snapshot here; the runner snapshots legacy agents at worktree creation). Runs inside the
+   * task-creation transaction, after the idempotency check, so a retry never re-resolves anything.
+   * Engine, provider and model are made concrete now; `model: default` without a configured
+   * `defaultModel` stays unpinned and is recorded as such (`modelPinned: false`) rather than guessed.
+   */
+  private freezeTeam(explicitTeamId: string | undefined, projectId: string): TaskTeam | undefined {
+    const project = this.store.project(projectId);
+    const teamId = explicitTeamId ?? project.defaultTeamId;
+    if (!teamId) return undefined;
+    const team = this.store.team(teamId);
+    if (team.archived) throw new AppError('team_archived', explicitTeamId ? `Team "${team.name}" is archived; restore it or choose another team` : `The default team "${team.name}" of project ${projectId} is archived; choose a team explicitly or change the project default`, 409);
+    const readiness = teamReadiness(team.members, this.support);
+    if (!readiness.ready) throw new AppError('team_not_ready', `Team "${team.name}" is a draft and cannot receive work: ${readiness.diagnostics.filter(d => d.level === 'error').map(d => d.message).join('; ')}`, 409);
+    const members = team.members.map(m => ({ ...m, engine: resolveEngine(m, this.config), provider: resolveProviderId(m, this.config), model: m.model === 'default' && this.config.defaultModel ? this.config.defaultModel : m.model }));
+    const used = new Set(members.map(m => m.provider));
+    const providers = this.config.providers.filter(p => used.has(p.id)).map(p => ({ id: p.id, kind: p.kind, auth: p.auth, ...(p.apiKeyEnv ? { apiKeyEnv: p.apiKeyEnv } : {}), ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}) }));
+    return { id: team.id, revision: team.revision, name: team.name, snapshotAt: new Date().toISOString(), members, providers, ...(this.config.defaultModel ? { defaultModel: this.config.defaultModel } : {}), modelPinned: members.filter(m => m.enabled).every(m => m.model !== 'default') };
+  }
   submit(input: unknown, key: string): Task {
     const task = TaskInput.parse(input);
     const mode = task.mode ?? this.store.project(task.projectId).defaultMode ?? this.config.defaultMode;
-    const created = this.store.createTask({ ...task, ...(mode ? { mode } : {}) }, key);
+    const created = this.store.createTask({ ...task, ...(mode ? { mode } : {}) }, key, () => this.freezeTeam(task.teamId, task.projectId));
     this.runner?.enqueue(created.id); return created;
   }
   mode(id: string, mode: unknown): Task {

@@ -29,6 +29,8 @@ export const Config = z.strictObject({
   executionTimeoutMs: z.number().int().min(1000).max(3600000).default(600000),
   validationTimeoutMs: z.number().int().min(1000).max(600000).default(120000),
   workspaceScanLimit: z.number().int().min(1000).max(2000000).default(200000),
+  /** An explicit model ID pins team snapshots; without it `model: default` means the runtime chooses at execution. */
+  defaultModel: z.string().min(1).max(200).optional(),
 }).superRefine((c, ctx) => {
   if (new Set(c.providers.map(p => p.id)).size !== c.providers.length) ctx.addIssue({ code: 'custom', message: 'Duplicate provider IDs' });
   if (!c.providers.some(p => p.id === c.defaultProvider)) ctx.addIssue({ code: 'custom', message: 'defaultProvider must exist' });
@@ -62,14 +64,38 @@ export const Integration = z.strictObject({ assignedAgent: Id, validation: z.arr
 export const Plan = z.strictObject({ summary: z.string().min(1), risks: z.array(z.string()), items: z.array(WorkItem).min(1).max(30), integration: Integration.nullable().optional() });
 export type TaskPlan = z.infer<typeof Plan>;
 export const ProjectInput = z.strictObject({ id: Id, path: z.string().min(1), defaultMode: Mode.optional() });
-export type Project = z.infer<typeof ProjectInput> & { baseSha: string; registeredAt: string };
-export const TaskInput = z.strictObject({ projectId: Id, request: z.string().min(1).max(20000), mode: Mode.optional(), acceptanceCriteria: z.array(z.string().min(1)).default([]) });
+/** `version` guards default-team changes against lost updates; legacy rows read as version 0. */
+export type Project = z.infer<typeof ProjectInput> & { baseSha: string; registeredAt: string; defaultTeamId?: string; version?: number };
+
+// Saved teams: explicit member copies, bounded so a whole roster fits one 256 KB request.
+export const TeamId = z.string().uuid();
+export const MemberInput = z.strictObject({
+  id: Id, name: z.string().min(1).max(100), description: z.string().min(1).max(4000), enabled: z.boolean().default(true),
+  engine: Id.default('default'), provider: Id.default('default'), model: z.string().min(1).max(200).default('default'),
+  capabilities: z.array(Id).min(1).max(20), instructions: z.string().min(1).max(16000),
+  delegation: z.strictObject({ canReceiveTasks: z.boolean(), canDelegate: z.boolean() }),
+  permissions: Permissions, concurrency: z.number().int().min(1).max(8).default(1),
+  origin: z.enum(['template', 'custom']).default('custom'), templateId: Id.optional(),
+});
+export type TeamMember = z.infer<typeof MemberInput>;
+export const TeamInput = z.strictObject({ name: z.string().min(1).max(100), description: z.string().max(4000).default(''), members: z.array(MemberInput).max(12).default([]) });
+export type TeamRecord = z.infer<typeof TeamInput> & { id: string; revision: number; archived: boolean; createdAt: string; updatedAt: string };
+export type TeamDiagnostic = { level: 'error' | 'warning'; code: string; message: string; memberId?: string };
+export type TeamReadiness = { ready: boolean; diagnostics: TeamDiagnostic[] };
+export type TeamSummary = Pick<TeamRecord, 'id' | 'name' | 'description' | 'revision' | 'archived' | 'createdAt' | 'updatedAt'> & { members: number; enabledMembers: number; readiness: TeamReadiness };
+/** Non-secret provider configuration frozen with a task: names of environment variables only, never values. */
+export type ProviderSnapshot = { id: string; kind: Provider['kind']; auth: Provider['auth']; apiKeyEnv?: string; baseUrl?: string };
+export type Provider = z.infer<typeof Provider>;
+/** Everything execution needs, resolved at submission so later team or default edits cannot change this task. */
+export type TaskTeam = { id: string; revision: number; name: string; snapshotAt: string; members: TeamMember[]; providers: ProviderSnapshot[]; defaultModel?: string; modelPinned: boolean };
+export const TaskInput = z.strictObject({ projectId: Id, request: z.string().min(1).max(20000), mode: Mode.optional(), acceptanceCriteria: z.array(z.string().min(1)).default([]), teamId: TeamId.optional() });
 export type Task = z.infer<typeof TaskInput> & {
   id: string; runId: string; state: TaskState; version: number;
   createdAt: string; updatedAt: string; plan?: TaskPlan;
   workspace?: { path: string; branch: string; baseSha: string };
   agents?: AgentDefinition[];
+  team?: TaskTeam;
   outcome?: { commit?: string; files?: string[]; summary?: string; error?: string; repairCycles: number };
 };
-export type TaskSummary = Pick<Task, 'id' | 'projectId' | 'state' | 'version' | 'createdAt' | 'updatedAt'> & { sequence: number; request: string; mode?: Task['mode']; branch?: string; items?: number; commit?: string; error?: string };
+export type TaskSummary = Pick<Task, 'id' | 'projectId' | 'state' | 'version' | 'createdAt' | 'updatedAt'> & { sequence: number; request: string; mode?: Task['mode']; branch?: string; items?: number; commit?: string; error?: string; team?: { id: string; revision: number; name: string } };
 export type TaskEvent = { sequence: number; taskId: string; runId: string; actor: string; reason: string; state: TaskState; timestamp: string };

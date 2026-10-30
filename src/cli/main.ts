@@ -95,11 +95,22 @@ cli.command('doctor').description('Report configuration and engine setup').actio
 const projects = cli.command('projects');
 projects.command('list').action(async () => print(await request('/projects')));
 projects.command('add <id> <path>').option('--mode <mode>', 'Optional project autonomy default').action(async (id: string, path: string, opts: { mode?: string }) => print(await request('/projects', 'POST', { id, path, ...(opts.mode ? { defaultMode: opts.mode } : {}) })));
+projects.command('default-team <project> <team>').description('Set a saved team as the project default, or "none" to clear it').requiredOption('--version <version>', 'Project settings version you looked at').action(async (projectId: string, team: string, opts: { version: string }) => print(await request(`/projects/${encodeURIComponent(projectId)}/default-team`, 'PUT', { teamId: team === 'none' ? null : team, expectedVersion: Number(opts.version) })));
+const teams = cli.command('teams').description('Saved teams: named rosters copied from templates or custom roles');
+teams.command('list').option('--archived', 'Only archived teams').option('--all', 'Active and archived teams').action(async (opts: { archived?: boolean; all?: boolean }) => print(await request(`/teams?filter=${opts.all ? 'all' : opts.archived ? 'archived' : 'active'}`)));
+teams.command('templates').description('Registry agents as copyable member templates').option('--project <id>').action(async (opts: { project?: string }) => print(await request(`/teams/templates${opts.project ? `?projectId=${encodeURIComponent(opts.project)}` : ''}`)));
+teams.command('show <id>').action(async (id: string) => print(await request(`/teams/${id}`)));
+teams.command('check <file>').description('Server readiness diagnostics for a team file without saving it').action(async (file: string) => print(await request('/teams/check', 'POST', parse(await readFile(file, 'utf8')))));
+teams.command('create <file>').description('Create a team from a YAML or JSON file (name, description, members)').action(async (file: string) => print(await request('/teams', 'POST', parse(await readFile(file, 'utf8')))));
+teams.command('edit <id> <file>').requiredOption('--revision <revision>', 'Revision you edited; a newer one is a conflict').action(async (id: string, file: string, opts: { revision: string }) => print(await request(`/teams/${id}`, 'PUT', { expectedRevision: Number(opts.revision), team: parse(await readFile(file, 'utf8')) })));
+teams.command('archive <id>').requiredOption('--revision <revision>').action(async (id: string, opts: { revision: string }) => print(await request(`/teams/${id}/archive`, 'POST', { expectedRevision: Number(opts.revision), archived: true })));
+teams.command('restore <id>').requiredOption('--revision <revision>').action(async (id: string, opts: { revision: string }) => print(await request(`/teams/${id}/archive`, 'POST', { expectedRevision: Number(opts.revision), archived: false })));
+teams.command('duplicate <id> <name>').action(async (id: string, name: string) => print(await request(`/teams/${id}/duplicate`, 'POST', { name })));
 cli.command('agents').option('--project <id>').action(async (opts: { project?: string }) => print(await request(`/agents${opts.project ? `?projectId=${encodeURIComponent(opts.project)}` : ''}`)));
 const tasks = cli.command('tasks');
 tasks.command('list').description('Summaries of all tasks; use tasks show for the full record').action(async () => print(await request('/tasks')));
-tasks.command('submit <project> <request>').option('--mode <mode>').option('--key <key>', 'Retry key; reuse it to avoid duplicate submissions').action(async (projectId: string, text: string, opts: { mode?: string; key?: string }) => {
-  const task = await request('/tasks', 'POST', { projectId, request: text, ...(opts.mode ? { mode: opts.mode } : {}) }, opts.key ?? randomUUID());
+tasks.command('submit <project> <request>').option('--mode <mode>').option('--team <id>', 'Saved team to freeze for this task (default: the project default, else the legacy registry)').option('--key <key>', 'Retry key; reuse it to avoid duplicate submissions').action(async (projectId: string, text: string, opts: { mode?: string; team?: string; key?: string }) => {
+  const task = await request('/tasks', 'POST', { projectId, request: text, ...(opts.mode ? { mode: opts.mode } : {}), ...(opts.team ? { teamId: opts.team } : {}) }, opts.key ?? randomUUID());
   print(task);
   if ((task as { state: string }).state === 'awaiting_mode') console.error('Choose a mode: devagents tasks mode <task-id> autonomous|plan-approval');
 });

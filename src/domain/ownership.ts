@@ -1,6 +1,8 @@
 import { AppError } from './errors.js';
 import type { AgentDefinition } from './schemas.js';
 
+/** Only exact paths and subtree `/**` grants are supported; any other glob form fails closed. */
+export function assertGrantShape(pattern: string): void { root(pattern); }
 function root(pattern: string): { path: string; tree: boolean } {
   const value = pattern.slice('project:/'.length);
   const path = value === '**' ? '' : value.endsWith('/**') ? value.slice(0, -3) : value;

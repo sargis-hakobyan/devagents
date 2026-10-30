@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { AppError } from '../domain/errors.js';
 import { assertTransition } from '../domain/lifecycle.js';
-import { TaskInput, type Project, type Task, type TaskEvent, type TaskState, type TaskSummary } from '../domain/schemas.js';
+import { TaskInput, TeamInput, type Project, type Task, type TaskEvent, type TaskState, type TaskSummary, type TaskTeam, type TeamRecord } from '../domain/schemas.js';
 import { environmentSecrets, redact, redactValues } from '../telemetry/redact.js';
 
 export class Store {
@@ -14,7 +14,7 @@ export class Store {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 2) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
+    if (version > 3) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
     if (version === 0) this.db.exec(`
       BEGIN IMMEDIATE;
       CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, data TEXT NOT NULL);
@@ -32,6 +32,17 @@ export class Store {
       CREATE TRIGGER evidence_no_update BEFORE UPDATE ON evidence BEGIN SELECT RAISE(ABORT, 'evidence is append-only'); END;
       CREATE TRIGGER evidence_no_delete BEFORE DELETE ON evidence BEGIN SELECT RAISE(ABORT, 'evidence is append-only'); END;
       PRAGMA user_version=2;
+      COMMIT;
+    `);
+    // Schema 3: saved teams with immutable member revisions. Existing rows are untouched; project
+    // default teams and task team references live inside the existing JSON columns.
+    if (version < 3) this.db.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE team_revisions (team_id TEXT NOT NULL REFERENCES teams(id), revision INTEGER NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL, reason TEXT NOT NULL, PRIMARY KEY (team_id, revision));
+      CREATE TRIGGER team_revisions_no_update BEFORE UPDATE ON team_revisions BEGIN SELECT RAISE(ABORT, 'team revisions are immutable'); END;
+      CREATE TRIGGER team_revisions_no_delete BEFORE DELETE ON team_revisions BEGIN SELECT RAISE(ABORT, 'team revisions are immutable'); END;
+      PRAGMA user_version=3;
       COMMIT;
     `);
   }
@@ -54,11 +65,83 @@ export class Store {
     this.db.prepare('INSERT INTO projects VALUES (?, ?, ?)').run(project.id, project.path, JSON.stringify(project));
     return project;
   }
-  projects(): Project[] { return this.db.prepare('SELECT data FROM projects ORDER BY id').all().map(r => JSON.parse(r.data as string) as Project); }
+  projects(): Project[] { return this.db.prepare('SELECT data FROM projects ORDER BY id').all().map(r => ({ version: 0, ...JSON.parse(r.data as string) }) as Project); }
   project(id: string): Project {
     const row = this.db.prepare('SELECT data FROM projects WHERE id=?').get(id);
     if (!row) throw new AppError('not_found', 'Unknown project', 404);
-    return JSON.parse(row.data as string) as Project;
+    return { version: 0, ...JSON.parse(row.data as string) } as Project;
+  }
+  /** Changes a project's default team under an optimistic version check; `null` clears it. */
+  setProjectDefaultTeam(projectId: string, teamId: string | null, expectedVersion: number): Project {
+    return this.transaction(() => {
+      const project = this.project(projectId);
+      if ((project.version ?? 0) !== expectedVersion) throw new AppError('stale_project', 'Project settings changed; reload before retrying', 409);
+      if (teamId !== null) { const team = this.team(teamId); if (team.archived) throw new AppError('team_archived', `Team "${team.name}" is archived and cannot be a default`, 409); }
+      const { defaultTeamId: _, ...rest } = project;
+      const updated: Project = { ...rest, ...(teamId ? { defaultTeamId: teamId } : {}), version: (project.version ?? 0) + 1 };
+      this.db.prepare('UPDATE projects SET data=? WHERE id=?').run(JSON.stringify(updated), projectId);
+      return updated;
+    });
+  }
+
+  // Teams: the row carries identity and the current revision number; every revision's content is immutable.
+  private teamRow(id: string): { id: string; name: string; archived: number; revision: number; created_at: string; updated_at: string } {
+    const row = this.db.prepare('SELECT id, name, archived, revision, created_at, updated_at FROM teams WHERE id=?').get(id);
+    if (!row) throw new AppError('not_found', 'Unknown team', 404);
+    return row as { id: string; name: string; archived: number; revision: number; created_at: string; updated_at: string };
+  }
+  teamRevision(id: string, revision: number): TeamRecord {
+    const row = this.teamRow(id);
+    const rev = this.db.prepare('SELECT data FROM team_revisions WHERE team_id=? AND revision=?').get(id, revision);
+    if (!rev) throw new AppError('not_found', `Unknown revision ${revision} of team ${id}`, 404);
+    const content = JSON.parse(String(rev.data)) as { name: string; description: string; members: TeamRecord['members'] };
+    return { id, revision, archived: Boolean(row.archived), createdAt: row.created_at, updatedAt: row.updated_at, ...content };
+  }
+  team(id: string): TeamRecord { return this.teamRevision(id, this.teamRow(id).revision); }
+  teams(filter: 'active' | 'archived' | 'all' = 'active'): TeamRecord[] {
+    const rows = this.db.prepare(`SELECT id FROM teams ${filter === 'all' ? '' : `WHERE archived=${filter === 'archived' ? 1 : 0}`} ORDER BY name, id`).all() as { id: string }[];
+    return rows.map(r => this.team(r.id));
+  }
+  teamRevisions(id: string): { revision: number; createdAt: string; reason: string }[] {
+    this.teamRow(id);
+    return (this.db.prepare('SELECT revision, created_at, reason FROM team_revisions WHERE team_id=? ORDER BY revision').all(id) as { revision: number; created_at: string; reason: string }[]).map(r => ({ revision: Number(r.revision), createdAt: r.created_at, reason: r.reason }));
+  }
+  createTeam(input: unknown, reason = 'Team created'): TeamRecord {
+    const team = TeamInput.parse(input); const id = randomUUID(); const now = new Date().toISOString();
+    return this.transaction(() => {
+      this.db.prepare('INSERT INTO teams VALUES (?, ?, 0, 1, ?, ?)').run(id, team.name, now, now);
+      this.db.prepare('INSERT INTO team_revisions VALUES (?, 1, ?, ?, ?)').run(id, JSON.stringify(team), now, reason);
+      return this.team(id);
+    });
+  }
+  /** Every change is a new immutable revision; a stale `expectedRevision` is a conflict, never an overwrite. */
+  updateTeam(id: string, expectedRevision: number, input: unknown, reason = 'Team edited'): TeamRecord {
+    const team = TeamInput.parse(input);
+    return this.transaction(() => {
+      const row = this.teamRow(id);
+      if (row.revision !== expectedRevision) throw new AppError('stale_team', `Team changed to revision ${row.revision}; reload before retrying`, 409);
+      if (row.archived) throw new AppError('team_archived', 'Archived teams cannot be edited; restore the team first', 409);
+      const now = new Date().toISOString(); const revision = row.revision + 1;
+      this.db.prepare('INSERT INTO team_revisions VALUES (?, ?, ?, ?, ?)').run(id, revision, JSON.stringify(team), now, reason);
+      this.db.prepare('UPDATE teams SET name=?, revision=?, updated_at=? WHERE id=?').run(team.name, revision, now, id);
+      return this.team(id);
+    });
+  }
+  setTeamArchived(id: string, expectedRevision: number, archived: boolean): TeamRecord {
+    return this.transaction(() => {
+      const row = this.teamRow(id);
+      if (row.revision !== expectedRevision) throw new AppError('stale_team', `Team changed to revision ${row.revision}; reload before retrying`, 409);
+      if (Boolean(row.archived) === archived) return this.team(id);
+      const now = new Date().toISOString(); const revision = row.revision + 1; const current = this.teamRevision(id, row.revision);
+      this.db.prepare('INSERT INTO team_revisions VALUES (?, ?, ?, ?, ?)').run(id, revision, JSON.stringify({ name: current.name, description: current.description, members: current.members }), now, archived ? 'Team archived' : 'Team restored');
+      this.db.prepare('UPDATE teams SET archived=?, revision=?, updated_at=? WHERE id=?').run(archived ? 1 : 0, revision, now, id);
+      return this.team(id);
+    });
+  }
+  /** An independent copy: later edits to either team never affect the other. */
+  duplicateTeam(id: string, name: string): TeamRecord {
+    const source = this.team(id);
+    return this.createTeam({ name, description: source.description, members: structuredClone(source.members) }, `Duplicated from team ${id} revision ${source.revision}`);
   }
   tasks(): Task[] { return this.db.prepare('SELECT data FROM tasks ORDER BY rowid DESC').all().map(r => JSON.parse(r.data as string) as Task); }
   private summarize(t: Task, sequence: number): TaskSummary {
@@ -67,6 +150,7 @@ export class Store {
       request: t.request.length > 200 ? `${t.request.slice(0, 200)}…` : t.request,
       ...(t.mode ? { mode: t.mode } : {}), ...(t.workspace ? { branch: t.workspace.branch } : {}), ...(t.plan ? { items: t.plan.items.length } : {}),
       ...(t.outcome?.commit ? { commit: t.outcome.commit } : {}), ...(t.outcome?.error ? { error: t.outcome.error } : {}),
+      ...(t.team ? { team: { id: t.team.id, revision: t.team.revision, name: t.team.name } } : {}),
     };
   }
   /** The list view: no agent snapshots, plans or instructions, which grow to hundreds of kilobytes per task. Newest first, cursor by row id. */
@@ -108,7 +192,12 @@ export class Store {
     if (!row) throw new AppError('not_found', 'Unknown task', 404);
     return JSON.parse(row.data as string) as Task;
   }
-  createTask(input: unknown, key: string): Task {
+  /**
+   * Creates a task atomically with its frozen team configuration. The idempotency check runs first,
+   * so retrying an earlier submission returns the original task even after the team or defaults
+   * changed; only a new submission resolves `freeze`, inside the same transaction as the insert.
+   */
+  createTask(input: unknown, key: string, freeze?: (task: Task) => TaskTeam | undefined): Task {
     const parsed = TaskInput.parse(input);
     this.project(parsed.projectId);
     const clean = redactValues(parsed, this.secrets) as typeof parsed;
@@ -120,10 +209,12 @@ export class Store {
         return this.task(previous.task_id as string);
       }
       const now = new Date().toISOString();
-      const task: Task = { ...clean, id: randomUUID(), runId: randomUUID(), state: clean.mode ? 'planning' : 'awaiting_mode', version: 0, createdAt: now, updatedAt: now };
+      let task: Task = { ...clean, id: randomUUID(), runId: randomUUID(), state: clean.mode ? 'planning' : 'awaiting_mode', version: 0, createdAt: now, updatedAt: now };
+      const team = freeze?.(task);
+      if (team) task = { ...task, team, agents: team.members.map(m => ({ ...m, schemaVersion: 1 as const, instructionsFile: 'team', source: `team:${team.id}@${team.revision}` })) };
       this.db.prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)').run(task.id, task.projectId, task.state, task.version, this.taskJson(task));
       this.db.prepare('INSERT INTO requests VALUES (?, ?, ?)').run(key, fingerprint, task.id);
-      this.append(task, 'user', clean.mode ? 'Task submitted with autonomy mode' : 'Choose autonomous or plan-approval to continue');
+      this.append(task, 'user', `${clean.mode ? 'Task submitted with autonomy mode' : 'Choose autonomous or plan-approval to continue'}${team ? ` · team "${team.name}" revision ${team.revision} frozen` : ''}`);
       return task;
     });
   }
