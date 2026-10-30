@@ -19,7 +19,8 @@ For the approved browser UI work, also read `docs/FRONTEND_BRIEF.md` and `docs/U
 7. Enforce tool permissions in code rather than prompts. Do not mount user home or Docker socket; do not merge/deploy or push to protected branches. External push/PR must be specifically enabled and authorized.
 8. Create meaningful unit, integration and Docker smoke tests. Demonstrate config-only addition of a new agent, missing-mode prompt, plan approval, dynamic delegation, Git isolation, review cycle and restart recovery.
 9. Maintain README, examples, decision log and a milestone checklist as implementation progresses. Prefer focused commits with passing tests.
-10. Do not publish a GitHub repository, push code, install external network dependencies outside normal project setup, or take destructive action without appropriate user authorization. Prepare the repository for publication and explain what requires owner approval.
+10. Never push automatically. Wait for an explicit user command to push the current work; permission for an earlier push does not authorize later pushes. When instructed, push to `main` unless the user specifies otherwise. Do not publish a GitHub repository, install external network dependencies outside normal project setup, or take destructive action without appropriate user authorization.
+11. Work directly on the local `main` branch (owner decision, 2026-10-30). Do not create feature branches unless explicitly requested. Local commits are allowed; they do not imply permission to push.
 
 ## First response expected
 
