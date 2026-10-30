@@ -251,3 +251,16 @@ Observation, recorded rather than hidden: one earlier full run of this verificat
 ## Status
 
 All findings F1 through F17 from `CLAUDE_REVIEW.md` are now addressed or explicitly decided (F8). M4 was not started. The protocol smoke, Docker suite and live fixtures were not run in any pass, for the reasons given in the review; they remain the next verification step before M4.
+
+---
+
+# Remaining non-live suites — 2026-10-30
+
+The protocol smoke and the Docker suite had been left out of every earlier pass. Both were run at commit `533bf86` (all fixes applied), natively on macOS ARM64 with Codex CLI 0.160.1 and Docker Engine 24.0.6 (Linux ARM64) with Compose 2.22, host load average about 4 to 5, no credentials and no live model call.
+
+| Check | Result |
+| --- | --- |
+| `npm run test:codex-protocol` | Pass: real pinned Codex JSONL and structured output; scoped shell and patch writes stay inside the owned directory and siblings are unchanged; outside, secret and Git denials; blocked command networking; no delegated or network tools; read-only review; opt-in connection check against the loopback fixture |
+| `npm run test:docker` | Pass: image rebuilt from the current source during the run (creation time inside the run window; `dist/workspace/hidden.js`, `dist/workspace/conflicts.js`, `dist/domain/protected-paths.js`, `dist/domain/roles.js`, `workspaceScanLimit` and the cleanup route present in the image); health, unauthenticated setup, explicit project mount, non-root read-only service, task and event persistence across restart, idempotent retry; vault create and restore; deterministic M2 and M3 fixtures with real sandboxed validation inside the container; two concurrent real Codex protocol workers under the configured PID, CPU and memory limits; the suite removed its own containers and volumes |
+
+The protocol fixture selected the keyring credential store with the real home directory, as noted in the review; no keychain prompt appeared and the fixture used only its fake environment key. The live fixtures (`test:codex-live`, `test:m3-live`) remain the only checks not run; they need the user's account and were excluded by instruction.
