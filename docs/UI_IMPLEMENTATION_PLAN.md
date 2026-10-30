@@ -1,6 +1,6 @@
 # Browser UI implementation plan (U1 first)
 
-Status: U1 and U2 implemented and accepted with the limits in `MILESTONES.md`; U3 is next. Codex handles implementation fixes; involve Claude for new design, per the latest owner instruction. Earlier U2 ownership/handoff text below is historical. Visual reference: `design/ui/` (Direction A). Behaviour and acceptance: `docs/FRONTEND_BRIEF.md`.
+Status: U1 and U2 implemented and accepted with the limits in `MILESTONES.md`; U3 is implemented with the delivery limits below; M4 remains separate. Codex handles implementation fixes; involve Claude for new design, per the latest owner instruction. Earlier U2 ownership/handoff text below is historical. Visual reference: `design/ui/` (Direction A). Behaviour and acceptance: `docs/FRONTEND_BRIEF.md`.
 
 ## Stack
 
@@ -86,6 +86,14 @@ Required U2 regression coverage:
 ## U3 handoff — browser workflows and guided setup
 
 Prerequisite: U2 is accepted, including the F6 pending-save fix. Submission fingerprints now identify the submitted input before resolving defaults; retain the legacy compatibility tests. This section prepares U3, not M4 or authenticated engine calls. Work on local `main`, commit in reviewable increments and wait for a fresh command before pushing.
+
+### U3 delivery (2026-10-30)
+
+Implemented in the handoff order on local `main`. Registration, submission, tab-scoped retry identity, task decisions, completed-task diff and guided setup reuse the existing shell/API/pollers. Header and Plan-tab decisions share a pending guard. Cleanup and patch download remain unavailable. Owner defaults applied: rejection is cancellation only, resubmission copies text/criteria only, and missing sign-in warns without blocking the form. Effective mode defaults come from authenticated `GET /submission-options`; no provider settings or secrets are exposed.
+
+The implemented diff limits replace illustrative board values: 64 KiB/file, 256 KiB total text, 200 files, a 256 KiB file-list bound and a 1 MiB/file read bound. Over-read files are omitted entirely before secret redaction can be cut short. Recorded task/commit ownership is required; missing metadata is unavailable. The browser submits no paths or refs to the diff endpoint. Browser setup uses secret-free status and copyable terminal commands only.
+
+See `MILESTONES.md` for verification. The following design and handoff text is retained as the implementation contract, not a request to begin another increment.
 
 ### Design work for Claude
 
