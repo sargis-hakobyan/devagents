@@ -10,62 +10,19 @@
   },
   "pages": [],
   "boards": {
-    "Main.dc.html": {
-      "x": 0,
-      "y": 0,
-      "w": 1360,
-      "h": 1040,
-      "title": "A · Overview",
-      "expand": "fill"
-    },
-    "A-Tasks.dc.html": {
-      "x": 1440,
-      "y": 0,
-      "w": 1360,
-      "h": 900,
-      "title": "A · Tasks",
-      "expand": "fill"
-    },
-    "A-Task.dc.html": {
-      "x": 2880,
-      "y": 0,
-      "w": 1360,
-      "h": 1560,
-      "title": "A · Task detail (running)",
-      "expand": "fill"
-    },
-    "A-Teams.dc.html": {
-      "x": 4320,
-      "y": 0,
-      "w": 1360,
-      "h": 1480,
-      "title": "A · Teams + member editor",
-      "expand": "fill"
-    },
-    "A-Projects.dc.html": {
-      "x": 5760,
-      "y": 0,
-      "w": 1360,
-      "h": 900,
-      "title": "A · Projects",
-      "expand": "fill"
-    },
-    "A-Settings.dc.html": {
-      "x": 7200,
-      "y": 0,
-      "w": 1360,
-      "h": 1000,
-      "title": "A · Settings",
-      "expand": "fill"
-    },
-    "A-States.dc.html": {
-      "x": 8640,
-      "y": 0,
-      "w": 1360,
-      "h": 1400,
-      "title": "A · States + narrow screen",
-      "expand": "fill"
-    }
+    "Main.dc.html": { "x": 0, "y": 0, "w": 1360, "h": 1040, "title": "A · Overview", "expand": "fill" },
+    "A-Tasks.dc.html": { "x": 1440, "y": 0, "w": 1360, "h": 900, "title": "A · Tasks", "expand": "fill" },
+    "A-Task.dc.html": { "x": 2880, "y": 0, "w": 1360, "h": 1560, "title": "A · Task detail (running)", "expand": "fill" },
+    "A-Teams.dc.html": { "x": 4320, "y": 0, "w": 1360, "h": 1480, "title": "A · Teams + member editor", "expand": "fill" },
+    "A-Projects.dc.html": { "x": 5760, "y": 0, "w": 1360, "h": 900, "title": "A · Projects", "expand": "fill" },
+    "A-Settings.dc.html": { "x": 7200, "y": 0, "w": 1360, "h": 1000, "title": "A · Settings", "expand": "fill" },
+    "A-States.dc.html": { "x": 8640, "y": 0, "w": 1360, "h": 1400, "title": "A · States + narrow screen", "expand": "fill" },
+    "U3-Register.dc.html": { "x": 0, "y": 2000, "w": 1360, "h": 1560, "title": "U3 · Register a project", "expand": "fill" },
+    "U3-Submit.dc.html": { "x": 1440, "y": 2000, "w": 1360, "h": 1760, "title": "U3 · Submit a task", "expand": "fill" },
+    "U3-Approve.dc.html": { "x": 2880, "y": 2000, "w": 1360, "h": 2000, "title": "U3 · Mode choice, approval, rejection, cancellation", "expand": "fill" },
+    "U3-Diff.dc.html": { "x": 4320, "y": 2000, "w": 1360, "h": 1620, "title": "U3 · Read-only diff", "expand": "fill" },
+    "U3-Setup.dc.html": { "x": 5760, "y": 2000, "w": 1360, "h": 1500, "title": "U3 · Guided connection setup", "expand": "fill" },
+    "U3-States.dc.html": { "x": 7200, "y": 2000, "w": 1360, "h": 1900, "title": "U3 · Pending, stale, disconnected, invalid path, narrow", "expand": "fill" }
   },
   "order": [
     "Main.dc.html",
@@ -74,30 +31,20 @@
     "A-Teams.dc.html",
     "A-Projects.dc.html",
     "A-Settings.dc.html",
-    "A-States.dc.html"
+    "A-States.dc.html",
+    "U3-Register.dc.html",
+    "U3-Submit.dc.html",
+    "U3-Approve.dc.html",
+    "U3-Diff.dc.html",
+    "U3-Setup.dc.html",
+    "U3-States.dc.html"
   ],
   "notes": {
-    "rowA": {
-      "x": 0,
-      "y": -300,
-      "text": "Direction A — indigo band, light workspace, amber accent",
-      "kind": "title1",
-      "maxW": 10000
-    },
-    "legend": {
-      "x": 10080,
-      "y": 0,
-      "w": 420,
-      "text": "All example content mirrors the deterministic fixtures (project “fixture”, task “Three modules”, items a/b/c, built-in roles). Counts and stages are real backend fields; nothing shows percentages, estimates or model availability that the backend cannot measure. Controls that arrive in U2/U3 are drawn visibly unavailable.",
-      "fill": "blue"
-    },
-    "chosen": {
-      "x": 0,
-      "y": -420,
-      "text": "Selected direction: A, with a denser two-column Overview.",
-      "kind": "title1",
-      "maxW": 10000
-    }
+    "rowA": { "x": 0, "y": -300, "text": "Direction A — indigo band, light workspace, amber accent", "kind": "title1", "maxW": 10000 },
+    "legend": { "x": 10080, "y": 0, "w": 420, "text": "All example content mirrors the deterministic fixtures (project “fixture”, task “Three modules”, items a/b/c, built-in roles). Counts and stages are real backend fields; nothing shows percentages, estimates or model availability that the backend cannot measure. Controls that arrive in U2/U3 are drawn visibly unavailable.", "fill": "blue" },
+    "chosen": { "x": 0, "y": -420, "text": "Selected direction: A, with a denser two-column Overview.", "kind": "title1", "maxW": 10000 },
+    "rowU3": { "x": 0, "y": 1700, "text": "U3 — browser workflows and guided setup (extends Direction A; U1/U2 boards unchanged)", "kind": "title1", "maxW": 10000 },
+    "legendU3": { "x": 8640, "y": 2000, "w": 440, "text": "U3 contracts drawn here: POST /projects with strict ProjectInput and preserved input on failure; one idempotency key per submission attempt, held until the outcome is known; mode/approve/cancel reuse the existing routes and bind to the displayed task version; the diff is read by task identity only, text-only, with unavailable/binary/truncated/empty told apart; setup reuses the terminal flow and never collects credentials or runs a paid test on its own.", "fill": "blue" }
   },
   "designSystems": []
 }

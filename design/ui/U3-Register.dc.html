@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents Projects — register a repository (U3)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#3B3F5E;text-decoration:none;font-weight:600;font-size:14px}
+.nav a:hover{background:#E6E8F3;color:#1C1A33}.nav a.on{background:#231F4A;color:#FFFFFF}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}
+.btn[disabled]{opacity:.55;cursor:not-allowed}
+.btn:focus-visible,.nav a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:#F2F3FA;border:1px solid #E0E2EE;border-radius:6px;padding:2px 6px}
+pre{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:#F2F3FA;border:1px solid #E0E2EE;border-radius:8px;padding:10px 12px;white-space:pre-wrap;word-break:break-all}
+.field{display:flex;flex-direction:column;gap:6px;font-size:13.5px;font-weight:700;color:#3B3F5E}
+.field input,.field select{font:inherit;font-weight:400;font-size:15px;color:#1C1A33;border:1px solid #D1D4E4;border-radius:10px;padding:10px 12px;background:#FFFFFF;min-height:44px;width:100%;box-sizing:border-box}
+.field input.bad{border-color:#F3C1BD;box-shadow:0 0 0 3px #FDE8E6}
+.hint{font-weight:400;color:#5A5F78;font-size:12.5px}
+.note{border-radius:10px;padding:10px 12px;font-size:13.5px}
+.note.warn{background:#FFF1DB;border:1px solid #F1D18A}.note.bad{background:#FDF2F1;border:1px solid #F3C1BD}.note.info{background:#F3F6FE;border:1px solid #C9D7F7}
+dl.kv{margin:0;display:grid;grid-template-columns:140px minmax(0,1fr);gap:6px 12px;font-size:14px}dl.kv dt{color:#5A5F78}dl.kv dd{margin:0;overflow-wrap:anywhere}
+.step{display:grid;grid-template-columns:28px minmax(0,1fr);gap:12px;align-items:start}
+.step b.n{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:999px;background:#231F4A;color:#FFFFFF;font-size:13px}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+  <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 18px"><div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div><div style="width: 1px; height: 36px; background: rgba(255,255,255,0.18)"></div><div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #B9B6D9">Local workspace</span><span style="font-weight: 700; font-size: 16px">127.0.0.1:4310 · docker · linux/arm64</span></div></div>
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6EE7A8" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Connected · updated 2 s ago</span><span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF">Codex signed in · model access not verified</span><button class="btn" type="button" style="background: transparent; color: #FFFFFF; border-color: rgba(255,255,255,0.35); min-height: 36px">Sign out</button></div>
+  </header>
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD">
+      <a href="Main.dc.html">Overview</a><a href="A-Tasks.dc.html">Tasks</a><a href="A-Teams.dc.html">Teams</a><a href="A-Projects.dc.html" class="on" aria-current="page">Projects</a><a href="A-Settings.dc.html">Settings</a>
+    </nav>
+    <main style="flex: 999 1 560px; min-width: 0; padding: 32px 40px 48px; display: flex; flex-direction: column; gap: 22px">
+      <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap">
+        <div><div style="font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #5A5F78; font-weight: 700">Projects</div><h1 style="margin: 4px 0 0; font-size: 40px; letter-spacing: -0.03em; line-height: 1.1">Register a repository</h1><p class="muted" style="margin: 6px 0 0">An existing Git checkout, by the absolute path the <b>service</b> can see. Nothing is cloned, copied or mounted for you; work happens in managed worktrees and the checkout is never modified.</p></div>
+        <a href="A-Projects.dc.html" class="btn">← All projects</a>
+      </div>
+
+      <div style="display: grid; grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr); gap: 18px; align-items: start">
+        <form class="card" aria-labelledby="reg-title" style="padding: 22px 24px; display: flex; flex-direction: column; gap: 16px">
+          <span id="reg-title" style="font-weight: 800; font-size: 16px">New project</span>
+          <label class="field" for="project-id"><span>Project ID <span class="hint">lowercase letters, digits and dashes; used in task lists and the CLI</span></span><input id="project-id" name="id" value="website" pattern="^[a-z][a-z0-9-]{0,63}$" required></label>
+          <label class="field" for="project-path"><span>Absolute path as the service sees it</span><input id="project-path" name="path" value="/projects/website" required><span class="hint">This service runs in Docker: enter the <b>container</b> path of a checkout you mounted explicitly (see the right). Native services take the host path, for example <code>/Users/you/Projects/website</code>.</span></label>
+          <label class="field" for="project-mode"><span>Default autonomy <span class="hint">optional · a task's own mode wins; without any default each task asks once</span></span><select id="project-mode" name="defaultMode"><option value="">None · each task asks once</option><option value="plan-approval" selected>plan-approval · wait for my approval of every plan</option><option value="autonomous">autonomous · plan and implement without asking</option></select></label>
+          <div class="note info"><b>What registration checks.</b> The path exists, is readable by the service, is the root of a Git repository with at least one commit, and does not resolve elsewhere through a symlink. The base commit is recorded. No file inside the checkout is read or written.</div>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-top: 1px solid #EAECF5; padding-top: 14px">
+            <button class="btn primary" type="submit">Register project</button>
+            <button class="btn" type="button">Clear</button>
+            <span class="muted" style="font-size: 13px">Sends <code>POST /projects</code> with the session's CSRF token. Your input stays in the form if the service refuses it.</span>
+          </div>
+        </form>
+
+        <aside class="card" aria-label="Docker path guidance" style="padding: 22px 24px; display: flex; flex-direction: column; gap: 14px">
+          <span style="font-weight: 800; font-size: 16px">Running in Docker? Mount first, then register the container path</span>
+          <div class="step"><b class="n">1</b><div><b>Mount the checkout explicitly</b> in <code>compose.override.yaml</code>. Home directories and the Docker socket are never mounted, and there is no filesystem browser.<pre>services:
+  devagents:
+    volumes:
+      - /Users/you/Projects/website:/projects/website</pre></div></div>
+          <div class="step"><b class="n">2</b><div><b>Restart the service</b> so the mount exists: <code>./devagents start</code></div></div>
+          <div class="step"><b class="n">3</b><div><b>Register the container path</b> here (<code>/projects/website</code>), or from the terminal:<pre>docker compose exec devagents node dist/cli/main.js projects add website /projects/website</pre></div></div>
+          <div class="muted" style="font-size: 13px; border-top: 1px solid #EAECF5; padding-top: 12px">Host ↔ container: <span class="mono">/Users/you/Projects/website</span> on your Mac is <span class="mono">/projects/website</span> inside the service. Tasks report container paths; commits land on branches in your real checkout through the mounted worktree.</div>
+        </aside>
+      </div>
+
+      <section aria-label="Registration states" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+        <div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px">
+          <span class="muted" style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em">Pending</span>
+          <div style="display: flex; gap: 10px; align-items: center"><span class="chip" style="background: #E3ECFF; color: #1C3F99"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#2457C5" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Checking the path</span><span class="muted" style="font-size: 13px">Form disabled while the service inspects the repository · one request, no retry on its own</span></div>
+          <button class="btn primary" type="button" disabled aria-disabled="true" style="align-self: flex-start">Registering…</button>
+        </div>
+        <div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; border-color: #F3C1BD">
+          <span class="muted" style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em">Invalid path (Docker)</span>
+          <div class="note bad" role="alert"><b>Not a Git repository the service can see.</b> <span class="mono">/Users/you/Projects/website</span> does not exist inside the container. Mount the checkout in <code>compose.override.yaml</code>, restart, then enter its container path such as <span class="mono">/projects/website</span>.</div>
+          <label class="field" for="bad-path"><span>Absolute path as the service sees it</span><input id="bad-path" class="bad" value="/Users/you/Projects/website" aria-invalid="true" aria-describedby="bad-path-why"><span id="bad-path-why" class="hint">Kept exactly as you typed it; fix and submit again.</span></label>
+        </div>
+        <div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; border-color: #F1D18A">
+          <span class="muted" style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em">Conflict</span>
+          <div class="note warn" role="alert"><b>Project ID <span class="mono">website</span> is already registered</b> for <span class="mono">/projects/website</span>. Choose another ID, or open the existing project. A path registered under two IDs is also refused.</div>
+          <div style="display: flex; gap: 8px"><a class="btn" href="A-Projects.dc.html" style="min-height: 36px; font-size: 13px">Open website</a></div>
+        </div>
+        <div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; border-color: #F3C1BD">
+          <span class="muted" style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em">Other backend refusals, rendered as the service states them</span>
+          <ul style="margin: 0; padding-left: 18px; font-size: 13.5px; display: flex; flex-direction: column; gap: 4px">
+            <li><b>Not a Git root</b> · <span class="mono">/projects/website/src</span> is inside a repository; register <span class="mono">/projects/website</span>.</li>
+            <li><b>No commits yet</b> · create an initial commit first; worktrees branch from a base commit.</li>
+            <li><b>Path resolves elsewhere</b> · the path is a symlink to a location outside what the service may use.</li>
+            <li><b>Not readable</b> · permission denied for the service user (Docker runs as a non-root user).</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card" aria-label="Registered" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; border-color: #B7E4C7">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap"><span style="font-weight: 800; font-size: 16px">Registered · website</span><span class="chip" style="background: #E1F5EA; color: #135E38">✓ Registered Git root</span></div>
+        <dl class="kv">
+          <dt>Container path</dt><dd class="mono">/projects/website</dd>
+          <dt>Base commit</dt><dd><span class="mono">ac1166b</span> · recorded at registration</dd>
+          <dt>Default mode</dt><dd>plan-approval</dd>
+          <dt>Default team</dt><dd><span class="muted">None · legacy agent configuration</span> · set it on the project card</dd>
+        </dl>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap"><a class="btn primary" href="U3-Submit.dc.html">Submit work for website</a><a class="btn" href="A-Projects.dc.html">Back to projects</a></div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

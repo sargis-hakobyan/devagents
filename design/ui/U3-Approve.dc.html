@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — mode choice, plan approval, rejection and cancellation (U3)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#3B3F5E;text-decoration:none;font-weight:600;font-size:14px}
+.nav a:hover{background:#E6E8F3;color:#1C1A33}.nav a.on{background:#231F4A;color:#FFFFFF}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}.btn.small{min-height:34px;font-size:13px;padding:0 12px}.btn.danger{border-color:#F3C1BD;color:#8A1C14}
+.btn[disabled]{opacity:.55;cursor:not-allowed}
+.btn:focus-visible,.nav a:focus-visible,.tab:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.tab{min-height:44px;padding:0 4px;border:0;background:transparent;font:inherit;font-weight:700;font-size:15px;color:#5A5F78;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap}.tab.on{color:#1C1A33;border-bottom-color:#FFB703}
+.stage{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;padding:3px 9px;border-radius:6px}
+.note{border-radius:10px;padding:10px 12px;font-size:13.5px}
+.note.warn{background:#FFF1DB;border:1px solid #F1D18A}.note.bad{background:#FDF2F1;border:1px solid #F3C1BD}.note.info{background:#F3F6FE;border:1px solid #C9D7F7}
+.h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5A5F78}
+table{border-collapse:collapse;width:100%;font-size:14px}th{text-align:left;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:#5A5F78;padding:8px 12px;border-bottom:1px solid #E0E2EE}td{padding:9px 12px;border-bottom:1px solid #EAECF5;vertical-align:top}
+.choice{display:flex;flex-direction:column;gap:8px;padding:16px 18px;border:1px solid #D1D4E4;border-radius:12px;background:#FFFFFF}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+  <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 18px"><div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div><div style="width: 1px; height: 36px; background: rgba(255,255,255,0.18)"></div><div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #B9B6D9">website</span><span style="font-weight: 700; font-size: 16px">Add input validation to the API</span></div></div>
+    <span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6EE7A8" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Connected · polling every 3 s</span>
+  </header>
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD">
+      <a href="Main.dc.html">Overview</a><a href="A-Tasks.dc.html" class="on" aria-current="page">Tasks</a><a href="A-Teams.dc.html">Teams</a><a href="A-Projects.dc.html">Projects</a><a href="A-Settings.dc.html">Settings</a>
+    </nav>
+    <main style="flex: 999 1 560px; min-width: 0; padding: 24px 40px 48px; display: flex; flex-direction: column; gap: 22px">
+      <a href="A-Tasks.dc.html" style="font-weight: 700; font-size: 14px; text-decoration: none">← All tasks</a>
+
+      <div class="h">1 · Awaiting mode (no task, project or global default)</div>
+      <section class="card" aria-label="Task header, awaiting mode" style="padding: 22px 24px; display: flex; flex-direction: column; gap: 14px">
+        <div style="display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-start">
+          <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: #FFF1DB; color: #7A4A00">● Awaiting mode choice</span><span class="muted" style="font-size: 13px">mode not chosen · version 0 · submitted 10:02 · waiting 4 min</span></div>
+            <h1 style="margin: 0; font-size: 28px; letter-spacing: -0.02em; line-height: 1.2">Document the release process</h1>
+            <div class="muted" style="font-size: 14px">Project <span class="mono">fixture</span> · Team: <b>Legacy agent configuration</b> (snapshotted when the worktree is created)</div>
+          </div>
+        </div>
+        <div class="note warn" style="display: flex; flex-direction: column; gap: 12px">
+          <div><b>Waiting for you: choose how this task may proceed.</b> Nothing runs until you decide, and the question is asked exactly once for this task. Neither option is preselected.</div>
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+            <div class="choice"><b>Plan approval</b><span class="muted" style="font-size: 13.5px">The Tech Lead plans; you approve a specific plan version before anything is implemented.</span><button class="btn primary" type="button" style="align-self: flex-start">Choose plan approval</button></div>
+            <div class="choice"><b>Autonomous</b><span class="muted" style="font-size: 13.5px">Plan, implement, validate and review without asking; stops only on failure, cancellation or the repair budget.</span><button class="btn" type="button" style="align-self: flex-start">Choose autonomous</button></div>
+          </div>
+          <span class="muted" style="font-size: 12.5px">Sends <span class="mono">POST /tasks/:id/mode</span>. Both buttons disable while the request is pending; if the task has meanwhile left this state (chosen from the CLI, cancelled) the page reloads the task and explains instead of pretending the click worked.</span>
+        </div>
+      </section>
+
+      <div class="h" style="margin-top: 8px">2 · Awaiting plan approval, bound to version 2</div>
+      <section class="card" aria-label="Task header, awaiting approval" style="padding: 22px 24px; display: flex; flex-direction: column; gap: 14px">
+        <div style="display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-start">
+          <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: #FFF1DB; color: #7A4A00">● Awaiting your approval</span><span class="muted" style="font-size: 13px">plan-approval · <b>version 2</b> · started 10:06 · waiting 1 min</span></div>
+            <h1 style="margin: 0; font-size: 28px; letter-spacing: -0.02em; line-height: 1.2">Add input validation to the API</h1>
+            <div class="muted" style="font-size: 14px">Project <span class="mono">website</span> · Team: <a href="A-Teams.dc.html"><b>Website team</b></a> revision 4 · 4 enabled members frozen at submission · model: runtime default (not pinned) · Branch <span class="mono">codex/devagents-a81f2c…</span></div>
+          </div>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+            <button class="btn danger" type="button">Reject plan · cancels the task</button>
+            <button class="btn primary" type="button">Approve version 2</button>
+          </div>
+        </div>
+        <div class="note warn"><b>Approval binds to version 2.</b> The button sends that number with <span class="mono">POST /tasks/:id/approve</span>; if the plan changed first, the service refuses and this page shows the new version for a fresh decision. Approving a plan is not permission to push, merge or run destructive commands.</div>
+      </section>
+      <div role="tablist" aria-label="Task sections" style="display: flex; gap: 22px; border-bottom: 1px solid #E0E2EE; overflow-x: auto">
+        <button class="tab" role="tab" aria-selected="false" type="button">Work · 1 item</button><button class="tab on" role="tab" aria-selected="true" type="button">Plan · version 2</button><button class="tab" role="tab" aria-selected="false" type="button">Activity · 6</button><button class="tab" role="tab" aria-selected="false" type="button">Result</button>
+      </div>
+      <section class="card" aria-label="Plan version 2" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 14px">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap"><span style="font-weight: 800; font-size: 16px">Plan · version 2 · proposed by Tech Lead (Website team, revision 4)</span><span class="chip" style="background: #EAECF5; color: #3B3F5E">Read-only · the plan you approve is stored verbatim</span></div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+          <div><div class="h">Summary</div><div>Add a request-body validator to the API layer and return 400 with the failing field path.</div><div class="h" style="margin-top: 10px">Risks declared by the planner</div><ul style="margin: 4px 0 0; padding-left: 18px"><li>Existing clients that send extra fields will now receive 400.</li></ul></div>
+          <div><div class="h">Your acceptance criteria</div><ul style="margin: 4px 0 0; padding-left: 18px"><li>Invalid bodies return 400 with a field path</li><li>Existing tests pass unchanged</li></ul><div class="h" style="margin-top: 10px">Integration</div><div class="muted">Single item · integration null · item validation is the gate</div></div>
+        </div>
+        <div style="overflow-x: auto"><table>
+          <thead><tr><th>Item</th><th>Deliverable</th><th>Agent</th><th>Owned paths</th><th>Validation</th><th>Depends</th></tr></thead>
+          <tbody><tr><td class="mono"><b>validate</b></td><td>Request validator with field-path errors; tests for invalid and valid bodies</td><td>general-developer</td><td class="mono">project:/src/**<br>project:/tests/**</td><td class="mono">node --test tests/</td><td class="muted">—</td></tr></tbody>
+        </table></div>
+        <div class="muted" style="font-size: 13px">Ownership narrows the member's permissions and never widens them. Every validation command is one of the supported forms; execution re-checks the plan.</div>
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-top: 1px solid #EAECF5; padding-top: 14px">
+          <button class="btn primary" type="button">Approve version 2</button>
+          <button class="btn danger" type="button">Reject plan · cancels the task</button>
+          <span class="muted" style="font-size: 13px">Rejection has no "revise" path today: it cancels this task (<span class="mono">POST /tasks/:id/cancel</span>). Resubmitting creates a new task that you can link from the request text.</span>
+        </div>
+      </section>
+
+      <div class="h" style="margin-top: 8px">3 · Stale approval: the plan changed to version 3 before your click arrived</div>
+      <section class="card" aria-label="Stale approval" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; border-color: #F1D18A">
+        <div class="note warn" role="alert"><b>Version 2 was not approved.</b> The service refused because the task is now at <b>version 3</b> (plan re-proposed at 10:09 after a planner retry). The new plan is shown below; nothing was approved and nothing ran. Read it and decide again.</div>
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap"><span style="font-weight: 800; font-size: 16px">Plan · version 3</span><span class="chip" style="background: #FFF1DB; color: #7A4A00">Changed since your last look · 2 items now</span></div>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap"><button class="btn primary" type="button">Approve version 3</button><button class="btn danger" type="button">Reject plan · cancels the task</button></div>
+      </section>
+
+      <div class="h" style="margin-top: 8px">4 · Rejection confirmation</div>
+      <section class="card" aria-label="Confirm rejection" role="dialog" aria-labelledby="reject-title" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; max-width: 640px; border-color: #F3C1BD">
+        <span id="reject-title" style="font-weight: 800; font-size: 16px">Reject plan version 2 and cancel this task?</span>
+        <span>The task becomes <b>Cancelled by you</b>. No implementation has started, so no worktree changes exist. The task stays in the history with its frozen team and the rejected plan; a resubmission is a new task.</span>
+        <div style="display: flex; gap: 10px"><button class="btn danger" type="button">Reject and cancel</button><button class="btn" type="button">Keep waiting</button></div>
+      </section>
+
+      <div class="h" style="margin-top: 8px">5 · Cancellation while running, and the non-cancellable boundary</div>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+        <section class="card" aria-label="Cancel while running" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: #E3ECFF; color: #1C3F99">▶ Running</span><span class="muted" style="font-size: 13px">item validate · implementing · elapsed 3 min</span></div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn danger" type="button">Cancel task…</button></div>
+          <div class="note info"><b>Cancelling stops the workers and keeps every worktree</b> for inspection; nothing is deleted and nothing is committed. Items record why they stopped: cancelled by you, aborted because a sibling failed, or interrupted by a shutdown.</div>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: #E3ECFF; color: #1C3F99">Cancelling…</span><span class="muted" style="font-size: 13px">button disabled; the page shows "Cancelled by you" from the service's next response, never from the click.</span></div>
+        </section>
+        <section class="card" aria-label="Committing" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: #E3ECFF; color: #1C3F99">▶ Committing</span><span class="chip" style="background: #EAECF5; color: #3B3F5E" title="The final local commit is an atomic boundary">Not cancellable</span></div>
+          <span class="muted" style="font-size: 13.5px">The reviewed local commit is being finalized. No cancel button is offered; if a cancel arrives anyway the service answers <span class="mono">409 commit_in_progress</span> and the page says so:</span>
+          <div class="note bad" role="alert"><b>Could not cancel.</b> Local commit is being finalized; inspect the resulting task before further action.</div>
+          <span class="muted" style="font-size: 13.5px">Other conflicts render the same way with the service's message: already finished, already cancelled, mode already selected, task changed (stale version).</span>
+        </section>
+      </div>
+
+      <div class="h" style="margin-top: 8px">6 · After cancellation</div>
+      <section class="card" aria-label="Cancelled" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: #EAECF5; color: #3B3F5E">⊘ Cancelled by you</span><span class="muted" style="font-size: 13px">plan-approval · version 3 · took 9 min</span></div>
+        <div class="note info"><b>Cancelled by you at 10:15.</b> Workers were stopped and worktrees preserved on <span class="mono">codex/devagents-a81f2c…</span>. Cleanup stays a terminal command for now (<span class="mono">devagents tasks cleanup</span>); a browser preview of removals arrives later in U3.</div>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap"><a class="btn primary" href="U3-Submit.dc.html">Submit a new task from this request</a><span class="muted" style="font-size: 13px; align-self: center">Opens the form prefilled with the request and criteria. It is a new task with a new attempt key, never a replay of this one.</span></div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":2000}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

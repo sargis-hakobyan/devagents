@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — guided connection setup (U3)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#3B3F5E;text-decoration:none;font-weight:600;font-size:14px}
+.nav a:hover{background:#E6E8F3;color:#1C1A33}.nav a.on{background:#231F4A;color:#FFFFFF}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}.btn.small{min-height:34px;font-size:13px;padding:0 12px}.btn[disabled]{opacity:.55;cursor:not-allowed}
+.btn:focus-visible,.nav a:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:#F2F3FA;border:1px solid #E0E2EE;border-radius:6px;padding:2px 6px}
+pre{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:#F2F3FA;border:1px solid #E0E2EE;border-radius:8px;padding:10px 12px;white-space:pre-wrap;word-break:break-all}
+.note{border-radius:10px;padding:10px 12px;font-size:13.5px}
+.note.warn{background:#FFF1DB;border:1px solid #F1D18A}.note.bad{background:#FDF2F1;border:1px solid #F3C1BD}.note.info{background:#F3F6FE;border:1px solid #C9D7F7}
+.h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5A5F78}
+.step{display:grid;grid-template-columns:36px minmax(0,1fr);gap:14px;padding:18px 20px;border-top:1px solid #EAECF5}
+.step:first-child{border-top:0}
+.n{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:999px;font-weight:800;font-size:14px}
+.n.ok{background:#E1F5EA;color:#135E38}.n.todo{background:#FFF1DB;color:#7A4A00}.n.off{background:#EAECF5;color:#5A5F78}
+.cmd{display:flex;gap:8px;align-items:stretch}.cmd pre{flex:1}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+  <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 18px"><div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div><div style="width: 1px; height: 36px; background: rgba(255,255,255,0.18)"></div><div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #B9B6D9">Local workspace</span><span style="font-weight: 700; font-size: 16px">127.0.0.1:4310 · docker · linux/arm64</span></div></div>
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6EE7A8" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Connected · updated 1 s ago</span><span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FF8A8A" stroke-width="3" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>Codex not signed in</span></div>
+  </header>
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD">
+      <a href="Main.dc.html">Overview</a><a href="A-Tasks.dc.html">Tasks</a><a href="A-Teams.dc.html">Teams</a><a href="A-Projects.dc.html">Projects</a><a href="A-Settings.dc.html" class="on" aria-current="page">Settings</a>
+    </nav>
+    <main style="flex: 999 1 560px; min-width: 0; padding: 32px 40px 48px; display: flex; flex-direction: column; gap: 22px">
+      <div class="note warn" role="status" style="display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap"><span><b>Not ready to run work:</b> no saved Codex sign-in. Tasks can be submitted and will wait, but planning fails at its first model call until a sign-in is saved.</span><a class="btn small" href="#setup">Finish setup</a></div>
+      <div><div class="h">Settings · setup</div><h1 style="margin: 4px 0 0; font-size: 40px; letter-spacing: -0.03em; line-height: 1.1">Get ready to run work</h1><p class="muted" style="margin: 6px 0 0">Everything below is read from the running service without secrets. Sign-in itself happens in your terminal with the existing flow; the browser never asks for a key or shows a saved one.</p></div>
+
+      <section class="card" id="setup" aria-label="Setup steps" style="display: flex; flex-direction: column">
+        <div class="step"><span class="n ok" aria-hidden="true">✓</span><div style="display: flex; flex-direction: column; gap: 4px"><div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><b>Browser session</b><span class="chip" style="background: #E1F5EA; color: #135E38">✓ Signed in with a one-time link</span></div><span class="muted" style="font-size: 13.5px">Ends after 12 h idle, 24 h in total, or when the service restarts. This is separate from the model-provider sign-in below.</span></div></div>
+        <div class="step"><span class="n ok" aria-hidden="true">✓</span><div style="display: flex; flex-direction: column; gap: 4px"><div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><b>Codex runtime</b><span class="chip" style="background: #E1F5EA; color: #135E38">✓ codex-cli 0.160.1 · pinned · dedicated profile</span></div><span class="muted" style="font-size: 13.5px">Inside the image in Docker; on native installs it must be on PATH. Missing runtime: this step shows "✕ Not installed" with the install command, and later steps stay waiting.</span></div></div>
+        <div class="step" style="background: #FFFBF2"><span class="n todo" aria-hidden="true">3</span><div style="display: flex; flex-direction: column; gap: 10px"><div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><b>Saved provider sign-in</b><span class="chip" style="background: #FFF1DB; color: #7A4A00">⚠ Not signed in</span></div>
+          <span style="font-size: 14px">Run the guided terminal setup; it saves a ChatGPT login or an API key into the encrypted vault (Docker) or the OS keychain (native). Then come back: this page re-reads the status on its own.</span>
+          <div class="cmd"><pre>docker compose exec -it devagents node dist/cli/main.js auth setup</pre><button class="btn small" type="button" aria-label="Copy command">Copy</button></div>
+          <div class="cmd"><pre>./devagents start            # Docker launcher: unlocks the vault and offers sign-in</pre><button class="btn small" type="button" aria-label="Copy command">Copy</button></div>
+          <span class="muted" style="font-size: 13px">Native: <code>npm run cli -- auth setup</code>. Secrets never pass through the browser; a replacement is write-only and the saved value is never displayed.</span>
+          <div class="note info" style="font-size: 13px"><b>Vault locked</b> (Docker only) shows here instead: "Encrypted credentials exist but are locked; run <code>./devagents start</code> to unlock with your OS credential store." No key is requested in the browser.</div>
+        </div></div>
+        <div class="step"><span class="n off" aria-hidden="true">4</span><div style="display: flex; flex-direction: column; gap: 6px"><div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><b>Model access</b><span class="chip" style="background: #EAECF5; color: #3B3F5E">Not verified</span></div>
+          <span class="muted" style="font-size: 13.5px">A saved sign-in does not establish quota or access to every model. The first real task verifies it; the optional connection test sends one small request on your allowance and only when you ask.</span>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><button class="btn small" type="button" disabled aria-disabled="true" title="Available after a sign-in is saved; always asks first and states that it uses your allowance">Test connection · uses allowance</button><span class="muted" style="font-size: 13px">Never runs automatically. When enabled it opens a confirmation naming the provider and the cost before sending anything.</span></div>
+        </div></div>
+        <div class="step"><span class="n todo" aria-hidden="true">5</span><div style="display: flex; flex-direction: column; gap: 6px"><div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><b>Register a project</b><span class="chip" style="background: #FFF1DB; color: #7A4A00">0 registered</span></div><span class="muted" style="font-size: 13.5px">An existing Git checkout by its absolute path. In Docker, mount it in <code>compose.override.yaml</code> first and register the container path.</span><a class="btn small" href="U3-Register.dc.html" style="align-self: flex-start">Register a repository</a></div></div>
+        <div class="step"><span class="n ok" aria-hidden="true">✓</span><div style="display: flex; flex-direction: column; gap: 6px"><div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><b>Team</b><span class="chip" style="background: #E1F5EA; color: #135E38">✓ 1 ready team · Website team</span></div><span class="muted" style="font-size: 13.5px">Optional: without a saved team, tasks use the legacy YAML agents. <a href="A-Teams.dc.html">Manage teams</a></span></div></div>
+        <div class="step" style="background: #F8F8FD"><span class="n off" aria-hidden="true">→</span><div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: center"><span><b>Then submit work.</b> Steps 3 and 5 are required; model access is confirmed by the first run.</span><a class="btn primary" href="U3-Submit.dc.html" aria-disabled="true" style="opacity: .55; pointer-events: none" title="Needs a saved sign-in and a registered project">Submit work</a></div></div>
+      </section>
+
+      <div class="h">How this shows up elsewhere</div>
+      <section aria-label="Setup entry points" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px">
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px">
+          <b>Overview · empty workspace</b>
+          <span class="muted" style="font-size: 13.5px">"Nothing is running" becomes a setup card listing the unfinished steps with the same chips, and a single "Finish setup" link to this page. No invented readiness: the card disappears only when the service reports the steps done.</span>
+        </div>
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px">
+          <b>Submit work · missing connection</b>
+          <span class="muted" style="font-size: 13.5px">The form stays usable with a warning banner ("will wait; planning fails until a sign-in is saved") so a user can queue work before finishing the terminal step. The resolved summary repeats the connection state.</span>
+        </div>
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px">
+          <b>Task failed at preflight</b>
+          <span class="muted" style="font-size: 13.5px">The task header's failure note links here: "Failed before planning: Codex is not signed in. Finish setup, then submit a new task." Resubmission is a new task; the failed one keeps its history.</span>
+        </div>
+      </section>
+
+      <section class="card" aria-label="Change sign-in" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 8px">
+        <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: center"><b>Change or replace the sign-in</b><span class="chip" style="background: #EAECF5; color: #3B3F5E">Terminal only in U3</span></div>
+        <span class="muted" style="font-size: 13.5px">Replacing a key or switching to ChatGPT uses the same terminal flow with <code>--replace-key</code> or <code>--auth chatgpt</code>. The browser shows the resulting state (method, store, locked/unlocked) and nothing else. A browser-based credential wizard is not part of this increment.</span>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

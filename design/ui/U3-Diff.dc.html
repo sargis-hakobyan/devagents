@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — read-only diff of a completed task (U3)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#3B3F5E;text-decoration:none;font-weight:600;font-size:14px}
+.nav a:hover{background:#E6E8F3;color:#1C1A33}.nav a.on{background:#231F4A;color:#FFFFFF}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none}
+.btn.small{min-height:34px;font-size:13px;padding:0 12px}.btn[disabled]{opacity:.55;cursor:not-allowed}
+.btn:focus-visible,.nav a:focus-visible,.tab:focus-visible,.file:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.tab{min-height:44px;padding:0 4px;border:0;background:transparent;font:inherit;font-weight:700;font-size:15px;color:#5A5F78;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap}.tab.on{color:#1C1A33;border-bottom-color:#FFB703}
+.note{border-radius:10px;padding:10px 12px;font-size:13.5px}
+.note.warn{background:#FFF1DB;border:1px solid #F1D18A}.note.bad{background:#FDF2F1;border:1px solid #F3C1BD}.note.info{background:#F3F6FE;border:1px solid #C9D7F7}
+.h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5A5F78}
+dl.kv{margin:0;display:grid;grid-template-columns:150px minmax(0,1fr);gap:7px 12px;font-size:14px}dl.kv dt{color:#5A5F78}dl.kv dd{margin:0;overflow-wrap:anywhere}
+ul.files{list-style:none;margin:0;padding:0}
+.file{display:flex;justify-content:space-between;gap:10px;align-items:center;width:100%;text-align:left;padding:9px 12px;border:0;border-top:1px solid #EAECF5;background:transparent;font:inherit;cursor:pointer;color:#1C1A33}
+.file.on{background:#E3ECFF;box-shadow:inset 3px 0 0 #2457C5}.file:first-child{border-top:0}
+.add{color:#135E38}.del{color:#8A1C14}
+pre.diff{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.55;white-space:pre;overflow-x:auto;padding:12px 0}
+pre.diff span{display:block;padding:0 14px}
+pre.diff .p{background:#E1F5EA;color:#135E38}pre.diff .m{background:#FDE8E6;color:#8A1C14}pre.diff .hunk{color:#1C3F99;background:#F3F6FE}pre.diff .ctx{color:#3B3F5E}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+  <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 18px"><div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div><div style="width: 1px; height: 36px; background: rgba(255,255,255,0.18)"></div><div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #B9B6D9">fixture</span><span style="font-weight: 700; font-size: 16px">Three modules</span></div></div>
+    <span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6EE7A8" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Connected · finished task, no polling</span>
+  </header>
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD">
+      <a href="Main.dc.html">Overview</a><a href="A-Tasks.dc.html" class="on" aria-current="page">Tasks</a><a href="A-Teams.dc.html">Teams</a><a href="A-Projects.dc.html">Projects</a><a href="A-Settings.dc.html">Settings</a>
+    </nav>
+    <main style="flex: 999 1 560px; min-width: 0; padding: 24px 40px 48px; display: flex; flex-direction: column; gap: 20px">
+      <a href="A-Tasks.dc.html" style="font-weight: 700; font-size: 14px; text-decoration: none">← All tasks</a>
+      <section class="card" aria-label="Task header" style="padding: 22px 24px; display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: #E1F5EA; color: #135E38">✓ Completed</span><span class="muted" style="font-size: 13px">autonomous · version 9 · started 09:41 · took 11 min</span></div>
+        <h1 style="margin: 0; font-size: 28px; letter-spacing: -0.02em; line-height: 1.2">Implement three modules and combine them</h1>
+        <div class="muted" style="font-size: 14px">Project <span class="mono">fixture</span> · Team: <a href="A-Teams.dc.html"><b>Website team</b></a> revision 1 · 4 enabled members frozen at submission · Branch <span class="mono">codex/devagents-2a6f7e…</span></div>
+        <div class="note info"><b>Completed: one reviewed local commit on the task branch.</b> Commit <span class="mono">b2f5e69</span> on <span class="mono">codex/devagents-2a6f7e…</span>. Nothing was merged or pushed; you integrate it yourself.</div>
+      </section>
+      <div role="tablist" aria-label="Task sections" style="display: flex; gap: 22px; border-bottom: 1px solid #E0E2EE; overflow-x: auto">
+        <button class="tab" role="tab" aria-selected="false" type="button">Work · 3 items</button><button class="tab" role="tab" aria-selected="false" type="button">Plan</button><button class="tab" role="tab" aria-selected="false" type="button">Activity · 41</button><button class="tab on" role="tab" aria-selected="true" type="button">Result</button>
+      </div>
+
+      <section class="card" aria-label="Result" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 12px">
+        <dl class="kv">
+          <dt>Summary</dt><dd>Implemented modules a and b, combined them in c; all three tests pass; independent review approved with 0 findings.</dd>
+          <dt>Commit</dt><dd><span class="mono">b2f5e69c…</span> on <span class="mono">codex/devagents-2a6f7e…</span> · base <span class="mono">2b7a01c</span> (project base at registration)</dd>
+          <dt>Validation</dt><dd>3 item runs ✓ · combined <span class="mono">node --test a.test.cjs b.test.cjs c.test.cjs</span> ✓ exit 0</dd>
+          <dt>Review</dt><dd>Item reviews ✓ ✓ ✓ · combined review ✓ approved, 0 findings (Code Reviewer, frozen revision 1)</dd>
+          <dt>Changed files</dt><dd>3 files · +9 −3</dd>
+        </dl>
+      </section>
+
+      <section class="card" aria-label="Diff" style="display: flex; flex-direction: column">
+        <div style="padding: 14px 18px; border-bottom: 1px solid #E0E2EE; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+          <div style="display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 800; font-size: 16px">Diff · base <span class="mono">2b7a01c</span> → final <span class="mono">b2f5e69</span></span><span class="muted" style="font-size: 12.5px">Read by task identity only (<span class="mono">GET /tasks/:id/diff</span>): the service verifies both commits belong to this task's branch before reading. Text only, 512 KB cap per file, 4 MB in all, known secret values redacted. No paths, refs or options come from the browser.</span></div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap"><span class="chip" style="background: #E1F5EA; color: #135E38">✓ Complete · 3 files</span><button class="btn small" type="button" disabled aria-disabled="true" title="Download arrives with cleanup preview; use git on the branch meanwhile">Download patch · later</button></div>
+        </div>
+        <div style="display: grid; grid-template-columns: 300px minmax(0, 1fr)">
+          <ul class="files" aria-label="Changed files" style="border-right: 1px solid #E0E2EE">
+            <li><button class="file" type="button" aria-current="false"><span class="mono">a/a.cjs</span><span class="mono"><span class="add">+1</span> <span class="del">−1</span></span></button></li>
+            <li><button class="file" type="button" aria-current="false"><span class="mono">b/b.cjs</span><span class="mono"><span class="add">+1</span> <span class="del">−1</span></span></button></li>
+            <li><button class="file on" type="button" aria-current="true"><span class="mono">c/c.cjs</span><span class="mono"><span class="add">+7</span> <span class="del">−1</span></span></button></li>
+            <li style="padding: 12px; border-top: 1px solid #EAECF5" class="muted"><span style="font-size: 12.5px">Order and names come from the service. Binary and oversized files stay listed with their status.</span></li>
+          </ul>
+          <div style="min-width: 0; display: flex; flex-direction: column">
+            <div style="padding: 10px 14px; border-bottom: 1px solid #EAECF5; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span class="mono"><b>c/c.cjs</b> · modified</span><span class="muted" style="font-size: 12.5px">text · 8 lines shown · nothing truncated</span></div>
+            <pre class="diff" aria-label="Diff of c/c.cjs"><span class="hunk">@@ -1,1 +1,7 @@</span><span class="m">-module.exports=()=> 'broken';</span><span class="p">+const a = require('../a/a.cjs');</span><span class="p">+const b = require('../b/b.cjs');</span><span class="p">+</span><span class="p">+// Combine both modules; the planner required c to depend on a and b.</span><span class="p">+module.exports = () =&gt; a() + b();</span><span class="p">+</span><span class="p">+// &lt;script&gt;alert('hostile')&lt;/script&gt; appears here only as text, never as markup</span></pre>
+          </div>
+        </div>
+      </section>
+
+      <div class="h">Diff states the service distinguishes (never inferred by the browser)</div>
+      <section aria-label="Diff states" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; justify-content: space-between; gap: 8px"><span class="mono"><b>assets/logo.png</b> · added</span><span class="chip" style="background: #EAECF5; color: #3B3F5E">Binary · not shown</span></div>
+          <span class="muted" style="font-size: 13.5px">12,480 bytes. Binary content is never rendered or downloaded from here; inspect it on the branch with Git.</span>
+        </div>
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; border-color: #F1D18A">
+          <div style="display: flex; justify-content: space-between; gap: 8px"><span class="mono"><b>dist/bundle.js</b> · modified</span><span class="chip" style="background: #FFF1DB; color: #7A4A00">⚠ Truncated · 512 KB of 3.1 MB</span></div>
+          <span class="muted" style="font-size: 13.5px">The first 512 KB are shown; the rest exists on the branch. Truncation is stated, not silently applied, and counts (<span class="add">+2,114</span> <span class="del">−1,980</span>) are still computed server-side.</span>
+        </div>
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; justify-content: space-between; gap: 8px"><span style="font-weight: 800">Empty diff</span><span class="chip" style="background: #EAECF5; color: #3B3F5E">0 files</span></div>
+          <span class="muted" style="font-size: 13.5px">Shown only when both commits exist and Git reports no change between them: "Final commit <span class="mono">b2f5e69</span> introduces no file changes relative to <span class="mono">2b7a01c</span>." A missing worktree or object is never reported as an empty diff.</span>
+        </div>
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; border-color: #F3C1BD">
+          <div style="display: flex; justify-content: space-between; gap: 8px"><span style="font-weight: 800">Unavailable</span><span class="chip" style="background: #FDE8E6; color: #8A1C14">✕ Cannot read</span></div>
+          <div class="note bad" role="alert"><b>The diff for this task cannot be produced.</b> The task's worktree was cleaned up and commit <span class="mono">b2f5e69</span> is not reachable from the project's repository metadata. The result summary, validation evidence and review above remain. <span class="muted">(409 diff_unavailable)</span></div>
+          <span class="muted" style="font-size: 13.5px">Also unavailable, each with its own message: the task has no final commit (failed, cancelled, running), the recorded commits do not belong to this task's branch, or the file list exceeds the overall cap.</span>
+        </div>
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; justify-content: space-between; gap: 8px"><span class="mono"><b>src/config.ts</b> · modified</span><span class="chip" style="background: #FFF1DB; color: #7A4A00">Redacted value</span></div>
+          <pre class="diff" style="padding: 6px 0; background: #F8F8FD; border-radius: 8px"><span class="ctx"> const key = process.env.OPENAI_API_KEY;</span><span class="p">+const fallback = '[REDACTED]'; // a known secret value was replaced before rendering</span></pre>
+        </div>
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; justify-content: space-between; gap: 8px"><span style="font-weight: 800">Live or failed task</span><span class="chip" style="background: #EAECF5; color: #3B3F5E">Not offered</span></div>
+          <span class="muted" style="font-size: 13.5px">The Result tab of a running, failed or cancelled task says the diff is available for completed tasks only, with the branch name for manual inspection. Loading state: a skeleton with "Reading the diff…" and no partial file list until the response arrives.</span>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1620}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

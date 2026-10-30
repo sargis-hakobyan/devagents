@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — submit a task (U3)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#3B3F5E;text-decoration:none;font-weight:600;font-size:14px}
+.nav a:hover{background:#E6E8F3;color:#1C1A33}.nav a.on{background:#231F4A;color:#FFFFFF}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}.btn.small{min-height:34px;font-size:13px;padding:0 12px}
+.btn[disabled]{opacity:.55;cursor:not-allowed}
+.btn:focus-visible,.nav a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:#F2F3FA;border:1px solid #E0E2EE;border-radius:6px;padding:2px 6px}
+.field{display:flex;flex-direction:column;gap:6px;font-size:13.5px;font-weight:700;color:#3B3F5E}
+.field input,.field select,.field textarea{font:inherit;font-weight:400;font-size:15px;color:#1C1A33;border:1px solid #D1D4E4;border-radius:10px;padding:10px 12px;background:#FFFFFF;min-height:44px;width:100%;box-sizing:border-box}
+.field textarea{min-height:120px;resize:vertical;line-height:1.5}
+.hint{font-weight:400;color:#5A5F78;font-size:12.5px}
+.note{border-radius:10px;padding:10px 12px;font-size:13.5px}
+.note.warn{background:#FFF1DB;border:1px solid #F1D18A}.note.bad{background:#FDF2F1;border:1px solid #F3C1BD}.note.info{background:#F3F6FE;border:1px solid #C9D7F7}
+.radio{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border:1px solid #D1D4E4;border-radius:12px;font-weight:400;cursor:pointer}
+.radio.on{border-color:#231F4A;box-shadow:0 0 0 3px #E6E8F3}.radio input{margin-top:4px;width:18px;height:18px}
+dl.kv{margin:0;display:grid;grid-template-columns:120px minmax(0,1fr);gap:7px 12px;font-size:14px}dl.kv dt{color:#5A5F78}dl.kv dd{margin:0;overflow-wrap:anywhere}
+ul.criteria{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+ul.criteria li{display:flex;gap:8px;align-items:center}ul.criteria input{flex:1}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+  <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 18px"><div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div><div style="width: 1px; height: 36px; background: rgba(255,255,255,0.18)"></div><div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #B9B6D9">Local workspace</span><span style="font-weight: 700; font-size: 16px">127.0.0.1:4310 · darwin/arm64</span></div></div>
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6EE7A8" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Connected · updated 1 s ago</span><span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF">Codex signed in · model access not verified</span><button class="btn" type="button" style="background: transparent; color: #FFFFFF; border-color: rgba(255,255,255,0.35); min-height: 36px">Sign out</button></div>
+  </header>
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD">
+      <a href="Main.dc.html">Overview</a><a href="A-Tasks.dc.html" class="on" aria-current="page">Tasks</a><a href="A-Teams.dc.html">Teams</a><a href="A-Projects.dc.html">Projects</a><a href="A-Settings.dc.html">Settings</a>
+    </nav>
+    <main style="flex: 999 1 560px; min-width: 0; padding: 32px 40px 48px; display: flex; flex-direction: column; gap: 22px">
+      <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap">
+        <div><div style="font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #5A5F78; font-weight: 700">Tasks · new</div><h1 style="margin: 4px 0 0; font-size: 40px; letter-spacing: -0.03em; line-height: 1.1">Submit work</h1><p class="muted" style="margin: 6px 0 0">One request becomes one task. The team you choose is frozen at the moment of submission; the result is a reviewed local commit on a task branch, never a merge or a push.</p></div>
+        <a href="A-Tasks.dc.html" class="btn">← All tasks</a>
+      </div>
+
+      <div style="display: grid; grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr); gap: 18px; align-items: start">
+        <form class="card" aria-labelledby="submit-title" style="padding: 22px 24px; display: flex; flex-direction: column; gap: 18px">
+          <span id="submit-title" style="font-weight: 800; font-size: 16px">Request</span>
+          <label class="field" for="project"><span>Project</span><select id="project" name="projectId"><option>fixture · default team: none (legacy agents) · asks for a mode</option><option selected>website · default team: Website team · default mode: plan-approval</option></select><span class="hint">Registered repositories only. <a href="U3-Register.dc.html">Register another</a>.</span></label>
+          <label class="field" for="request"><span>What should the team do? <span class="hint">up to 20,000 characters · rendered as text everywhere, never as markup</span></span><textarea id="request" name="request">Add input validation to the API. Invalid request bodies must return 400 with the failing field path, and the existing tests must keep passing.</textarea></label>
+          <div class="field"><span id="criteria-label">Acceptance criteria <span class="hint">one per line · the planner must cover each; the reviewer checks them</span></span>
+            <ul class="criteria" aria-labelledby="criteria-label">
+              <li><label for="c1" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Criterion 1</label><input id="c1" value="Invalid bodies return 400 with a field path"><button class="btn small" type="button" aria-label="Remove criterion 1">Remove</button></li>
+              <li><label for="c2" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Criterion 2</label><input id="c2" value="Existing tests pass unchanged"><button class="btn small" type="button" aria-label="Remove criterion 2">Remove</button></li>
+              <li><label for="c3" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Criterion 3</label><input id="c3" value="" placeholder="Add another criterion"><button class="btn small" type="button" aria-label="Remove criterion 3" disabled>Remove</button></li>
+            </ul>
+            <button class="btn small" type="button" style="align-self: flex-start">+ Add criterion</button>
+          </div>
+          <label class="field" for="team"><span>Team</span><select id="team" name="teamId">
+            <option selected>Project default · Website team (revision 3, ready)</option>
+            <option>Website team · revision 3 · ready</option>
+            <option>Docs team · revision 2 · ready</option>
+            <option disabled>Design team · revision 1 · draft, cannot receive work (1 issue)</option>
+            <option disabled>Old platform team · archived</option>
+          </select><span class="hint">Leaving the project default means the request carries no <code>teamId</code>: the service uses the project's default team, or the legacy YAML agents when the project has none. There is no way to bypass a configured default from here; change it on the <a href="A-Projects.dc.html">project card</a>. Drafts and archived teams are listed so you can see why they are unavailable.</span></label>
+          <fieldset style="border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px"><legend class="field" style="padding: 0; margin-bottom: 6px"><span>Autonomy</span></legend>
+            <label class="radio"><input type="radio" name="mode" value=""><span><b>Use the project default · plan-approval</b><br><span class="hint">Sends no <code>mode</code>; the service resolves the project default, then the global default. If neither exists the task waits for your choice and nothing runs.</span></span></label>
+            <label class="radio on"><input type="radio" name="mode" value="plan-approval" checked><span><b>Plan approval</b> · the Tech Lead plans, then waits for your explicit approval of that plan version before any implementation.<br><span class="hint">Approval is never permission to push, merge or run destructive commands.</span></span></label>
+            <label class="radio"><input type="radio" name="mode" value="autonomous"><span><b>Autonomous</b> · plan, implement, validate and review without asking; stops only on failure, cancellation or the repair budget.</span></span></label>
+          </fieldset>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-top: 1px solid #EAECF5; padding-top: 14px">
+            <button class="btn primary" type="submit">Submit task</button>
+            <button class="btn" type="button">Discard</button>
+            <span class="muted" style="font-size: 13px">One attempt key per submission; a double click or a dropped response never creates a second task.</span>
+          </div>
+        </form>
+
+        <aside style="display: flex; flex-direction: column; gap: 16px">
+          <section class="card" aria-label="Resolved summary" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 12px">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px"><span style="font-weight: 800; font-size: 16px">What will be submitted</span><span class="chip" style="background: #EAECF5; color: #3B3F5E">live preview</span></div>
+            <dl class="kv">
+              <dt>Project</dt><dd><span class="mono">website</span> · <span class="mono">/projects/website</span></dd>
+              <dt>Team</dt><dd>Website team · <b>revision 3 now</b> · 4 enabled members · ✓ ready<br><span class="hint">The task freezes whatever revision is current at the instant the service accepts it. If someone saves revision 4 first, the task shows revision 4 and says so.</span></dd>
+              <dt>Mode</dt><dd>plan-approval (explicit)</dd>
+              <dt>Criteria</dt><dd>2 listed</dd>
+              <dt>Model</dt><dd>runtime default · not pinned <span class="hint">(set <code>defaultModel</code> to pin)</span></dd>
+              <dt>Connection</dt><dd>Codex signed in · model access not verified until the first run</dd>
+            </dl>
+          </section>
+          <section class="card" aria-label="Team readiness" style="padding: 18px 22px; display: flex; flex-direction: column; gap: 8px">
+            <span style="font-weight: 800">Why Design team is unavailable</span>
+            <ul style="margin: 0; padding-left: 18px; font-size: 13.5px; color: #8A1C14"><li>Graphic Designer: capability "asset-design" has no backend in this build</li></ul>
+            <a href="A-Teams.dc.html" style="font-size: 13.5px; font-weight: 700">Fix it in Teams →</a>
+          </section>
+          <section class="card" aria-label="What happens next" style="padding: 18px 22px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px">
+            <span style="font-weight: 800">After you submit</span>
+            <span>1 · The task appears in Tasks with its frozen team and revision from the service's response.</span>
+            <span>2 · It queues behind the current request; one top-level request runs at a time.</span>
+            <span>3 · In plan-approval mode you are asked to approve a specific plan version; nothing is implemented before that.</span>
+          </section>
+        </aside>
+      </div>
+
+      <section aria-label="Submission states" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px">
+        <div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px">
+          <span class="muted" style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em">Pending</span>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: #E3ECFF; color: #1C3F99">Submitting · attempt <span class="mono">8f2c…</span></span></div>
+          <span class="muted" style="font-size: 13px">The whole form is read-only and the button is disabled until the service answers. The attempt key and the exact payload are kept in this tab's session storage (no secrets), so a reload or session renewal resumes this same attempt instead of inventing a new one.</span>
+          <button class="btn primary" type="button" disabled aria-disabled="true" style="align-self: flex-start">Submitting…</button>
+        </div>
+        <div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; border-color: #F1D18A">
+          <span class="muted" style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em">Outcome unknown</span>
+          <div class="note warn" role="alert"><b>The service did not answer.</b> The task may or may not exist. Retrying uses the <b>same</b> attempt key and payload, so you get the original task back if it was created and a new one only if it was not.</div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn primary small" type="button">Retry this attempt</button><button class="btn small" type="button">Abandon attempt…</button></div>
+          <span class="hint">Abandon asks you to confirm and explains that a task created by the first try would stay in the list. Editing the form starts a new attempt with a new key, never a replay.</span>
+        </div>
+        <div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; border-color: #F3C1BD">
+          <span class="muted" style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em">Refused by the service</span>
+          <div class="note bad" role="alert"><b>Team "Old platform team" is archived;</b> restore it or choose another team. <span class="muted">(409 team_archived)</span></div>
+          <div class="note bad" role="alert"><b>The default team "Design team" of project website is a draft and cannot receive work:</b> Graphic Designer: capability "asset-design" has no backend. Choose a team explicitly or change the project default. <span class="muted">(409 team_not_ready)</span></div>
+          <span class="hint">Input stays in the form; the attempt is closed and the next submit is a new attempt with a new key.</span>
+        </div>
+      </section>
+
+      <section class="card" aria-label="Accepted" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; border-color: #B7E4C7">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap"><span style="font-weight: 800; font-size: 16px">Submitted · task <span class="mono">a81f2c…</span></span><span class="chip" style="background: #E1F5EA; color: #135E38">✓ Created · queued for planning</span></div>
+        <div class="muted" style="font-size: 14px">Frozen from the response, not from the preview: <b>Website team · revision 4</b> (saved by another client 20 s before you submitted) · 4 enabled members · plan-approval · 2 criteria. The attempt key is cleared; a further submit is a new task.</div>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap"><a class="btn primary" href="U3-Approve.dc.html">Open the task</a><a class="btn" href="U3-Submit.dc.html">Submit another</a></div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1760}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

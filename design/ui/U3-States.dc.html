@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents U3 — pending, stale, disconnected, invalid path and narrow states</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}.btn.small{min-height:34px;font-size:13px;padding:0 12px}.btn.danger{border-color:#F3C1BD;color:#8A1C14}.btn[disabled]{opacity:.55;cursor:not-allowed}
+.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:#F2F3FA;border:1px solid #E0E2EE;border-radius:6px;padding:2px 6px}
+.note{border-radius:10px;padding:10px 12px;font-size:13.5px}
+.note.warn{background:#FFF1DB;border:1px solid #F1D18A}.note.bad{background:#FDF2F1;border:1px solid #F3C1BD}.note.info{background:#F3F6FE;border:1px solid #C9D7F7}
+.h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5A5F78}
+.field{display:flex;flex-direction:column;gap:6px;font-size:13.5px;font-weight:700;color:#3B3F5E}
+.field input,.field select,.field textarea{font:inherit;font-weight:400;font-size:15px;color:#1C1A33;border:1px solid #D1D4E4;border-radius:10px;padding:10px 12px;background:#FFFFFF;min-height:44px;width:100%;box-sizing:border-box}
+.field input:disabled,.field textarea:disabled,.field select:disabled{background:#F8F8FD;color:#5A5F78}
+.phone{width:390px;border:1px solid #E0E2EE;border-radius:18px;background:#F2F3FA;overflow:hidden;display:flex;flex-direction:column}
+.band{background:#231F4A;color:#FFFFFF;padding:10px 16px;display:flex;flex-direction:column;gap:8px}
+.pnav{display:flex;flex-wrap:wrap;gap:4px;padding:8px 10px;border-bottom:1px solid #E0E2EE;background:#F8F8FD}
+.pnav a{padding:8px 10px;border-radius:10px;font-size:13px;font-weight:600;color:#3B3F5E;text-decoration:none}.pnav a.on{background:#231F4A;color:#FFFFFF}
+.banner{background:#231F4A;color:#FFFFFF;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;font-size:13.5px;border-radius:12px}
+</style>
+</helmet>
+<div style="min-height: 100vh; padding: 40px; display: flex; flex-direction: column; gap: 28px; box-sizing: border-box">
+  <div><div class="h">U3 states</div><h1 style="margin: 4px 0 0; font-size: 32px; letter-spacing: -0.03em">Pending attempts, stale approval, disconnection, invalid paths and narrow screens</h1><p class="muted" style="margin: 6px 0 0">Each panel is the state as the service reports it. Unsaved input is never replaced by a polling update; mutations are disabled while pending and nothing is retried on its own.</p></div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px">
+    <section class="card" aria-label="Pending attempt restored after reload" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; border-color: #F1D18A">
+      <div class="h">Submit work · pending attempt restored after a reload or session renewal</div>
+      <div class="note warn" role="status"><b>An attempt from 10:12 is still unresolved.</b> You submitted "Add input validation to the API" for <span class="mono">website</span> but the answer never arrived. Retry sends the same attempt key and payload; the service returns the original task if it was created.</div>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn primary small" type="button">Retry this attempt</button><button class="btn small" type="button">Abandon attempt…</button><button class="btn small" type="button">Show the payload</button></div>
+      <span class="muted" style="font-size: 13px">Held in tab-scoped session storage: key, payload, timestamp. No tokens, cookies or provider secrets. Cleared on confirmed success, on deliberate abandonment, or when the restored task is found in the list.</span>
+      <div class="note bad" role="alert" style="font-size: 13px"><b>Abandon attempt?</b> The service may already have created this task from the first try; it would stay in your task list. Abandoning only stops retries here; it does not cancel anything. <span style="display: inline-flex; gap: 6px; margin-left: 6px"><button class="btn danger small" type="button">Abandon</button><button class="btn small" type="button">Keep</button></span></div>
+    </section>
+
+    <section class="card" aria-label="Submit work while disconnected" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 12px">
+      <div class="h">Submit work · service disconnected</div>
+      <div class="banner" role="status"><span><b>Service disconnected</b> · last update 10:14:03 · retrying in 8 s (attempt 3) · showing the last known state, nothing is invented</span><button class="btn small" type="button" style="background: transparent; color: #FFFFFF; border-color: rgba(255,255,255,0.35)">Retry now</button></div>
+      <label class="field" for="dc-request"><span>What should the team do?</span><textarea id="dc-request" rows="3">Add input validation to the API. Invalid request bodies must return 400 with the failing field path.</textarea></label>
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap"><button class="btn primary" type="button" disabled aria-disabled="true" title="Submission waits for the service">Submit task</button><span class="muted" style="font-size: 13px">Typing continues; only Submit is disabled. Project, team and readiness lists keep their last known values and say when they were last updated. Reconnecting refreshes those lists, never the text you typed.</span></div>
+    </section>
+
+    <section class="card" aria-label="Stale approval" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; border-color: #F1D18A">
+      <div class="h">Plan approval · stale version</div>
+      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: #FFF1DB; color: #7A4A00">● Awaiting your approval</span><span class="muted" style="font-size: 13px">plan-approval · version 3 (was 2 when the page loaded)</span></div>
+      <div class="note warn" role="alert"><b>Version 2 was not approved:</b> the service replied <span class="mono">409 stale_task</span> because the task is now at version 3. The plan below is version 3; read it and decide again. Nothing ran.</div>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn primary" type="button">Approve version 3</button><button class="btn danger" type="button">Reject plan · cancels the task</button></div>
+      <span class="muted" style="font-size: 13px">The page also refreshes on its own when polling sees a newer version before you click: the header, tab label and buttons all switch to the new number and a note says why. The approve button is never re-targeted silently.</span>
+    </section>
+
+    <section class="card" aria-label="Approval while disconnected and after restart" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 12px">
+      <div class="h">Approval · disconnected, then the service restarted</div>
+      <div class="banner" role="status"><span><b>Service disconnected</b> · last update 10:20:41 · retrying in 16 s (attempt 4)</span><button class="btn small" type="button" style="background: transparent; color: #FFFFFF; border-color: rgba(255,255,255,0.35)">Retry now</button></div>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn primary" type="button" disabled aria-disabled="true">Approve version 2</button><button class="btn danger" type="button" disabled aria-disabled="true">Reject plan</button></div>
+      <div class="note info"><b>Reconnected after a restart.</b> Your browser session ended with the restart; you are sent to the signed-out page and the task reloads after a new one-time link. An approval that was in flight is not replayed: the page shows the task's current state and asks again if it still waits.</div>
+      <div class="note warn"><b>Interrupted by shutdown.</b> A task that was running when the service stopped is shown as failed with that reason, never as cancelled by you. Its worktrees are preserved.</div>
+    </section>
+
+    <section class="card" aria-label="Invalid Docker path" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; border-color: #F3C1BD">
+      <div class="h">Register · invalid path, input preserved</div>
+      <label class="field" for="bad-id"><span>Project ID</span><input id="bad-id" value="website"></label>
+      <label class="field" for="bad-path2"><span>Absolute path as the service sees it</span><input id="bad-path2" value="~/Projects/website" aria-invalid="true" aria-describedby="bad-path2-why" style="border-color: #F3C1BD; box-shadow: 0 0 0 3px #FDE8E6"><span id="bad-path2-why" class="note bad" role="alert" style="font-weight: 400"><b>Not an absolute path.</b> <span class="mono">~</span> is not expanded by the service. In Docker, use the container path you mounted, such as <span class="mono">/projects/website</span>.</span></label>
+      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><button class="btn primary" type="button">Register project</button><span class="muted" style="font-size: 13px">Client checks only the shape (absolute, no traversal); existence, Git root and readability are the service's verdict and are shown verbatim.</span></div>
+    </section>
+
+    <section class="card" aria-label="Diff loading and connection states" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 12px">
+      <div class="h">Diff · loading, then unavailable while disconnected</div>
+      <div class="card" aria-busy="true" aria-label="Reading the diff" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; background: #F8F8FD"><span class="muted" style="font-size: 13px">Reading the diff from the task's branch…</span><div style="height: 14px; width: 55%; background: #E3E5F0; border-radius: 6px"></div><div style="height: 14px; width: 80%; background: #E3E5F0; border-radius: 6px"></div><div style="height: 14px; width: 70%; background: #E3E5F0; border-radius: 6px"></div></div>
+      <div class="note info"><b>Diff not loaded</b> · the service is unreachable. The result summary, commit and review shown above are the last known state; the file list is not shown partially. Retry follows the connection banner.</div>
+    </section>
+  </div>
+
+  <div class="h">Narrow screen · 390 px</div>
+  <div style="display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start">
+    <div class="phone" aria-label="Submit work on a phone">
+      <div class="band"><div style="display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 18px"><svg width="20" height="20" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div><div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF; font-size: 12px">✓ Connected</span><span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF; font-size: 12px">Codex signed in</span></div></div>
+      <nav class="pnav" aria-label="Main"><a href="Main.dc.html">Overview</a><a href="A-Tasks.dc.html" class="on" aria-current="page">Tasks</a><a href="A-Teams.dc.html">Teams</a><a href="A-Projects.dc.html">Projects</a><a href="A-Settings.dc.html">Settings</a></nav>
+      <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px">
+        <div><div class="h">Tasks · new</div><h2 style="margin: 2px 0 0; font-size: 22px; letter-spacing: -0.02em">Submit work</h2></div>
+        <label class="field" for="p-project"><span>Project</span><select id="p-project"><option>website · default team: Website team</option></select></label>
+        <label class="field" for="p-request"><span>What should the team do?</span><textarea id="p-request" rows="4">Add input validation to the API.</textarea></label>
+        <div class="field"><span>Acceptance criteria</span><input value="Invalid bodies return 400 with a field path" aria-label="Criterion 1"><button class="btn small" type="button" style="align-self: flex-start">+ Add criterion</button></div>
+        <label class="field" for="p-team"><span>Team</span><select id="p-team"><option>Project default · Website team (rev 3)</option></select></label>
+        <div class="field"><span>Autonomy</span><label style="display: flex; gap: 10px; align-items: flex-start; font-weight: 400; padding: 10px 12px; border: 1px solid #231F4A; border-radius: 12px"><input type="radio" name="pm" checked style="margin-top: 4px"><span><b>Plan approval</b><br><span class="muted" style="font-size: 12.5px">wait for my approval of the plan</span></span></label><label style="display: flex; gap: 10px; align-items: flex-start; font-weight: 400; padding: 10px 12px; border: 1px solid #D1D4E4; border-radius: 12px"><input type="radio" name="pm" style="margin-top: 4px"><span><b>Autonomous</b></span></label></div>
+        <div class="card" style="padding: 12px 14px; font-size: 13px; display: flex; flex-direction: column; gap: 4px"><b>What will be submitted</b><span>website · Website team rev 3 (now) · plan-approval · 1 criterion</span><span class="muted">Model: runtime default, not pinned</span></div>
+        <div style="position: sticky; bottom: 0; display: flex; gap: 8px; padding: 10px 0; background: #F2F3FA"><button class="btn" type="button" style="flex: 1">Discard</button><button class="btn primary" type="button" style="flex: 2">Submit task</button></div>
+      </div>
+    </div>
+
+    <div class="phone" aria-label="Plan approval on a phone">
+      <div class="band"><div style="display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 18px"><svg width="20" height="20" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div><div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF; font-size: 12px">✓ Connected</span></div></div>
+      <nav class="pnav" aria-label="Main"><a href="Main.dc.html">Overview</a><a href="A-Tasks.dc.html" class="on" aria-current="page">Tasks</a><a href="A-Teams.dc.html">Teams</a><a href="A-Projects.dc.html">Projects</a><a href="A-Settings.dc.html">Settings</a></nav>
+      <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px">
+        <a href="A-Tasks.dc.html" style="font-weight: 700; font-size: 13px; text-decoration: none">← All tasks</a>
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 8px">
+          <span class="chip" style="background: #FFF1DB; color: #7A4A00; align-self: flex-start">● Awaiting your approval</span>
+          <h2 style="margin: 0; font-size: 19px; letter-spacing: -0.02em; line-height: 1.25">Add input validation to the API</h2>
+          <span class="muted" style="font-size: 12.5px">website · Website team rev 4 · plan-approval · <b>version 2</b></span>
+          <div class="note warn" style="font-size: 12.5px"><b>Approval binds to version 2.</b> If the plan changes first, the page shows the new version and asks again.</div>
+        </div>
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; font-size: 13.5px">
+          <b>Plan · version 2</b>
+          <span>Add a request-body validator and return 400 with the failing field path.</span>
+          <div class="muted" style="font-size: 12.5px">1 item · validate · general-developer · <span class="mono">node --test tests/</span></div>
+          <div class="muted" style="font-size: 12.5px">Risk: clients sending extra fields now get 400.</div>
+        </div>
+        <div style="position: sticky; bottom: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 0; background: #F2F3FA"><button class="btn primary" type="button">Approve version 2</button><button class="btn danger" type="button">Reject plan · cancels the task</button></div>
+      </div>
+    </div>
+
+    <div class="phone" aria-label="Awaiting mode and cancellation on a phone">
+      <div class="band"><div style="display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 18px"><svg width="20" height="20" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div><div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="chip" style="background: #FFF1DB; color: #7A4A00; font-size: 12px">Disconnected · retry 8 s</span></div></div>
+      <nav class="pnav" aria-label="Main"><a href="Main.dc.html">Overview</a><a href="A-Tasks.dc.html" class="on" aria-current="page">Tasks</a><a href="A-Teams.dc.html">Teams</a><a href="A-Projects.dc.html">Projects</a><a href="A-Settings.dc.html">Settings</a></nav>
+      <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px">
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px">
+          <span class="chip" style="background: #FFF1DB; color: #7A4A00; align-self: flex-start">● Awaiting mode choice</span>
+          <h2 style="margin: 0; font-size: 19px; letter-spacing: -0.02em; line-height: 1.25">Document the release process</h2>
+          <span class="muted" style="font-size: 12.5px">Asked once; nothing runs until you choose. Neither option is preselected.</span>
+          <button class="btn primary" type="button" disabled aria-disabled="true">Choose plan approval</button>
+          <button class="btn" type="button" disabled aria-disabled="true">Choose autonomous</button>
+          <span class="muted" style="font-size: 12.5px">Disabled while disconnected; last known state shown.</span>
+        </div>
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px">
+          <span class="chip" style="background: #E3ECFF; color: #1C3F99; align-self: flex-start">▶ Running · item validate</span>
+          <button class="btn danger" type="button">Cancel task…</button>
+          <span class="muted" style="font-size: 12.5px">Confirmation names the consequence: workers stop, worktrees stay, nothing is committed.</span>
+        </div>
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 6px"><span class="chip" style="background: #E3ECFF; color: #1C3F99; align-self: flex-start">▶ Committing · not cancellable</span><span class="muted" style="font-size: 12.5px">No cancel control is shown at this boundary.</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
