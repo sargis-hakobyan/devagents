@@ -1,4 +1,5 @@
 schemaVersion: 1
+devagentsRules: false # true adds role scopes, command allowlist and read-only validation
 defaultEngine: codex
 defaultProvider: openai
 # M2 runs serially; higher concurrency is reserved for M3.

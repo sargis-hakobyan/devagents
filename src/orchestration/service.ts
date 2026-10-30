@@ -10,6 +10,7 @@ import { inspectProject, WorkspaceManager } from '../workspace/git.js';
 import { builtinCapabilities, builtinDirectory, loadRegistry } from '../agents/registry.js';
 import { providerExecutable, resolveEngine, resolveProviderId, teamReadiness, type RuntimeSupport } from '../domain/readiness.js';
 import { validatePlan } from '../domain/plan.js';
+import { taskRules } from '../domain/execution-policy.js';
 import { isWithin } from '../workspace/paths.js';
 import { STARTER_TEAM_ID, STARTER_TEAM_NAME, STARTER_ROLES } from '../domain/starter-team.js';
 
@@ -63,7 +64,7 @@ export class TaskService {
     const executable = (id: string) => this.executableEngines.has(id);
     return {
       platform: this.platform,
-      defaults: { engine: this.config.defaultEngine, provider: this.config.defaultProvider, model: this.config.defaultModel ?? null },
+      defaults: { devagentsRules: this.config.devagentsRules, engine: this.config.defaultEngine, provider: this.config.defaultProvider, model: this.config.defaultModel ?? null },
       capabilities: [...builtinCapabilities].sort(),
       engines: ['codex', 'claude-code'].map(id => ({ id, executable: executable(id), reason: executable(id) ? null : 'not available until M4 (no adapter in this build)' })),
       providers: this.config.providers.map(p => ({ id: p.id, kind: p.kind, auth: p.auth, executable: providerExecutable(p), reason: providerExecutable(p) ? null : 'configuration only; execution needs the official OpenAI provider' })),
@@ -109,7 +110,7 @@ export class TaskService {
   }
   submit(input: unknown, key: string): Task {
     const task = TaskInput.parse(input);
-    const created = this.store.createTask(task, key, () => this.freezeTeam(task.teamId, task.projectId), () => this.store.project(task.projectId).defaultMode ?? this.config.defaultMode);
+    const created = this.store.createTask(task, key, () => this.freezeTeam(task.teamId, task.projectId), () => this.store.project(task.projectId).defaultMode ?? this.config.defaultMode, this.config.devagentsRules);
     this.runner?.enqueue(created.id); return created;
   }
   mode(id: string, mode: unknown): Task {
@@ -122,7 +123,7 @@ export class TaskService {
     if (this.runner && !snapshot) throw new AppError('automatic_planning', 'The active execution service generates plans automatically', 409);
     const task = this.store.task(id);
     if (task.state !== 'planning') throw new AppError('invalid_transition', 'Task is not awaiting a plan', 409);
-    const plan = validatePlan(input, task.projectId, snapshot ?? task.agents ?? await this.agents(task.projectId), { platform: this.platform });
+    const plan = validatePlan(input, task.projectId, snapshot ?? task.agents ?? await this.agents(task.projectId), { platform: this.platform, devagentsRules: taskRules(task) });
     if (task.workspace && plan.items.some(item => item.branch !== (plan.items.length === 1 ? task.workspace!.branch : `${task.workspace!.branch}-${item.id}`))) throw new AppError('branch_mismatch', 'Plan branches must match their managed task/work-item branches');
     return this.store.transition(id, task.version, task.mode === 'plan-approval' ? 'awaiting_plan_approval' : 'ready', 'planner', 'Validated plan stored', { plan });
   }

@@ -339,3 +339,17 @@ test('overview setup hint follows availability and projects; fixture limits matc
   await page.route(`${base}/projects`, route => route.fulfill({ json: [] })); await page.reload();
   await expect(page.getByRole('link', { name: 'Finish setup', exact: true })).toBeVisible();
 });
+
+test('settings and task details show the default-off policy and its frozen task value', async ({ page }) => {
+  const status = await (await call('/status')).json(); expect(status.defaults.devagentsRules).toBe(false);
+  await signIn(page); await page.goto(`${base}/ui/settings`);
+  await expect(page.locator('dd').filter({ hasText: 'Off · engine sandbox' })).toBeVisible();
+  await expect(page.getByText('Set DEVAGENTS_RULES=true in .env and restart to enable. Applies to new tasks.', { exact: true })).toBeVisible();
+  await page.screenshot({ path: join(shots, 'execution-policy-settings.png'), fullPage: true });
+  const response = await call('/tasks', 'POST', { projectId: 'fixture', request: 'Policy visibility fixture', mode: 'plan-approval' }, { 'idempotency-key': 'policy-visibility' });
+  expect(response.ok).toBe(true); const task = await response.json(); expect(task.devagentsRules).toBe(false);
+  await page.goto(`${base}/ui/tasks/${task.id}`);
+  await expect(page.getByText('Extra DevAgents rules: off · engine sandbox · frozen at submission', { exact: true })).toBeVisible();
+  await page.screenshot({ path: join(shots, 'execution-policy-task.png'), fullPage: true });
+  await call(`/tasks/${task.id}/cancel`, 'POST', {});
+});

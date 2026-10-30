@@ -9,9 +9,9 @@ import { TaskRunner } from '../../src/orchestration/runner.js';
 import { git } from '../../src/workspace/git.js';
 import type { CodingEngine, EngineRequest, EngineResult } from '../../src/domain/engine.js';
 
-type Options = { hidden?: boolean; markdown?: boolean; unresolved?: 'markers' | 'separator'; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
+type Options = { devagentsRules?: boolean; projectCommands?: boolean; hidden?: boolean; markdown?: boolean; unresolved?: 'markers' | 'separator'; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
 async function dagFixture(options: Options = {}) {
-  const f = await fixture();
+  const f = await fixture(options.devagentsRules ?? true);
   // Modules live in per-item directories so ownership uses subtree grants, the only write-grant form the Linux runtime accepts.
   for (const id of ['a', 'b', 'c']) {
     const assertion = options.conflict && id !== 'c'
@@ -38,8 +38,8 @@ async function dagFixture(options: Options = {}) {
       calls.push(r);
       if (r.phase === 'planning') {
         const branch = await git(r.cwd, ['branch', '--show-current']);
-        return { output: { summary: 'Build two modules and combine them', risks: [], integration: { assignedAgent: 'general-developer', validation: [{ executable: 'node', args: ['--test', 'a.test.cjs', 'b.test.cjs', 'c.test.cjs'] }, ...(options.invalidCombinedCommand ? [{ executable: 'node', args: ['-e', 'throw new Error("Must not execute")'] }] : [])] }, items: ['a', 'b', 'c'].map(id => ({
-          id, title: `Module ${id}`, description: `Implement ${id}`, acceptanceCriteria: ['Existing test passes'], dependsOn: id === 'c' ? ['a', 'b'] : [], requiredCapabilities: ['implementation'], assignedAgent: 'module-developer', projectId: 'fixture', branch: `${branch}-${id}`, ownedPaths: [`project:/${options.conflict && id !== 'c' ? 'shared' : id}/**`], validation: [{ executable: 'node', args: ['--test', `${id}.test.cjs`] }],
+        return { output: { summary: 'Build two modules and combine them', risks: [], integration: { assignedAgent: 'general-developer', validation: [{ executable: 'node', args: options.projectCommands ? ['-e', "require('./a.test.cjs');require('./b.test.cjs');require('./c.test.cjs')"] : ['--test', 'a.test.cjs', 'b.test.cjs', 'c.test.cjs'] }, ...(options.invalidCombinedCommand ? [{ executable: 'node', args: ['-e', 'throw new Error("Must not execute")'] }] : [])] }, items: ['a', 'b', 'c'].map(id => ({
+          id, title: `Module ${id}`, description: `Implement ${id}`, acceptanceCriteria: ['Existing test passes'], dependsOn: id === 'c' ? ['a', 'b'] : [], requiredCapabilities: ['implementation'], assignedAgent: 'module-developer', projectId: 'fixture', branch: `${branch}-${id}`, ownedPaths: [`project:/${options.conflict && id !== 'c' ? 'shared' : id}/**`], validation: [{ executable: 'node', args: options.projectCommands ? ['-e', `require('./${id}.test.cjs')`] : ['--test', `${id}.test.cjs`] }],
         })) } };
       }
       if (r.phase === 'review') {
@@ -275,5 +275,19 @@ test('cleanup of a completed DAG task removes every item worktree and item branc
     assert.deepEqual(after, [done.workspace!.branch, 'main']);
     assert.equal((await git(f.project, ['worktree', 'list', '--porcelain'], false)).split('\n').filter(l => l.startsWith('worktree ')).length, 1);
     assert.equal(await git(f.project, ['rev-parse', done.workspace!.branch]), done.outcome!.commit);
+  } finally { await f.runner.stop(); await f.cleanup(); }
+});
+
+test('DAG engine policy permits project commands for items and integration, generated files and advisory scopes', async () => {
+  const f = await dagFixture({ devagentsRules: false, projectCommands: true, hidden: true, outside: true });
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Three modules', mode: 'autonomous' }, 'engine-policy-dag');
+    await f.runner.idle(); const done = f.store.task(task.id);
+    assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
+    assert.ok(f.calls.every(c => c.devagentsRules === false));
+    for (const call of f.calls.filter(c => c.phase === 'implementation')) assert.deepEqual(call.agent.permissions.writePaths, ['project:/**']);
+    const evidence = f.store.evidence(task.id).filter(e => e.kind === 'validation').map(e => e.data as { args: string[]; exitCode: number });
+    assert.ok(evidence.length >= 4); assert.ok(evidence.every(e => e.args[0] === '-e' && e.exitCode === 0));
+    assert.equal(await readFile(join(f.project, 'README.md'), 'utf8'), '# Fixture\n');
   } finally { await f.runner.stop(); await f.cleanup(); }
 });

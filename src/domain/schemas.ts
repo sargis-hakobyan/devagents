@@ -21,6 +21,7 @@ export const Provider = z.strictObject({
 export const Config = z.strictObject({
   schemaVersion: z.literal(1),
   defaultMode: Mode.optional(),
+  devagentsRules: z.boolean().default(false),
   defaultEngine: Id.default('codex'),
   defaultProvider: Id.default('openai'),
   providers: z.array(Provider).default([{ id: 'openai', kind: 'openai', auth: 'login' }]),
@@ -95,6 +96,8 @@ export type Provider = z.infer<typeof Provider>;
 export type TaskTeam = { id: string; revision: number; name: string; snapshotAt: string; members: TeamMember[]; providers: ProviderSnapshot[]; defaultModel?: string; modelPinned: boolean };
 export const TaskInput = z.strictObject({ projectId: Id, request: z.string().min(1).max(20000), mode: Mode.optional(), acceptanceCriteria: z.array(z.string().min(1)).default([]), teamId: TeamId.optional() });
 export type Task = z.infer<typeof TaskInput> & {
+  /** Frozen service policy; absent on legacy tasks, which retain strict rules. */
+  devagentsRules?: boolean;
   id: string; runId: string; state: TaskState; version: number;
   createdAt: string; updatedAt: string; plan?: TaskPlan;
   workspace?: { path: string; branch: string; baseSha: string };

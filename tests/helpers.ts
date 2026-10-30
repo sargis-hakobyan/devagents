@@ -6,7 +6,8 @@ import { Store } from '../src/persistence/store.js';
 import { TaskService } from '../src/orchestration/service.js';
 import { Config } from '../src/domain/schemas.js';
 
-export async function fixture() {
+// Historical policy regression fixtures opt in; default-policy coverage explicitly uses false.
+export async function fixture(devagentsRules = true) {
   const root = await mkdtemp(join(tmpdir(), 'devagents-test-'));
   const project = join(root, 'project');
   execFileSync('git', ['init', '-q', '-b', 'main', project]);
@@ -17,7 +18,7 @@ export async function fixture() {
   execFileSync('git', ['-C', project, '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'Initial fixture']);
   const dataDir = join(root, 'data');
   const store = new Store(join(dataDir, 'test.db'), ['fixture-secret-value']);
-  const service = new TaskService(store, Config.parse({ schemaVersion: 1 }), dataDir);
+  const service = new TaskService(store, Config.parse({ schemaVersion: 1, devagentsRules }), dataDir);
   await service.registerProject({ id: 'fixture', path: project });
   return { root, project, dataDir, store, service, cleanup: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
 }

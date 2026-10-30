@@ -87,6 +87,20 @@ try {
   await engine.execute({ ...base, runId: 'review', phase: 'review', agent: agents.find(a => a.id === 'code-reviewer') }, event => progress.push(event));
   assert.equal(await readFile(join(project, 'result.txt'), 'utf8'), 'patched\n');
   assert.doesNotMatch(offeredNames().join(','), /exec_command|spawn_agent/);
+  // Extra rules off: the runtime can write anywhere in its isolated worktree, while the
+  // core boundary still protects outside files, secrets, Git metadata and networking.
+  index = 0; requests = []; calls = [
+    patch('*** Begin Patch\n*** Update File: result.txt\n@@\n-patched\n+engine-policy\n*** End Patch'),
+    patch(`*** Begin Patch\n*** Update File: ${secret}\n@@\n-fake-service-secret\n+bad\n*** End Patch`),
+  ];
+  await engine.execute({ ...base, devagentsRules: false, runId: 'engine-policy', phase: 'implementation', agent: { ...scopedDeveloper, permissions: { ...scopedDeveloper.permissions, allowCommands: false } } }, event => progress.push(event));
+  assert.equal(await readFile(join(project, 'result.txt'), 'utf8'), 'engine-policy\n');
+  assert.equal(await readFile(secret, 'utf8'), 'fake-service-secret');
+  assert.ok(offeredNames().includes('exec_command'), 'optional role shell restriction is off');
+  index = 0; requests = []; calls = [patch('*** Begin Patch\n*** Update File: result.txt\n@@\n-engine-policy\n+bad\n*** End Patch')];
+  await engine.execute({ ...base, devagentsRules: false, runId: 'engine-review', phase: 'review', agent: scopedDeveloper }, event => progress.push(event));
+  assert.equal(await readFile(join(project, 'result.txt'), 'utf8'), 'engine-policy\n', 'review stays read-only');
+  console.log('PASS: extra rules off expands role scope and command access, with outside and read-only review boundaries intact.');
   index = 0; requests = []; calls = []; finalOutput = { connected: true };
   const connection = await testCodexConnection(join(root, 'data'), 'api-key', { engine: {
     id: 'codex', preflight: provider => engine.preflight(provider),

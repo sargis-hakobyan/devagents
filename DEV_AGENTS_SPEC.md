@@ -172,6 +172,8 @@ Implement one engine first end-to-end, then the second with the same contract. P
 
 ## 8. Security and approvals
 
+**Owner update, 2026-10-30:** additional DevAgents execution rules are opt-in (`devagentsRules: false` by default). This supersedes the mandatory role/command allowlist below. Task policy is frozen at submission; old tasks retain strict rules. With extra rules off, project-specific commands, worktree-wide coding scope and generated files are permitted within the engine sandbox. Worktree/credential isolation, independent review, plan approval, no automatic external effects and resource bounds remain application guarantees. See `docs/REFERENCE.md` for the precise boundary; this does not import desktop engine settings or implement Claude before M4.
+
 Autonomy is **not** unrestricted tool access. The policy engine, outside the model, authorizes file writes, shell commands, networking, Git operations and secret access. Defaults: only registered projects; no arbitrary host paths; no production infrastructure access; no shell execution for non-coding design-only agents; no protected branch pushes; no merges or deployments.
 
 Use command allowlists/deny rules plus per-command context checks. Treat `curl | sh`, destructive commands, shell redirection and arbitrary tool install as high-risk; don't rely on textual denylisting alone. Sandbox worker execution appropriately, prefer non-root container user, scoped filesystem mounts, constrained network, resource/time limits and explicit escalation flow. Never put secrets into model prompts, logs or source control. Provide redaction and secure secret injection.

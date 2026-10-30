@@ -38,7 +38,7 @@ export function teamReadiness(members: TeamMember[], support: RuntimeSupport): T
     const providerId = resolveProviderId(m, support.config); const provider = support.config.providers.find(p => p.id === providerId);
     if (!provider) add('error', 'provider_unknown', `${m.name}: provider "${providerId}" is not configured`, m.id);
     else if (!providerExecutable(provider)) add('error', 'provider_unavailable', `${m.name}: provider "${providerId}" (${provider.kind}) is configuration only; execution needs the official OpenAI provider`, m.id);
-    for (const grant of m.permissions.writePaths) { try { assertSupportedWriteGrant(grant, support.platform); } catch (error) { add('error', 'write_grant_unsupported', `${m.name}: ${error instanceof Error ? error.message : String(error)}`, m.id); } }
+    if (support.config.devagentsRules) for (const grant of m.permissions.writePaths) { try { assertSupportedWriteGrant(grant, support.platform); } catch (error) { add('error', 'write_grant_unsupported', `${m.name}: ${error instanceof Error ? error.message : String(error)}`, m.id); } }
     if (m.enabled && m.model === 'default' && !support.config.defaultModel) add('warning', 'model_not_pinned', `${m.name}: no model is pinned; the runtime default is chosen at execution and recorded as such`, m.id);
     if (!m.enabled) add('warning', 'member_disabled', `${m.name} is disabled and will not be selected`, m.id);
   }

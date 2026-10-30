@@ -222,7 +222,7 @@ export class Store {
    * included the resolved mode, so omitted-mode retries may match either historical mode. Those
    * rows cannot distinguish explicit from defaulted modes; never infer that from mutable task data.
    */
-  createTask(input: unknown, key: string, freeze?: (task: Task) => TaskTeam | undefined, defaultMode?: () => Task['mode']): Task {
+  createTask(input: unknown, key: string, freeze?: (task: Task) => TaskTeam | undefined, defaultMode?: () => Task['mode'], devagentsRules = true): Task {
     const parsed = TaskInput.parse(input);
     this.project(parsed.projectId);
     const clean = redactValues(parsed, this.secrets) as typeof parsed;
@@ -238,7 +238,7 @@ export class Store {
       }
       const now = new Date().toISOString();
       const mode = clean.mode ?? defaultMode?.();
-      let task: Task = { ...clean, ...(mode ? { mode } : {}), id: randomUUID(), runId: randomUUID(), state: mode ? 'planning' : 'awaiting_mode', version: 0, createdAt: now, updatedAt: now };
+      let task: Task = { ...clean, ...(mode ? { mode } : {}), devagentsRules, id: randomUUID(), runId: randomUUID(), state: mode ? 'planning' : 'awaiting_mode', version: 0, createdAt: now, updatedAt: now };
       const team = freeze?.(task);
       if (team) task = { ...task, team, agents: team.members.map(m => ({ ...m, schemaVersion: 1 as const, instructionsFile: 'team', source: `team:${team.id}@${team.revision}` })) };
       this.db.prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)').run(task.id, task.projectId, task.state, task.version, this.taskJson(task));

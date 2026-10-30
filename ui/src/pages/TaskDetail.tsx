@@ -44,6 +44,7 @@ export function TaskDetailPage({ id }: { id: string }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}><StateChip task={task} /><span class="muted" style={{ fontSize: '13px' }}>{task.mode ?? 'mode not chosen'} · v{task.version} · started {formatTime(task.createdAt)} · {terminal ? 'took' : 'elapsed'} {elapsed(task.createdAt, finishedAt, now)}</span></div>
+            <div class="muted" style={{ fontSize: '13px' }}>Extra DevAgents rules: {(task.devagentsRules ?? true) ? 'on' : 'off · engine sandbox'} · frozen at submission</div>
             <h1 style={{ margin: 0, fontSize: '22px', letterSpacing: '-0.02em', lineHeight: 1.3 }} class="wrap-anywhere">{task.request}</h1>
             <div class="muted" style={{ fontSize: '13.5px' }}>Project <span class="mono">{task.projectId}</span> · Team: {task.team ? <><a href={`/ui/teams/${task.team.id}`}><b>{task.team.name}</b></a> revision {task.team.revision} · {task.team.members.filter(m => m.enabled).length} enabled members frozen at submission{task.team.modelPinned ? '' : ' · model: runtime default (not pinned)'}</> : <><b>Legacy agent configuration</b>{task.agents ? ` (${task.agents.length} agents snapshotted at worktree creation)` : ' (snapshotted when the worktree is created)'}</>}{task.workspace && <> · Branch <span class="mono">{task.workspace.branch}</span></>}</div>
           </div>
@@ -108,7 +109,7 @@ function WorkTab({ task, items, perItem, now }: { task: Task; items: ItemProgres
       const lastTest = ev?.tests?.[ev.tests.length - 1]; const testsRan = ev?.tests?.length ?? 0;
       return <article key={planned.id} class={`card item ${current ? 'current' : ''}`}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}><b class="wrap-anywhere"><span class="mono">{planned.id}</span> · {planned.title}</b><ItemChip state={st} /></div>
-        <div class="muted" style={{ fontSize: '13px' }}>{planned.assignedAgent ?? 'any eligible agent'}{planned.ownedPaths?.length ? <> · owns <span class="mono">{planned.ownedPaths.join(', ')}</span></> : null}{planned.dependsOn.length ? <> · depends on <span class="mono">{planned.dependsOn.join(', ')}</span></> : ' · no dependencies'}</div>
+        <div class="muted" style={{ fontSize: '13px' }}>{planned.assignedAgent ?? 'any eligible agent'}{planned.ownedPaths?.length ? <> · {(task.devagentsRules ?? true) ? 'owns' : 'planned scope'} <span class="mono">{planned.ownedPaths.join(', ')}</span></> : null}{planned.dependsOn.length ? <> · depends on <span class="mono">{planned.dependsOn.join(', ')}</span></> : ' · no dependencies'}</div>
         <div class="stages">
           <Stage tone={ev?.implementations ? 'ok' : current && st === 'running' ? 'run' : 'neutral'}>Implemented{ev?.implementations ? ` ×${ev.implementations}` : ''}</Stage>
           <Stage tone={!testsRan ? (st === 'validating' ? 'run' : 'neutral') : lastTest && lastTest.exitCode === 0 && !lastTest.truncated ? (testsRan > 1 ? 'warn' : 'ok') : 'bad'}>{!testsRan ? 'Tests' : lastTest!.exitCode === 0 && !lastTest!.truncated ? (testsRan > 1 ? `Tests ✕ then ✓ (${testsRan} runs)` : 'Tests ✓') : lastTest!.truncated ? 'Tests · output truncated' : `Tests ✕ (exit ${lastTest!.exitCode})`}</Stage>
@@ -138,7 +139,7 @@ function PlanTab({ task }: { task: Task }) {
       <div class="wrap-anywhere" style={{ fontSize: '13.5px' }}>{i.description}</div>
       <dl class="kv" style={{ gridTemplateColumns: '110px minmax(0, 1fr)', fontSize: '13px' }}>
         <dt>Agent</dt><dd>{i.assignedAgent ?? 'any eligible'} · needs {i.requiredCapabilities.join(', ')}</dd>
-        <dt>Scope</dt><dd class="mono">{i.ownedPaths?.join(', ') ?? 'agent write scope'}</dd>
+        <dt>{(task.devagentsRules ?? true) ? 'Scope' : 'Planned scope (advisory)'}</dt><dd class="mono">{i.ownedPaths?.join(', ') ?? 'agent write scope'}</dd>
         <dt>Depends on</dt><dd class="mono">{i.dependsOn.length ? i.dependsOn.join(', ') : '—'}</dd>
         <dt>Validation</dt><dd class="mono">{i.validation.map(command).join(' ; ')}</dd>
         <dt>Branch</dt><dd class="mono">{i.branch}</dd>

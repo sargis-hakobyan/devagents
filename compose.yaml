@@ -9,6 +9,7 @@ services:
       - devagents-data:/data
     read_only: true
     environment:
+      DEVAGENTS_RULES: ${DEVAGENTS_RULES:-false}
       DEVAGENTS_CREDENTIAL_RUNTIME: /run/devagents-auth
       # The browser reaches the service through the published host port; sign-in links and the
       # Host allowlist must use it rather than the container's internal 4310.

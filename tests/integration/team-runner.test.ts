@@ -129,7 +129,7 @@ test('a multi-item plan that assigns an agent outside the team fails before any 
 
 test('a team-backed DAG runs through integration and combined review on its snapshot while the team and defaults change underneath it', async () => {
   const f = await fixture();
-  const config = Config.parse({ schemaVersion: 1, concurrency: 2 });
+  const config = Config.parse({ schemaVersion: 1, concurrency: 2, devagentsRules: true });
   const service = new TaskService(f.store, config, f.dataDir);
   for (const id of ['a', 'b', 'c']) {
     await writeFile(join(f.project, `${id}.test.cjs`), `const test=require('node:test'),assert=require('node:assert/strict');test('${id}',()=>assert.equal(require('./${id}/${id}.cjs')(),'${id === 'c' ? 'ab' : id}'));\n`);

@@ -16,7 +16,7 @@ export function toml(value: unknown): string {
 }
 const flags = (config: Record<string, unknown>) => Object.entries(config).flatMap(([key, value]) => ['-c', `${key}=${toml(value)}`]);
 export const DEFAULT_SCAN_LIMIT = 200000;
-export async function sandboxFlags(cwd: string, permissions: AgentDefinition['permissions'], temp: string, scanLimit = DEFAULT_SCAN_LIMIT): Promise<string[]> {
+export async function sandboxFlags(cwd: string, permissions: AgentDefinition['permissions'], temp: string, scanLimit = DEFAULT_SCAN_LIMIT, devagentsRules = true): Promise<string[]> {
   const root = await realpath(cwd);
   const filesystem: Record<string, string> = { ':minimal': 'read' };
   const config: Record<string, unknown> = {
@@ -47,7 +47,10 @@ export async function sandboxFlags(cwd: string, permissions: AgentDefinition['pe
     for (const entry of entries) {
       if (++count > scanLimit) throw new AppError('workspace_limit', `Workspace exceeds the safety scan limit of ${scanLimit} entries; remove unneeded files from the worktree or raise workspaceScanLimit in the DevAgents configuration`);
       const path = join(dir, entry.name);
-      if (protectedPath(entry.name) || entry.isSymbolicLink() || (entry.isFile() && (await lstat(path)).nlink > 1)) { denies.push(path); continue; }
+      // Normal package-manager bin links may point to another file inside this worktree.
+      // Never permit links outside it or links to protected project data.
+      const internalLink = !devagentsRules && entry.isSymbolicLink() && await realpath(path).then(target => target.startsWith(`${root}/`) && !protectedPath(target.slice(root.length + 1)), () => false);
+      if (protectedPath(entry.name) || (entry.isSymbolicLink() && !internalLink) || (entry.isFile() && (await lstat(path)).nlink > 1)) { denies.push(path); continue; }
       if (entry.isDirectory()) {
         const inner = await scan(path);
         if (inner.length === 1 && inner[0] === path) { denies.push(path); continue; }

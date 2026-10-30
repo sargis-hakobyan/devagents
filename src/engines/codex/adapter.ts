@@ -8,6 +8,7 @@ import { runProcess } from '../process.js';
 import { runtimeHome, safeEnvironment, sandboxFlags, verifyCodex } from './sandbox.js';
 import { environmentSecrets, redact, redactValues } from '../../telemetry/redact.js';
 import { configuredVault, credentialStore } from '../../security/credential-vault.js';
+import { executionAgent } from '../../domain/execution-policy.js';
 
 const disabled = ['apps', 'browser_use', 'browser_use_external', 'computer_use', 'code_mode', 'hooks', 'image_generation', 'multi_agent', 'multi_agent_v2', 'plugins', 'remote_plugin', 'memories', 'skill_search', 'skill_mcp_dependency_install', 'shell_snapshot', 'view_image', 'workspace_dependencies', 'goals', 'tool_suggest'];
 export class CodexAdapter implements CodingEngine {
@@ -34,11 +35,13 @@ export class CodexAdapter implements CodingEngine {
     const temp = join(directory, 'tmp'); await mkdir(temp, { recursive: true, mode: 0o700 });
     const schema = join(directory, 'output.schema.json');
     await writeFile(schema, JSON.stringify(request.schema), { mode: 0o600 });
-    const permissions = request.phase === 'implementation' ? request.agent.permissions : { ...request.agent.permissions, writePaths: [] };
+    const rules = request.devagentsRules ?? true;
+    const agent = executionAgent(request.agent, rules);
+    const permissions = request.phase === 'implementation' ? agent.permissions : { ...agent.permissions, writePaths: [] };
     const args = [
       'exec',
       '-c', `cli_auth_credentials_store="${credentialStore()}"`,
-      ...await sandboxFlags(request.cwd, permissions, temp, this.options.scanLimit),
+      ...await sandboxFlags(request.cwd, permissions, temp, this.options.scanLimit, rules),
       '-c', 'agents.enabled=false', '-c', 'agents.max_depth=0',
       '-c', 'web_search="disabled"', '-c', 'project_doc_max_bytes=0',
       '-c', 'shell_environment_policy.inherit="none"',
@@ -46,7 +49,7 @@ export class CodexAdapter implements CodingEngine {
       '-c', 'allow_login_shell=false', '-c', 'features.skip_host_skill_discovery=true',
       ...disabled.flatMap(flag => ['-c', `features.${flag}=false`]),
       '-c', `features.shell_tool=${permissions.allowCommands}`,
-      '--ignore-user-config', '--ignore-rules', '--ephemeral', '--strict-config', '--json', '--color', 'never',
+      '--ignore-user-config', '--ephemeral', '--strict-config', '--json', '--color', 'never',
       '--skip-git-repo-check', '--cd', request.cwd, '--output-schema', schema,
       ...(request.agent.model === 'default' ? [] : ['--model', request.agent.model]), '-'
     ];

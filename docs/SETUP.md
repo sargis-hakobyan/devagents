@@ -67,3 +67,11 @@ Terminal users can finish team and task setup with the existing `teams` and `tas
 - **Quota/model access:** saved credentials do not guarantee allowance or model availability. Read the task's preflight error; DevAgents does not silently switch billing methods.
 
 Public prebuilt image distribution is still release work. This checkout builds locally and caches its image; no unpublished image URL or installer is advertised.
+
+## Optional DevAgents rules
+
+Extra DevAgents restrictions are **off by default** for new tasks. The engine sandbox accepts project-specific validation commands and permits generated output in the isolated worktree. Installed tooling, sandbox access and dependency availability still determine whether a command succeeds. Claude execution is not available yet.
+
+To enable the additional command allowlist and role scopes, add `DEVAGENTS_RULES=true` to `.env` in the DevAgents folder, then run `./devagents start`. Use `false` to turn them off again. Native configuration also supports `devagentsRules: true` in the YAML file selected by `DEVAGENTS_CONFIG`.
+
+Settings shows the running default; every task keeps the setting it had at submission. Submit a new task after changing it. A failed task is not restarted automatically. See the [execution-policy details and remaining boundaries](REFERENCE.md#optional-extra-rules).

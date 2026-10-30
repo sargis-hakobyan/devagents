@@ -3,6 +3,7 @@ import type { AgentDefinition, AppConfig } from './schemas.js';
 export type EnginePhase = 'planning' | 'implementation' | 'review';
 export type EngineProgress = { kind: 'started' | 'message' | 'command' | 'file-change' | 'usage'; text?: string; data?: unknown };
 export type EngineRequest = {
+  devagentsRules?: boolean;
   runId: string; workItemId?: string; phase: EnginePhase; cwd: string; prompt: string;
   agent: AgentDefinition; provider: AppConfig['providers'][number];
   schema: Record<string, unknown>; signal: AbortSignal; timeoutMs: number;
@@ -15,5 +16,5 @@ export interface CodingEngine {
 }
 export type ValidationResult = { executable: string; args: string[]; exitCode: number; output: string; truncated?: boolean };
 export interface Validator {
-  execute(cwd: string, command: { executable: string; args: string[] }, signal: AbortSignal, timeoutMs: number): Promise<ValidationResult>;
+  execute(cwd: string, command: { executable: string; args: string[] }, signal: AbortSignal, timeoutMs: number, devagentsRules?: boolean): Promise<ValidationResult>;
 }

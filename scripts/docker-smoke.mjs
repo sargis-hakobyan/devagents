@@ -14,7 +14,7 @@ const probe = createServer();
 await new Promise(r => probe.listen(0, '127.0.0.1', r));
 const port = probe.address().port;
 await new Promise(r => probe.close(r));
-const env = { ...process.env, DEVAGENTS_PORT: String(port) };
+const env = { ...process.env, DEVAGENTS_PORT: String(port), DEVAGENTS_RULES: '' }; // Exercise the Compose default, independent of the operator's .env.
 const override = join(root, 'compose.fixture.yaml');
 const fixture = join(root, 'fixture');
 const base = ['compose', '-p', projectName, '-f', resolve('compose.yaml'), '-f', override];
@@ -53,6 +53,7 @@ try {
   await cli('projects', 'add', 'fixture', '/projects/fixture');
   const task = await cli('tasks', 'submit', 'fixture', 'Persist across restart', '--key', 'docker-smoke');
   assert.equal(task.state, 'awaiting_mode');
+  assert.equal(task.devagentsRules, false, 'Docker defaults to engine policy');
   console.log(await docker(['exec', '-T', 'devagents', 'node', 'scripts/vault-smoke.mjs', 'create']));
   const session = await (await fetch(`http://127.0.0.1:${port}/ui/session`, { headers: { cookie } })).json();
   const authHeaders = { cookie, origin: `http://127.0.0.1:${port}`, 'x-csrf-token': session.csrfToken, 'content-type': 'application/json' };
@@ -74,6 +75,7 @@ try {
   console.log(await docker(['exec', '-T', 'devagents', 'node', 'scripts/vault-smoke.mjs', 'restore']));
   const restored = await cli('tasks', 'show', task.id);
   assert.equal(restored.state, 'awaiting_mode');
+  assert.equal(restored.devagentsRules, false, 'policy snapshot persists across restart');
   assert.equal((await cli('tasks', 'events', task.id)).length, 1);
   const retried = await cli('tasks', 'submit', 'fixture', 'Persist across restart', '--key', 'docker-smoke');
   assert.equal(retried.id, task.id);

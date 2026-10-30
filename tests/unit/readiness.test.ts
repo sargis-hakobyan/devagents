@@ -6,7 +6,7 @@ import { teamReadiness, type RuntimeSupport } from '../../src/domain/readiness.j
 import { validatePlan } from '../../src/domain/plan.js';
 import { builtinCapabilities } from '../../src/agents/registry.js';
 
-const support = (config: Record<string, unknown> = {}): RuntimeSupport => ({ config: Config.parse({ schemaVersion: 1, ...config }), capabilities: builtinCapabilities, executableEngines: new Set(['codex']), platform: 'darwin' });
+const support = (config: Record<string, unknown> = {}): RuntimeSupport => ({ config: Config.parse({ schemaVersion: 1, devagentsRules: true, ...config }), capabilities: builtinCapabilities, executableEngines: new Set(['codex']), platform: 'darwin' });
 
 
 test('a complete roster is ready and readiness never depends on sign-in or model access', () => {
@@ -43,6 +43,8 @@ test('unsupported capabilities, engines and providers are per-member errors, not
   // Linux runtimes cannot grant exact-file writes; the diagnostic names the member instead of failing at execution.
   const linux = teamReadiness([lead(), { ...developer(), permissions: { ...developer().permissions, writePaths: ['project:/src/index.ts'] } }, reviewer()], { ...support(), platform: 'linux' });
   assert.ok(linux.diagnostics.some(d => d.code === 'write_grant_unsupported' && d.memberId === 'dev'));
+  const enginePolicy = teamReadiness([lead(), { ...developer(), permissions: { ...developer().permissions, writePaths: ['project:/src/index.ts'] } }, reviewer()], { ...support({ devagentsRules: false }), platform: 'linux' });
+  assert.equal(enginePolicy.ready, true, 'advisory exact-file scopes do not block engine-policy teams on Linux');
 });
 test('malformed and forbidden members cannot be saved at all', () => {
   assert.throws(() => MemberInput.parse({ ...developer(), permissions: { readPaths: ['project:/**'], writePaths: ['project:/../etc/**'] } }), /traversal/i);

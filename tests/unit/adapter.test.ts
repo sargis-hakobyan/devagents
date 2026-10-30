@@ -77,12 +77,12 @@ process.stdin.resume(); process.stdin.on('end', () => {
   console.log(JSON.stringify({ type: 'turn.completed', usage: {} }));
 });
 `, { mode: 0o700 });
-  const grants = async (phase: 'planning' | 'implementation' | 'review', agent: typeof developer) => {
-    await adapter.execute({ runId: `phase-${phase}`, phase, cwd, prompt: 'x', agent, provider: { id: 'openai', kind: 'openai', auth: 'login' }, schema: {}, signal: new AbortController().signal, timeoutMs: 5000 }, () => {});
+  const grants = async (phase: 'planning' | 'implementation' | 'review', agent: typeof developer, devagentsRules = true) => {
+    await adapter.execute({ devagentsRules, runId: `phase-${phase}`, phase, cwd, prompt: 'x', agent, provider: { id: 'openai', kind: 'openai', auth: 'login' }, schema: {}, signal: new AbortController().signal, timeoutMs: 5000 }, () => {});
     const argv = JSON.parse(await readFile(capture, 'utf8')) as string[];
     const permissions = argv.find(a => a.startsWith('permissions='))!;
     const writes = [...permissions.matchAll(/"((?:[^"\\]|\\.)*)"="write"/g)].map(m => JSON.parse(`"${m[1]}"`) as string);
-    return { writes, shell: argv.find(a => a.startsWith('features.shell_tool='))! };
+    return { writes, shell: argv.find(a => a.startsWith('features.shell_tool='))!, ignoresRules: argv.includes('--ignore-rules') };
   };
   try {
     const implementation = await grants('implementation', developer);
@@ -96,5 +96,11 @@ process.stdin.resume(); process.stdin.on('end', () => {
     // The Tech Lead keeps its shell (read-only project, no network) to inspect files; the reviewer has none.
     assert.equal((await grants('planning', lead)).shell, 'features.shell_tool=true');
     assert.equal((await grants('review', { ...reviewer, permissions: { ...reviewer.permissions, allowCommands: false } })).shell, 'features.shell_tool=false');
+    const enginePolicy = await grants('implementation', { ...developer, permissions: { ...developer.permissions, writePaths: ['project:/owned/**'], allowCommands: false } }, false);
+    assert.equal(enginePolicy.shell, 'features.shell_tool=true');
+    assert.ok(enginePolicy.writes.some(w => w.endsWith('/project')), 'role scopes no longer restrict worktree writes');
+    assert.equal(enginePolicy.ignoresRules, false, 'engine execution rules are not disabled');
+    assert.equal(implementation.ignoresRules, false, 'extra restrictions are layered on top of engine rules');
+    assert.deepEqual((await grants('review', developer, false)).writes.filter(w => !w.includes('/tmp')), [], 'engine policy still enforces read-only review');
   } finally { await rm(root, { recursive: true, force: true }); }
 });

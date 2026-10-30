@@ -72,6 +72,7 @@ export function SettingsPage() {
     </Card>
     <div class="items" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))' }}>
       <Card title="Engine and model defaults"><div style={{ padding: '14px 16px' }}><dl class="kv" style={{ gridTemplateColumns: '140px minmax(0, 1fr)' }}>
+        <dt>Extra DevAgents rules</dt><dd>{status.defaults.devagentsRules ? 'On · command allowlist and role scopes' : 'Off · engine sandbox'}<div class="muted">Set DEVAGENTS_RULES=true in .env and restart to enable. Applies to new tasks.</div></dd>
         <dt>Default engine</dt><dd class="mono">{status.defaults.engine}</dd>
         <dt>Default provider</dt><dd class="mono">{status.defaults.provider}</dd>
         <dt>Default model</dt><dd>{status.defaults.model ? <span class="mono">{status.defaults.model}</span> : 'runtime default (not pinned) · set defaultModel in devagents.yaml to pin team snapshots'}</dd>

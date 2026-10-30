@@ -1,3 +1,4 @@
+import { taskRules } from '../domain/execution-policy.js';
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
 import type { CodingEngine, EnginePhase, Validator, ValidationResult } from '../domain/engine.js';
@@ -31,6 +32,7 @@ type Hooks = {
 
 export async function runDag(h: Hooks): Promise<void> {
   const { service, task, agents, signal } = h;
+  const rules = taskRules(task);
   const plan = task.plan!; const workspace = task.workspace!; const project = service.store.project(task.projectId);
   const originalStatus = await git(project.path, ['status', '--porcelain=v1', '--untracked-files=all']);
   if (!plan.integration) throw new AppError('invalid_plan', 'Multi-item execution requires integration instructions');
@@ -40,17 +42,17 @@ export async function runDag(h: Hooks): Promise<void> {
     const agent = item.assignedAgent ? selectImplementer(agents, item) : undefined;
     if (!agent || !item.ownedPaths) throw new AppError('missing_agent', `No scoped developer for ${item.id}`);
     if (item.branch !== `${workspace.branch}-${item.id}`) throw new AppError('branch_mismatch', `Work item ${item.id} must use branch ${workspace.branch}-${item.id}`);
-    assertValidationCommands(item.validation, `Work item ${item.id}`);
-    return [item.id, scopeAgent(agent, item.ownedPaths)];
+    assertValidationCommands(item.validation, `Work item ${item.id}`, rules);
+    return [item.id, rules ? scopeAgent(agent, item.ownedPaths) : agent];
   }));
   const integrationAgent = agents.find(a => a.id === plan.integration!.assignedAgent && a.enabled && a.delegation.canReceiveTasks);
-  if (!integrationAgent) throw new AppError('missing_agent', 'Integration agent is unavailable');
-  const integrator = scopeAgent(integrationAgent, [...new Set(plan.items.flatMap(item => item.ownedPaths!))]);
-  assertValidationCommands(plan.integration.validation, 'Integration');
+  if (!integrationAgent || !integrationAgent.permissions.writePaths.length) throw new AppError('missing_agent', 'Writable integration agent is unavailable');
+  const integrator = rules ? scopeAgent(integrationAgent, [...new Set(plan.items.flatMap(item => item.ownedPaths!))]) : integrationAgent;
+  assertValidationCommands(plan.integration.validation, 'Integration', rules);
   const implementers = new Set([...developers.values()].map(a => a.id)); implementers.add(integrator.id);
   const reviewer = independentReviewer(agents, implementers);
   if (!reviewer) throw new AppError('missing_agent', 'Multi-item execution needs a reviewer independent of every implementer and integrator');
-  const readOnlyReviewer = { ...reviewer, permissions: { ...reviewer.permissions, writePaths: [], allowCommands: false } };
+  const readOnlyReviewer = { ...reviewer, permissions: { ...reviewer.permissions, writePaths: [], allowCommands: !rules } };
   for (const agent of [...new Map([...developers.values(), integrator, reviewer].map(a => [a.id, a])).values()]) await h.engine.preflight(h.provider(agent));
   await assertIntegrationConfig(workspace.path);
   h.active(); h.move('running', 'Scheduling approved work items in isolated worktrees');
@@ -59,17 +61,17 @@ export async function runDag(h: Hooks): Promise<void> {
   const repair = () => { repairCycles++; h.onRepair(); };
   const invoke = (phase: EnginePhase, agent: AgentDefinition, prompt: string, schema: z.ZodType, workerSignal: AbortSignal, context: Context) =>
     slots.run(agent.id, agent.concurrency, workerSignal, () => h.invoke(phase, agent, prompt, schema, workerSignal, context));
-  /** Implementation may only change what review and the commit will see; hidden (ignored) files must stay untouched. */
+  /** With extra rules enabled, hidden (ignored) files must stay untouched. */
   const implement = async (agent: AgentDefinition, prompt: string, workerSignal: AbortSignal, context: Context) => {
-    const before = await hiddenFiles(context.cwd);
+    const before = rules ? await hiddenFiles(context.cwd) : undefined;
     await invoke('implementation', agent, prompt, ImplementationOutput, workerSignal, context);
-    h.active(); assertHiddenUnchanged(before, await hiddenFiles(context.cwd), context.workItemId === '@integration' ? 'Integration repair' : `Work item ${context.workItemId}`);
+    h.active(); if (before) assertHiddenUnchanged(before, await hiddenFiles(context.cwd), context.workItemId === '@integration' ? 'Integration repair' : `Work item ${context.workItemId}`);
   };
   const validate = async (cwd: string, commands: Item['validation'], workerSignal: AbortSignal, itemId: string): Promise<ValidationResult[]> => {
     const evidence = [];
     for (const command of commands) {
       h.active(); if (workerSignal.aborted) throw new AppError('cancelled', 'Work item cancelled');
-      const result = await h.validator.execute(cwd, command, workerSignal, service.config.validationTimeoutMs);
+      const result = await h.validator.execute(cwd, command, workerSignal, service.config.validationTimeoutMs, rules);
       evidence.push(result); record('validation', { workItemId: itemId, ...result });
     }
     return evidence;
@@ -89,7 +91,7 @@ export async function runDag(h: Hooks): Promise<void> {
       ? 'FINAL COMBINED GATE: assess the complete request, all user acceptance criteria, the full diff and combined validation. Approval permits the final task commit. Missing combined validation or any actionable defect must block approval.'
       : 'ITEM INTEGRATION GATE: assess only this item\'s deliverable, owned changes and declared item validation. Approval permits integration of this item, not task completion. Task-wide tests and acceptance checks run at the mandatory final combined gate after all items are integrated. Do not demand combined validation at this item gate or ask the implementer to access the original checkout. Report defects in this item; defer checks explicitly reserved for the combined gate.';
     return await invoke('review', readOnlyReviewer,
-      `Independently review this ${combined ? 'combined change' : 'work item'} against its acceptance criteria. ${stage} Do not modify files or execute commands. Findings must contain only actionable defects requiring repair. Positive observations belong in summary. Approve only with approved=true and findings=[].\nOrchestrator workspace evidence: ${JSON.stringify(workspaceEvidence)}. Git-status comparisons do not attest ignored files or the contents of already-dirty/untracked files.\nUser request: ${task.request}\nUser acceptance criteria (task-wide context): ${JSON.stringify(task.acceptanceCriteria)}\nScope and acceptance criteria: ${JSON.stringify(criteria)}\nDiff:\n${current.diff}\nActual validation:\n${JSON.stringify(evidence).slice(0, 50000)}`,
+      `Independently review this ${combined ? 'combined change' : 'work item'} against its acceptance criteria. ${stage} Do not modify files.${rules ? ' Do not execute commands.' : ' Read-only inspection commands are available.'} Findings must contain only actionable defects requiring repair. Positive observations belong in summary. Approve only with approved=true and findings=[].\nOrchestrator workspace evidence: ${JSON.stringify(workspaceEvidence)}. Git-status comparisons do not attest ignored files or the contents of already-dirty/untracked files.\nUser request: ${task.request}\nUser acceptance criteria (task-wide context): ${JSON.stringify(task.acceptanceCriteria)}\nScope and acceptance criteria: ${JSON.stringify(criteria)}\nDiff:\n${current.diff}\nActual validation:\n${JSON.stringify(evidence).slice(0, 50000)}`,
       ReviewOutput, workerSignal, { cwd, workItemId: itemId }) as z.infer<typeof ReviewOutput>;
   };
   const executeItem = async (item: Item, baseSha: string, workerSignal: AbortSignal) => {
@@ -103,7 +105,7 @@ export async function runDag(h: Hooks): Promise<void> {
       let feedback = '';
       for (;;) {
         check();
-        await implement(developer, `Implement only this work item. Dependency results are already present in this worktree. Do not commit or modify Git metadata or ignored files.\nRequest: ${task.request}\nUser acceptance criteria: ${JSON.stringify(task.acceptanceCriteria)}\nWork item: ${JSON.stringify(item)}\n${feedback}`, workerSignal, { cwd: worker.path, workItemId: item.id });
+        await implement(developer, `Implement only this work item. Dependency results are already present in this worktree. Do not commit or modify Git metadata.${rules ? ' Do not modify ignored files.' : ' Generated files are permitted; keep source changes visible to review.'}\nRequest: ${task.request}\nUser acceptance criteria: ${JSON.stringify(task.acceptanceCriteria)}\nWork item: ${JSON.stringify(item)}\n${feedback}`, workerSignal, { cwd: worker.path, workItemId: item.id });
         const before = await changes(worker, developer);
         if (!before.files.length) throw new AppError('no_changes', `Work item ${item.id} produced no changes`);
         check(); state(item.id, 'validating');
@@ -172,7 +174,7 @@ export async function runDag(h: Hooks): Promise<void> {
             if (integrationRepairs >= service.config.maxRepairCycles) throw new AppError('integration_conflict', 'Integration conflict exhausted the repair budget; inspect preserved worktrees and evidence.');
             integrationRepairs++; repair();
             for (const file of conflicts) await new PolicyEngine().file(integrator, workspace.path, file, 'write');
-            await implement(integrator, `Resolve this explicit integration conflict. Preserve all work-item requirements. Edit project files only; do not use Git, commit or touch ignored files. Remove conflict markers.\nUser request: ${task.request}\nPlan: ${JSON.stringify(plan)}\nConflicting files: ${JSON.stringify(conflicts)}`, signal, { cwd: workspace.path, workItemId: '@integration' });
+            await implement(integrator, `Resolve this explicit integration conflict. Preserve all work-item requirements. Edit project files only; do not use Git or commit.${rules ? ' Do not touch ignored files.' : ''} Remove conflict markers.\nUser request: ${task.request}\nPlan: ${JSON.stringify(plan)}\nConflicting files: ${JSON.stringify(conflicts)}`, signal, { cwd: workspace.path, workItemId: '@integration' });
             await changes(workspace, integrator);
             resolved = true;
             for (const file of conflicts) {
@@ -224,7 +226,7 @@ export async function runDag(h: Hooks): Promise<void> {
       if (integrationRepairs >= service.config.maxRepairCycles) throw new AppError('repair_limit', `Combined integration repair budget exhausted. ${feedback.slice(0, 2000)}`);
       integrationRepairs++; repair(); h.move('repairing', 'Bounded integration repair requested', { outcome: { repairCycles } });
       h.move('running', 'Integration agent repairing combined result');
-      await implement(integrator, `Repair the combined result within the plan's owned paths. Do not commit or modify Git metadata or ignored files.\nRequest: ${task.request}\nPlan: ${JSON.stringify(plan)}\n${feedback}`, signal, { cwd: workspace.path, workItemId: '@integration' });
+      await implement(integrator, `Repair the combined result within the plan's owned paths. Do not commit or modify Git metadata.${rules ? ' Do not modify ignored files.' : ' Generated files are permitted; keep source changes visible to review.'}\nRequest: ${task.request}\nPlan: ${JSON.stringify(plan)}\n${feedback}`, signal, { cwd: workspace.path, workItemId: '@integration' });
     }
   } catch (error) {
     for (const item of plan.items) if (!done.has(item.id) && !started.has(item.id)) state(item.id, signal.aborted && !h.stopping() ? 'cancelled' : 'blocked', { reason: h.stopping() ? 'Service shutdown stopped the task before this item started' : 'Task stopped before dependencies completed' });

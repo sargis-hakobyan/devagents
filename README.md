@@ -22,6 +22,8 @@ To change setup later:
 ./devagents setup
 ```
 
+Extra DevAgents restrictions are off by default; [enable them in setup](docs/SETUP.md#optional-devagents-rules) when needed. The engine sandbox remains active.
+
 **Available now:** Codex execution. Claude and local-model execution are planned.
 
 [Setup and troubleshooting](docs/SETUP.md) · [Technical reference](docs/REFERENCE.md) · [Roadmap](docs/MILESTONES.md)
