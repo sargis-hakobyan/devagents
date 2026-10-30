@@ -21,6 +21,7 @@ For the approved browser UI work, also read `docs/FRONTEND_BRIEF.md` and `docs/U
 9. Maintain README, examples, decision log and a milestone checklist as implementation progresses. Prefer focused commits with passing tests.
 10. Never push automatically. Wait for an explicit user command to push the current work; permission for an earlier push does not authorize later pushes. When instructed, push to `main` unless the user specifies otherwise. Do not publish a GitHub repository, install external network dependencies outside normal project setup, or take destructive action without appropriate user authorization.
 11. Work directly on the local `main` branch (owner decision, 2026-10-30). Do not create feature branches unless explicitly requested. Local commits are allowed; they do not imply permission to push.
+12. Do not prefix commit messages with `Codex`, `Claude`, or variants of those names. Use a plain description of the change.
 
 ## First response expected
 
