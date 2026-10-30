@@ -1,6 +1,6 @@
 # DevAgents browser UI — product and implementation brief
 
-Status: approved direction; U1 implemented, U2/U3 planned. Owner approval: 2026-10-30. Claude owns frontend design and implementation using its design tools. This brief defines behaviour and acceptance; visual details are deliberately left to the designer.
+Status: approved direction; U1 and U2 accepted with documented limits; U3 planned. Owner clarification: 2026-10-30. Codex handles implementation fixes, including frontend bugs; involve Claude when new design is needed. This brief defines behaviour and acceptance; visual details are deliberately left to the designer.
 
 Read this with `DEV_AGENTS_SPEC.md`, `IMPLEMENTATION_PROMPT.md`, `docs/MILESTONES.md`, and `docs/UI_IMPLEMENTATION_PLAN.md`. This decision brings a focused local dashboard into scope; it does not authorize M4 engine work, remote hosting, or live model tests.
 
@@ -107,7 +107,7 @@ Enabling the UI is a backend security change, not simply removing the Origin che
 
 ## Delivery sequence and acceptance
 
-The authorized post-review authenticated M2/M3 reruns passed on 2026-10-30 at `db95711`; see `MILESTONES.md` for the commands, environment and scope. U2 is the next increment, with Claude owning frontend implementation. U3 and M4 remain separately reviewed work. Future authenticated model calls require explicit authorization; this frontend brief does not supply it.
+The authorized post-review authenticated M2/M3 reruns passed on 2026-10-30 at `db95711`; see `MILESTONES.md` for the commands, environment and scope. U2 and the pre-U3 submission retry fix are accepted with documented limits. U3 is next; its design and implementation handoff is in `UI_IMPLEMENTATION_PLAN.md`. M4 remains separately reviewed work. Future authenticated model calls require explicit authorization; this frontend brief does not supply it.
 
 ### U1 — Visibility (first integrated UI increment, before M4)
 

@@ -1,6 +1,6 @@
 # Browser UI implementation plan (U1 first)
 
-Status: U1 implemented; U2/U3 planned as required by `IMPLEMENTATION_PROMPT.md`. Visual reference: `design/ui/` (Direction A). Behaviour and acceptance: `docs/FRONTEND_BRIEF.md`.
+Status: U1 and U2 implemented and accepted with the limits in `MILESTONES.md`; U3 is next. Codex handles implementation fixes; involve Claude for new design, per the latest owner instruction. Earlier U2 ownership/handoff text below is historical. Visual reference: `design/ui/` (Direction A). Behaviour and acceptance: `docs/FRONTEND_BRIEF.md`.
 
 ## Stack
 
@@ -82,6 +82,32 @@ Required U2 regression coverage:
 - Verify idempotent retries after edits/archive return the original task, while a genuinely different submission with the same key conflicts. Archived-team submissions fail; existing task history remains readable.
 - Use a deterministic engine to prove a selected team constrains the planner, worker and reviewer pool; an assignment to an excluded registry agent must fail before execution. Include DAG integration/review coverage and unchanged legacy submissions.
 - Browser workflows cover create/edit/custom/template/duplicate/archive/default selection, actionable readiness, stale-save recovery, hostile text escaping and responsive keyboard use. Test new mutations with missing CSRF and foreign origins. Store screenshots only in the existing ignored output directory.
+
+## U3 handoff — browser workflows and guided setup
+
+Prerequisite: U2 is accepted, including the F6 pending-save fix. Submission fingerprints now identify the submitted input before resolving defaults; retain the legacy compatibility tests. This section prepares U3, not M4 or authenticated engine calls. Work on local `main`, commit in reviewable increments and wait for a fresh command before pushing.
+
+### Design work for Claude
+
+Extend Direction A for project registration, task submission, awaiting-mode choice, plan approval/rejection, cancellation feedback, read-only diff inspection and guided setup. Use the existing Projects, Tasks, Task and Settings boards. Include keyboard/narrow layouts and pending, stale, disconnected, missing-connection and invalid-path states. Keep forms usable without hiding unsaved input behind polling updates. Deliver the design in `design/ui/`; implementation should follow the contracts below. No new engine or credential integration is implied by a design control.
+
+### Implementation order and contracts
+
+1. **Register an existing project.** Reuse `POST /projects` and its strict `ProjectInput`. Ask for a project ID and absolute path visible to the service. Explain Docker mounts and container paths; do not add automatic cloning, mounting, a filesystem browser or a host folder picker. Surface canonical-path/access/conflict errors from the backend and preserve form input on failure.
+2. **Submit a task.** Add a dedicated submission route before the dynamic task-ID route. Collect project, request, acceptance criteria, optional explicit team and mode. Use existing project/team readiness data; keep draft/archived teams visibly unavailable. Omitting `teamId` uses the project's default or, if absent, the legacy registry. The current API has no explicit bypass of a configured project default: do not offer a misleading “legacy” override. Display the actual frozen team/revision from the response; the displayed team preview does not bind the submission to that preview revision. Expose effective mode defaults through a secret-free service projection if necessary rather than duplicating configuration resolution in the client.
+3. **Make retry identity explicit.** Generate one key per submission attempt and hold its exact payload until the outcome is known. Disable duplicate clicks and edits while pending. After an ambiguous network failure, retry the same key and payload; never regenerate a key automatically. A deliberate new submission uses a new key. Preserve the pending attempt across reload/session renewal in tab-scoped state, without storing authentication/provider secrets; clear it after confirmed success or deliberate abandonment. Explain uncertainty before allowing abandonment, since the first task may already exist. Refresh task data after reconnect rather than replaying other mutations automatically.
+4. **Mode, approval and cancellation.** Reuse `POST /tasks/:id/mode`, `/approve` with the displayed task `version`, and `/cancel`. No preselected autonomous choice when the service has no mode. A stale approval reloads the current plan and requires a new explicit click; never silently approve the new version. “Reject plan” uses cancellation and states that consequence. Keep the committing boundary non-cancellable and render backend conflicts honestly. Disable pending actions and retain context on failures.
+5. **Safe diff inspection.** Add a bounded authenticated read endpoint addressed only by task identity. Start with the completed task's recorded base/final commit; inspect server-owned repository metadata and verify commit identities/ownership. No arbitrary path, ref or shell arguments from the client; no external diff/textconv helpers. Redact known secret values, render text only, and explicitly distinguish unavailable, binary, oversized/truncated and empty results. Do not infer an empty diff when objects or a worktree are missing. Live/failed-task diff views can remain explicitly unavailable until equivalent ownership and race protections exist.
+6. **Guided setup.** Use existing secret-free status and copyable terminal commands for launcher/authentication and Docker project mounts. Distinguish browser session, saved provider sign-in and verified model access. Do not collect credentials in this increment, read saved secrets or trigger a paid connection test automatically. Missing runtime/connection should lead to an actionable setup step without fabricated readiness.
+7. **Cleanup stays a separate follow-up within U3.** Leave it unavailable until a server-owned preview lists removals and retained results, execution revalidates that preview, and stale/forged previews are tested. Do not simply enable the existing destructive endpoint from the browser. Resubmit is an explicit new task, never a replay of an old idempotency key.
+
+### Required verification
+
+- Browser end-to-end against the deterministic engine: register a fixture, select a ready team, submit in plan-approval mode, approve the displayed plan, observe tests/review/local commit and inspect its diff. Assert the original checkout is unchanged.
+- Double click, dropped submission response, reload and session renewal reuse one attempt/key and produce one task; altered payload with the old key conflicts. Cover mode defaults changing during retry, team edits/archive after submission and the original frozen snapshot.
+- Cover missing mode, stale approval, rejection, cancellation while queued/running, committing refusal, disconnected/restarted service, unavailable engine/login, invalid Docker path and draft/archived team selection. Never use real model credentials for these tests.
+- Test missing CSRF, foreign Origin/Host, arbitrary/forged diff identity, hostile text, missing commits and output limits. Render all generated strings as escaped text and retain existing U1/U2 workflows.
+- Run `npm run check`, the browser suite, deterministic M2/M3 and Docker smoke after integration. Inspect representative screenshots in the ignored output directory; update README/milestones/decisions and report exact scope and limits. Future live fixtures still require separate authorization.
 
 ## Test strategy
 
