@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { AppError } from '../domain/errors.js';
 import { assertTransition } from '../domain/lifecycle.js';
-import { TaskInput, TeamInput, type Project, type Task, type TaskEvent, type TaskState, type TaskSummary, type TaskTeam, type TeamRecord } from '../domain/schemas.js';
+import { Mode, TaskInput, TeamInput, type Project, type Task, type TaskEvent, type TaskState, type TaskSummary, type TaskTeam, type TeamRecord } from '../domain/schemas.js';
 import { environmentSecrets, redact, redactValues } from '../telemetry/redact.js';
 
 export class Store {
@@ -195,26 +195,33 @@ export class Store {
   /**
    * Creates a task atomically with its frozen team configuration. The idempotency check runs first,
    * so retrying an earlier submission returns the original task even after the team or defaults
-   * changed; only a new submission resolves `freeze`, inside the same transaction as the insert.
+   * changed; only a new submission resolves defaults and `freeze`, inside the insert transaction.
+   * New fingerprints identify submitted input, before defaults. Unprefixed legacy fingerprints
+   * included the resolved mode, so omitted-mode retries may match either historical mode. Those
+   * rows cannot distinguish explicit from defaulted modes; never infer that from mutable task data.
    */
-  createTask(input: unknown, key: string, freeze?: (task: Task) => TaskTeam | undefined): Task {
+  createTask(input: unknown, key: string, freeze?: (task: Task) => TaskTeam | undefined, defaultMode?: () => Task['mode']): Task {
     const parsed = TaskInput.parse(input);
     this.project(parsed.projectId);
     const clean = redactValues(parsed, this.secrets) as typeof parsed;
-    const fingerprint = createHash('sha256').update(JSON.stringify(parsed)).digest('hex');
+    const hash = (value: typeof parsed) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    const fingerprint = `input-v2:${hash(parsed)}`;
     return this.transaction(() => {
       const previous = this.db.prepare('SELECT * FROM requests WHERE key=?').get(key);
       if (previous) {
-        if (previous.fingerprint !== fingerprint) throw new AppError('idempotency_conflict', 'Idempotency key was used with different input', 409);
+        const legacy = typeof previous.fingerprint === 'string' && /^[a-f0-9]{64}$/.test(previous.fingerprint);
+        const matchesLegacy = legacy && (previous.fingerprint === hash(parsed) || (parsed.mode === undefined && Mode.options.some(mode => previous.fingerprint === hash(TaskInput.parse({ ...parsed, mode })))));
+        if (previous.fingerprint !== fingerprint && !matchesLegacy) throw new AppError('idempotency_conflict', 'Idempotency key was used with different input', 409);
         return this.task(previous.task_id as string);
       }
       const now = new Date().toISOString();
-      let task: Task = { ...clean, id: randomUUID(), runId: randomUUID(), state: clean.mode ? 'planning' : 'awaiting_mode', version: 0, createdAt: now, updatedAt: now };
+      const mode = clean.mode ?? defaultMode?.();
+      let task: Task = { ...clean, ...(mode ? { mode } : {}), id: randomUUID(), runId: randomUUID(), state: mode ? 'planning' : 'awaiting_mode', version: 0, createdAt: now, updatedAt: now };
       const team = freeze?.(task);
       if (team) task = { ...task, team, agents: team.members.map(m => ({ ...m, schemaVersion: 1 as const, instructionsFile: 'team', source: `team:${team.id}@${team.revision}` })) };
       this.db.prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)').run(task.id, task.projectId, task.state, task.version, this.taskJson(task));
       this.db.prepare('INSERT INTO requests VALUES (?, ?, ?)').run(key, fingerprint, task.id);
-      this.append(task, 'user', `${clean.mode ? 'Task submitted with autonomy mode' : 'Choose autonomous or plan-approval to continue'}${team ? ` · team "${team.name}" revision ${team.revision} frozen` : ''}`);
+      this.append(task, 'user', `${mode ? 'Task submitted with autonomy mode' : 'Choose autonomous or plan-approval to continue'}${team ? ` · team "${team.name}" revision ${team.revision} frozen` : ''}`);
       return task;
     });
   }

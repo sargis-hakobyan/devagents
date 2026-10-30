@@ -105,9 +105,15 @@ npm run cli -- projects add my-project /absolute/path/to/existing-checkout
 
 Before the M2 live fixture, configure the dedicated account with `npm run cli -- auth codex`, or use `auth codex --api-key-env OPENAI_API_KEY`. M2 queues planning/execution after explicit mode selection. Use `tasks show` and `tasks evidence` to follow the result.
 
+## Pre-U3 submission retry fix — 2026-10-30
+
+Completed: mode defaults resolve only after request identity is checked, inside task creation. New fingerprints distinguish explicit and omitted modes; old resolved-input fingerprints remain readable without rewriting existing request records. Their historical explicit/default ambiguity is documented in `DECISIONS.md`.
+
+Verification: `npm run check` passed **127 tests, no skips**, backend/UI typechecks and production build. Deterministic M2 and M3 fixtures passed with real sandboxed validation and unchanged original checkouts. Five new tests cover default changes, mode selection/restart, legacy records, conflicting input and transactional rollback. Browser/Docker/protocol suites were not repeated for this persistence/service-only change; no authenticated calls or real credential inspection occurred.
+
 ## Acceptance commands
 
-- `npm run check`: 122 tests, backend and UI typecheck, production build of service and UI (one real-sandbox containment test runs only when the pinned Codex is installed).
+- `npm run check`: 127 tests, backend and UI typecheck, production build of service and UI (one real-sandbox containment test runs only when the pinned Codex is installed).
 - `npm run test:m2`: deterministic planning/implementation/review with real sandboxed validation and a local commit.
 - `npm run test:m3`: deterministic three-item DAG with isolated branches, dependency integration, actual sandboxed validation and a combined commit.
 - `npm run test:m3-live`: opt-in authenticated three-item fixture; equivalent container command passed with saved ChatGPT sign-in. Native authenticated execution remains unverified.

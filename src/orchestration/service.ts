@@ -86,8 +86,7 @@ export class TaskService {
   }
   submit(input: unknown, key: string): Task {
     const task = TaskInput.parse(input);
-    const mode = task.mode ?? this.store.project(task.projectId).defaultMode ?? this.config.defaultMode;
-    const created = this.store.createTask({ ...task, ...(mode ? { mode } : {}) }, key, () => this.freezeTeam(task.teamId, task.projectId));
+    const created = this.store.createTask(task, key, () => this.freezeTeam(task.teamId, task.projectId), () => this.store.project(task.projectId).defaultMode ?? this.config.defaultMode);
     this.runner?.enqueue(created.id); return created;
   }
   mode(id: string, mode: unknown): Task {
