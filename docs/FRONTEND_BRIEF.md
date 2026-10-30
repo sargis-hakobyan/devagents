@@ -2,7 +2,7 @@
 
 Status: approved direction, not implemented. Owner approval: 2026-10-30. Claude will design and implement the frontend using its design tools. This brief defines behaviour and acceptance; visual details are deliberately left to the designer.
 
-Read this with `DEV_AGENTS_SPEC.md`, `IMPLEMENTATION_PROMPT.md`, `docs/MILESTONES.md`, and `docs/FRONTEND_IMPLEMENTATION_PROMPT.md`. This decision brings a focused local dashboard into scope; it does not authorize M4 engine work, remote hosting, or live model tests.
+Read this with `DEV_AGENTS_SPEC.md`, `IMPLEMENTATION_PROMPT.md`, `docs/MILESTONES.md`, and `docs/UI_IMPLEMENTATION_PLAN.md`. This decision brings a focused local dashboard into scope; it does not authorize M4 engine work, remote hosting, or live model tests.
 
 ## Product purpose
 

@@ -55,19 +55,19 @@
 
 ## Post-review acceptance gate
 
-- [ ] Re-run authenticated M2 and M3 fixtures against the post-review baseline, only when explicitly authorized. Historical live passes above predate the review fixes; the final follow-up record reports 99 tests and deterministic/protocol/Docker suites passing, but not these live reruns.
+- [ ] Re-run authenticated M2 and M3 fixtures against the post-review baseline, only when explicitly authorized. Historical live passes above predate the review fixes; the pre-UI follow-up passed 99 tests and deterministic/protocol/Docker suites, but did not run these live reruns.
 
 ## U1–U3 — Local browser UI (approved 2026-10-30; not implemented)
 
-Design and implementation owner: Claude, using its frontend design tools. Product scope and acceptance are in [the frontend brief](FRONTEND_BRIEF.md); start with [the implementation handoff](FRONTEND_IMPLEMENTATION_PROMPT.md). Design and deterministic UI development may proceed while the live gate is pending; do not declare release acceptance or start M4 until it is satisfied.
+Design and implementation owner: Claude, using its frontend design tools. Product scope and acceptance are in [the frontend brief](FRONTEND_BRIEF.md); start with [the implementation instructions](../IMPLEMENTATION_PROMPT.md) and [UI implementation plan](UI_IMPLEMENTATION_PLAN.md). Design and deterministic UI development may proceed while the live gate is pending; do not declare release acceptance or start M4 until it is satisfied.
 
 - [x] Product brief, implementation handoff and roadmap alignment.
-- [x] Full screen/state design: Overview, Teams, Projects, Tasks and Settings. Two directions were designed; Direction A was chosen with its Overview restructured for density. Source boards live in `design/ui/` (see its README).
+- [x] Full screen/state design: Overview, Teams, Projects, Tasks and Settings. Direction A was chosen with its Overview restructured for density. The selected source boards live in `design/ui/` (see its README).
 - [x] U1: same-origin app shell, protected browser session, real read-only progress/history/results, safe content rendering and browser/CLI compatibility. Verified natively with 9 Playwright workflows against the labelled fixture (sign-in, overview, list, completed/approval/failed/cancelled/mode-wait detail, hostile content, disconnect and reconnect, narrow screen, sign-out) plus API/session regression tests; Docker smoke covers the in-image UI and bootstrap exchange.
-- [x] U1 status review fixes: category-first overview queries, state filters before pagination, history-derived plan approval, and bounded structured facts alongside evidence previews. Three new API tests and four new browser regressions; see [verification record](U1_REVIEW_FIXES.md).
+- [x] U1 status review fixes: category-first overview queries, state filters before pagination, history-derived plan approval, and bounded structured facts alongside evidence previews. Three new API tests and four new browser regressions. The full check passed 107 tests; all 13 browser workflows passed across the full run and a targeted rerun after correcting an exact-text test selector. Docker/protocol/standalone smoke suites were not repeated for that status-only fix pass.
 - [ ] U2: persisted reusable teams, custom/template members, revisions, readiness, archive/duplicate, project defaults, submission snapshots and legacy compatibility.
 - [ ] U3: guided setup, project registration, task submission/mode, version-bound plan approval, cancellation and safe diff inspection.
-- [x] U1 browser workflow/security tests, responsive layout, screenshots in `docs/screenshots/` and native/Docker packaging. Repeat for U2 and U3.
+- [x] U1 browser workflow/security tests, responsive layout, regenerable screenshots in ignored `test-results/ui-screenshots/` and native/Docker packaging. Repeat for U2 and U3.
 - [ ] U2/U3 as above.
 
 U1 is the first integrated UI increment before M4. Keep U2/U3 and M4 as separately reviewed work; a team editor must not claim unavailable engines or capabilities work.
@@ -104,3 +104,7 @@ Before the M2 live fixture, configure the dedicated account with `npm run cli --
 - `npm run test:codex-live`: opt-in authenticated native fixture. The equivalent container command passed with ChatGPT sign-in; native authenticated execution remains unverified. See README.
 
 M3 supports one active top-level request with bounded parallel work items, text changes and read-only Node/npm validation. Linux/Docker writes require directory-subtree grants; exact-file writes are rejected when the plan is validated, before approval, and again before model execution because of a pinned-runtime limitation. Scheduling uses deterministic waves, not immediate dispatch when a slot frees. Local inference, multiple engines, cross-request concurrency, generated build output policies and external actions remain later work.
+
+## Verification history notes
+
+Detailed completed review reports are retained in Git history; current constraints and fixes are recorded here and in `DECISIONS.md`. Earlier live fixture passes predate the review fixes. During one pre-UI verification window, high host load coincided with a DAG timeout and failures whose output was not captured; subsequent repeated DAG runs and full checks passed. The cause was not established, and wall-clock-sensitive fixtures remain a known testing limitation. Follow-up fixes covered process output bounds and credential seal locking shared across instances.

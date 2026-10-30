@@ -11,3 +11,8 @@ coverage/
 .DS_Store
 /compose.override.yaml
 /devagents.yaml
+
+# Generated browser test artifacts
+/test-results/
+/playwright-report/
+/blob-report/

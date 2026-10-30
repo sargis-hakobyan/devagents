@@ -1,6 +1,6 @@
 # Browser UI implementation plan (U1 first)
 
-Status: U1 implemented; U2/U3 planned as required by `docs/FRONTEND_IMPLEMENTATION_PROMPT.md`. Visual reference: `design/ui/` (Direction A). Behaviour and acceptance: `docs/FRONTEND_BRIEF.md`.
+Status: U1 implemented; U2/U3 planned as required by `IMPLEMENTATION_PROMPT.md`. Visual reference: `design/ui/` (Direction A). Behaviour and acceptance: `docs/FRONTEND_BRIEF.md`.
 
 ## Stack
 
@@ -51,7 +51,7 @@ Action controls that arrive in U2/U3 (submit, approve, cancel, register, team ed
 
 - **API/session:** bootstrap needs bearer; code single-use and expiring; cookie grants reads; replay rejected; wrong Host, foreign Origin, missing CSRF each 403; logout invalidates; bearer still rejects Origin; CSP header present; static shell public, data routes private.
 - **Pagination/cursors:** list limits and cursors, events and evidence `after` cursors return only new rows, evidence truncation and single-entry fetch, overview counts match the store.
-- **Browser (Playwright):** against the fixture service: login via link; overview shows measured counts; task list filters; task detail for completed, failed and awaiting-approval tasks; hostile request text with `<script>` and `<img onerror>` renders as text with no script execution; disconnect and reconnect show the banner and append events without duplication; narrow viewport renders. Screenshots are written to `docs/screenshots/`.
+- **Browser (Playwright):** against the fixture service: login via link; overview shows measured counts; task list filters; task detail for completed, failed and awaiting-approval tasks; hostile request text with `<script>` and `<img onerror>` renders as text with no script execution; disconnect and reconnect show the banner and append events without duplication; narrow viewport renders. Screenshots are generated in ignored `test-results/ui-screenshots/` by default; override with `DEVAGENTS_UI_SCREENSHOT_DIR` when needed. They are not source artifacts or visual assertion baselines.
 - **Existing suites:** `npm run check`, deterministic M2/M3, protocol smoke and the Docker suite (extended to assert `/ui/` is served and the bootstrap exchange works in the container).
 
 ## Out of scope for U1

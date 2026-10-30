@@ -4,7 +4,7 @@
     "v": 1,
     "at": "2026-10-30T10:40:00Z"
   },
-  "title": "DevAgents UI directions",
+  "title": "DevAgents UI — selected design",
   "launch": {
     "view": "canvas"
   },
@@ -15,7 +15,7 @@
       "y": 0,
       "w": 1360,
       "h": 1040,
-      "title": "A \u00b7 Overview",
+      "title": "A · Overview",
       "expand": "fill"
     },
     "A-Tasks.dc.html": {
@@ -23,7 +23,7 @@
       "y": 0,
       "w": 1360,
       "h": 900,
-      "title": "A \u00b7 Tasks",
+      "title": "A · Tasks",
       "expand": "fill"
     },
     "A-Task.dc.html": {
@@ -31,7 +31,7 @@
       "y": 0,
       "w": 1360,
       "h": 1560,
-      "title": "A \u00b7 Task detail (running)",
+      "title": "A · Task detail (running)",
       "expand": "fill"
     },
     "A-Teams.dc.html": {
@@ -39,7 +39,7 @@
       "y": 0,
       "w": 1360,
       "h": 1480,
-      "title": "A \u00b7 Teams + member editor",
+      "title": "A · Teams + member editor",
       "expand": "fill"
     },
     "A-Projects.dc.html": {
@@ -47,7 +47,7 @@
       "y": 0,
       "w": 1360,
       "h": 900,
-      "title": "A \u00b7 Projects",
+      "title": "A · Projects",
       "expand": "fill"
     },
     "A-Settings.dc.html": {
@@ -55,7 +55,7 @@
       "y": 0,
       "w": 1360,
       "h": 1000,
-      "title": "A \u00b7 Settings",
+      "title": "A · Settings",
       "expand": "fill"
     },
     "A-States.dc.html": {
@@ -63,63 +63,7 @@
       "y": 0,
       "w": 1360,
       "h": 1400,
-      "title": "A \u00b7 States + narrow screen",
-      "expand": "fill"
-    },
-    "B-Overview.dc.html": {
-      "x": 0,
-      "y": 2000,
-      "w": 1360,
-      "h": 1040,
-      "title": "B \u00b7 Overview",
-      "expand": "fill"
-    },
-    "B-Tasks.dc.html": {
-      "x": 1440,
-      "y": 2000,
-      "w": 1360,
-      "h": 900,
-      "title": "B \u00b7 Tasks",
-      "expand": "fill"
-    },
-    "B-Task.dc.html": {
-      "x": 2880,
-      "y": 2000,
-      "w": 1360,
-      "h": 1560,
-      "title": "B \u00b7 Task detail (running)",
-      "expand": "fill"
-    },
-    "B-Teams.dc.html": {
-      "x": 4320,
-      "y": 2000,
-      "w": 1360,
-      "h": 1480,
-      "title": "B \u00b7 Teams + member editor",
-      "expand": "fill"
-    },
-    "B-Projects.dc.html": {
-      "x": 5760,
-      "y": 2000,
-      "w": 1360,
-      "h": 900,
-      "title": "B \u00b7 Projects",
-      "expand": "fill"
-    },
-    "B-Settings.dc.html": {
-      "x": 7200,
-      "y": 2000,
-      "w": 1360,
-      "h": 1000,
-      "title": "B \u00b7 Settings",
-      "expand": "fill"
-    },
-    "B-States.dc.html": {
-      "x": 8640,
-      "y": 2000,
-      "w": 1360,
-      "h": 1400,
-      "title": "B \u00b7 States + narrow screen",
+      "title": "A · States + narrow screen",
       "expand": "fill"
     }
   },
@@ -130,27 +74,13 @@
     "A-Teams.dc.html",
     "A-Projects.dc.html",
     "A-Settings.dc.html",
-    "A-States.dc.html",
-    "B-Overview.dc.html",
-    "B-Tasks.dc.html",
-    "B-Task.dc.html",
-    "B-Teams.dc.html",
-    "B-Projects.dc.html",
-    "B-Settings.dc.html",
-    "B-States.dc.html"
+    "A-States.dc.html"
   ],
   "notes": {
     "rowA": {
       "x": 0,
       "y": -300,
-      "text": "Direction A \u2014 Studio: navy band, light workspace, pink brand accent",
-      "kind": "title1",
-      "maxW": 10000
-    },
-    "rowB": {
-      "x": 0,
-      "y": 1700,
-      "text": "Direction B \u2014 Console: warm neutral workbench, dense tables, mono details",
+      "text": "Direction A — indigo band, light workspace, amber accent",
       "kind": "title1",
       "maxW": 10000
     },
@@ -158,13 +88,13 @@
       "x": 10080,
       "y": 0,
       "w": 420,
-      "text": "All example content mirrors the deterministic fixtures (project \u201cfixture\u201d, task \u201cThree modules\u201d, items a/b/c, built-in roles). Counts and stages are real backend fields; nothing shows percentages, estimates or model availability that the backend cannot measure. Controls that arrive in U2/U3 are drawn visibly unavailable.",
+      "text": "All example content mirrors the deterministic fixtures (project “fixture”, task “Three modules”, items a/b/c, built-in roles). Counts and stages are real backend fields; nothing shows percentages, estimates or model availability that the backend cannot measure. Controls that arrive in U2/U3 are drawn visibly unavailable.",
       "fill": "blue"
     },
     "chosen": {
       "x": 0,
       "y": -420,
-      "text": "Chosen direction: A (indigo palette, Overview restructured with B's density). B kept for reference.",
+      "text": "Selected direction: A, with a denser two-column Overview.",
       "kind": "title1",
       "maxW": 10000
     }

@@ -6,7 +6,7 @@ You are the principal engineer implementing **DevAgents**, a public open-source,
 
 Read `DEV_AGENTS_SPEC.md` in full before writing code. It captures the product's decisions, assumptions, open questions, architecture, security contract, acceptance criteria and milestones. If the spec conflicts with repository code that already exists, inspect current code, explain the discrepancy and make a safe incremental decision. Do not discard existing work.
 
-For the approved browser UI work, also read `docs/FRONTEND_BRIEF.md` and follow `docs/FRONTEND_IMPLEMENTATION_PROMPT.md`. The 2026-10-30 decision supersedes the earlier custom-UI deferral. M0–M3 are already implemented; inspect the checklist and review records rather than restarting the project. Claude owns UI design/implementation; U1–U3 are separate from M4. Post-review live reruns remain pending and require explicit authorization.
+For the approved browser UI work, also read `docs/FRONTEND_BRIEF.md` and `docs/UI_IMPLEMENTATION_PLAN.md`. The 2026-10-30 decision supersedes the earlier custom-UI deferral. M0–M3 are already implemented; inspect the checklist and decision log rather than restarting the project. Claude owns UI design/implementation; U1–U3 are separate from M4. Post-review live reruns remain pending and require explicit authorization.
 
 ## Working rules
 
@@ -38,3 +38,7 @@ A user can clone the repository, start DevAgents through Docker Compose, configu
 - Support API keys and officially permitted account-login flows; never assume subscription credentials are reusable as generic API keys.
 - Built-in named roles plus YAML/Markdown custom roles with name, description, instructions, provider/model, capabilities and permissions.
 - Local LLM execution is a follow-up phase; design extensible provider contracts now.
+
+## Browser UI implementation
+
+U1 is implemented; continue U2 team management and U3 workflows in separately reviewed increments against `docs/FRONTEND_BRIEF.md`. Use the selected boards in `design/ui/` and the current implementation plan. Preserve the CLI, existing configuration, backend policy enforcement and secure browser sessions. Resolve and snapshot team settings for future tasks; never rewrite queued/running task configuration. Use real service data, with labelled deterministic fixtures only in tests/development. Do not claim unsupported engines or actions work. Run relevant API/domain/browser tests, inspect generated screenshots, update milestones and document limitations. Frontend work does not authorize authenticated model calls or M4 execution.
