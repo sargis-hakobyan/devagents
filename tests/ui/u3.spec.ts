@@ -59,3 +59,57 @@ test('submission uses effective defaults, disables unavailable teams and shows t
   await page.screenshot({ path: join(shots, 'u3-accepted.png'), fullPage: true });
 });
 
+test('a dropped response, reload and session renewal retain one immutable submission attempt', async ({ page }) => {
+  await signIn(page); await page.goto(`${base}/ui/tasks/new`);
+  await page.getByLabel('Project', { exact: true }).selectOption('fixture');
+  const request = 'Lost browser response must not duplicate work';
+  await page.getByLabel('What should the team do?').fill(request);
+  const attempts: { key: string; payload: unknown }[] = [];
+  await page.route(`${base}/tasks`, async route => {
+    if (route.request().method() !== 'POST') return route.continue();
+    attempts.push({ key: route.request().headers()['idempotency-key']!, payload: route.request().postDataJSON() });
+    if (attempts.length === 1) { await route.fetch(); await route.abort('connectionreset'); } else await route.continue();
+  });
+  await page.getByRole('button', { name: 'Submit task', exact: true }).evaluate((b: HTMLButtonElement) => { b.click(); b.click(); });
+  await expect(page.getByRole('button', { name: 'Retry this attempt' })).toBeEnabled();
+  expect(attempts).toHaveLength(1);
+  const held = await page.evaluate(() => JSON.parse(sessionStorage.getItem('devagents.submission.v1')!));
+  expect(Object.keys(held).sort()).toEqual(['at', 'key', 'payload']);
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Retry this attempt' })).toBeEnabled();
+  await expect(page.getByLabel('What should the team do?')).toBeDisabled();
+  expect(attempts).toHaveLength(1);
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page).toHaveURL(`${base}/ui/signed-out`);
+  await signIn(page); await page.goto(`${base}/ui/tasks/new`);
+  await expect(page.getByLabel('What should the team do?')).toHaveValue(request);
+  await page.getByRole('button', { name: 'Retry this attempt' }).click();
+  await expect(page.getByText('Task accepted', { exact: true })).toBeVisible();
+  expect(attempts).toHaveLength(2); expect(attempts[1]).toEqual(attempts[0]);
+  expect(await page.evaluate(() => sessionStorage.getItem('devagents.submission.v1'))).toBeNull();
+  const tasks = (await (await call('/tasks?limit=200')).json()).tasks;
+  expect(tasks.filter((t: { request: string }) => t.request === request)).toHaveLength(1);
+  expect((await call('/tasks', 'POST', { ...(held.payload), request: 'Changed input' }, { 'idempotency-key': held.key })).status).toBe(409);
+});
+
+test('abandon is explicit and unavailable tab storage prevents sending', async ({ page }) => {
+  await signIn(page); await page.goto(`${base}/ui/tasks/new`);
+  await page.getByLabel('Project', { exact: true }).selectOption('fixture');
+  await page.getByLabel('What should the team do?').fill('Ambiguous attempt to abandon');
+  await page.route(`${base}/tasks`, route => route.request().method() === 'POST' ? route.abort() : route.continue());
+  await page.getByRole('button', { name: 'Submit task', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Retry this attempt' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Abandon attempt…', exact: true }).click();
+  await expect(page.getByText('The first task may exist in your task list.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Keep', exact: true }).click();
+  expect(await page.evaluate(() => sessionStorage.getItem('devagents.submission.v1'))).not.toBeNull();
+  await page.getByRole('button', { name: 'Abandon attempt…', exact: true }).click();
+  await page.getByRole('button', { name: 'Abandon', exact: true }).click();
+  await expect(page.getByLabel('What should the team do?')).toBeEnabled();
+  expect(await page.evaluate(() => sessionStorage.getItem('devagents.submission.v1'))).toBeNull();
+  await page.unroute(`${base}/tasks`);
+  let posts = 0; page.on('request', r => { if (r.method() === 'POST' && r.url() === `${base}/tasks`) posts++; });
+  await page.evaluate(() => { Storage.prototype.setItem = () => { throw new Error('storage denied'); }; });
+  await page.getByRole('button', { name: 'Submit task', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('No request was sent'); expect(posts).toBe(0);
+});

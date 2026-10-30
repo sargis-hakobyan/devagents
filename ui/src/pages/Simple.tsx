@@ -98,6 +98,7 @@ export function SignedOutPage() {
   return <div style={{ maxWidth: '560px', margin: '48px auto', padding: '0 16px' }}>
     <Card><div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
       <b style={{ fontSize: '20px' }}>Signed out</b>
+      <a href="/ui/tasks/new">Recover an unresolved submission after signing in</a>
       <span>Your browser session has ended. Sessions end on sign-out, after 12 hours idle, or when the service restarts.</span>
       <span>Create a new one-time link in the terminal and open it:</span>
       <Code>devagents ui</Code>
