@@ -16,5 +16,6 @@ export interface CodingEngine {
 }
 export type ValidationResult = { executable: string; args: string[]; exitCode: number; output: string; truncated?: boolean };
 export interface Validator {
+  preflight?(cwd: string, commands: { executable: string; args: string[] }[], signal: AbortSignal, devagentsRules: boolean): Promise<void>;
   execute(cwd: string, command: { executable: string; args: string[] }, signal: AbortSignal, timeoutMs: number, devagentsRules?: boolean): Promise<ValidationResult>;
 }

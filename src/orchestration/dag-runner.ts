@@ -15,7 +15,7 @@ import { changes, commitOwned, commitChanges } from '../workspace/changes.js';
 import { integrationSnapshot, integrateItem, assertIntegrationConfig } from '../workspace/integration.js';
 import { hiddenFiles, assertHiddenUnchanged } from '../workspace/hidden.js';
 import { conflictBaselines, unresolvedMarkers } from '../workspace/conflicts.js';
-import { assertValidationCommands, validationFailed, describeValidationFailure } from '../domain/validation.js';
+import { assertValidationCommands, assertValidationEnvironment, validationFailed, describeValidationFailure } from '../domain/validation.js';
 import { selectImplementer, independentReviewer } from '../domain/roles.js';
 
 type Workspace = NonNullable<Task['workspace']>;
@@ -28,6 +28,7 @@ type Hooks = {
   provider(agent: AgentDefinition): AppConfig['providers'][number];
   invoke(phase: EnginePhase, agent: AgentDefinition, prompt: string, schema: z.ZodType, signal: AbortSignal, context: Context): Promise<unknown>;
   workflows: TaskWorkflows;
+  prepareEnvironment(cwd: string, commands: Item['validation'], signal: AbortSignal, workItemId: string): Promise<void>;
   onRepair(): number;
   stopping(): boolean;
 };
@@ -65,16 +66,19 @@ export async function runDag(h: Hooks): Promise<void> {
     slots.run(agent.id, agent.concurrency, workerSignal, () => h.invoke(phase, agent, prompt, schema, workerSignal, context));
   /** With extra rules enabled, hidden (ignored) files must stay untouched. */
   const implement = async (agent: AgentDefinition, prompt: string, workerSignal: AbortSignal, context: Context) => {
+    await h.prepareEnvironment(context.cwd, context.workItemId === '@integration' ? plan.integration!.validation : plan.items.find(i => i.id === context.workItemId)!.validation, workerSignal, context.workItemId);
     const before = rules ? await hiddenFiles(context.cwd) : undefined;
     await invoke('implementation', agent, prompt, ImplementationOutput, workerSignal, context);
     h.active(); if (before) assertHiddenUnchanged(before, await hiddenFiles(context.cwd), context.workItemId === '@integration' ? 'Integration repair' : `Work item ${context.workItemId}`);
   };
   const validate = async (cwd: string, commands: Item['validation'], workerSignal: AbortSignal, itemId: string): Promise<ValidationResult[]> => {
+    await h.prepareEnvironment(cwd, commands, workerSignal, itemId);
     const evidence = [];
     for (const command of commands) {
       h.active(); if (workerSignal.aborted) throw new AppError('cancelled', 'Work item cancelled');
       const result = await h.validator.execute(cwd, command, workerSignal, service.config.validationTimeoutMs, rules);
       evidence.push(result); record('validation', { workItemId: itemId, ...result });
+      assertValidationEnvironment(result);
     }
     return evidence;
   };

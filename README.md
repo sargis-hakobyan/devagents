@@ -4,6 +4,8 @@ DevAgents uses Mastra workflows to run AI development teams on your local Git pr
 
 Work happens in isolated Git worktrees. Results are local commits; DevAgents does not automatically merge or push them.
 
+For npm and pnpm 10 projects, DevAgents checks the runtime and installs locked dependencies before coding. See [environment preparation and limits](docs/SETUP.md#project-environment-preparation).
+
 ## Get started
 
 Install and start **Docker with Compose**, clone this repository, then run from its folder:

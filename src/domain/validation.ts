@@ -27,3 +27,13 @@ export function describeValidationFailure(results: { exitCode: number; truncated
   const truncated = results.some(r => r.truncated);
   return truncated ? 'Validation failed or produced more output than the evidence limit allows (truncated below); make the checks pass and reduce their output' : 'Validation failed';
 }
+
+/** Infrastructure failures cannot be repaired by changing application code. Keep the evidence,
+ * then stop without spending a model repair attempt. Avoid classifying assertion failures this way.
+ */
+export function assertValidationEnvironment(result: { executable: string; exitCode: number; output: string }): void {
+  if (result.exitCode === 0) return;
+  if (/Failed to execvp .*No such file or directory|(?:command not found|not found: (?:pnpm|npm|yarn))|Cannot find package '[^']+' imported from|Cannot find module '[^'\n]*node_modules\//.test(result.output)) {
+    throw new AppError('environment_blocked', `Environment blocked: ${result.executable} could not run with the available tools/dependencies. No code-repair attempt was used for this failure. ${result.output.slice(-2000)}`);
+  }
+}

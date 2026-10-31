@@ -12,7 +12,7 @@ import type { TaskService } from './service.js';
 
 export const TASK_WORKFLOW_ID = 'devagents-task-v1';
 const identity = z.object({ taskId: z.string() });
-type Hooks = { prepare(id: string): Promise<void>; plan(id: string): Promise<void>; execute(id: string): Promise<void> };
+type Hooks = { prepare(id: string): Promise<void>; plan(id: string): Promise<void>; environment?(id: string): Promise<void>; execute(id: string): Promise<void> };
 const errorMessage = (error: unknown): string => error && typeof error === 'object' && 'message' in error && typeof error.message === 'string' ? error.message : String(error);
 
 /** Mastra owns control flow and durable waits; domain storage owns approvals and Git evidence.
@@ -60,6 +60,7 @@ export class TaskWorkflows {
       .then(operation('prepare-worktree', hooks.prepare))
       .then(operation('plan', hooks.plan))
       .then(gate('approval'))
+      .then(operation('prepare-environment', hooks.environment ?? (async () => {})))
       .then(operation('execute-plan', hooks.execute)).commit();
     // Disable framework logging: task events use the application's redacted evidence channel.
     new Mastra({ workflows: { task: this.workflow }, storage: this.storage, logger: false });

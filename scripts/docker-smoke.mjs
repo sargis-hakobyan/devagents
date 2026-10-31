@@ -107,7 +107,7 @@ try {
   assert.equal(inspect.HostConfig.ReadonlyRootfs, true);
   assert.equal(inspect.Mounts.some(m => m.Destination === '/var/run/docker.sock'), false);
   await exec('docker', ['run', '--rm', '--read-only', '--tmpfs', '/tmp:size=128m,mode=1777', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--mount', `type=bind,source=${resolve('scripts/sandbox-spike.mjs')},target=/tmp/sandbox-spike.mjs,readonly`, 'devagents:local', 'node', '/tmp/sandbox-spike.mjs'], { timeout: 30000 });
-  for (const script of ['auth-smoke.mjs', 'm2-smoke.mjs', 'm3-smoke.mjs', 'codex-protocol-smoke.mjs']) {
+  for (const script of ['auth-smoke.mjs', 'environment-smoke.mjs', 'm2-smoke.mjs', 'm3-smoke.mjs', 'codex-protocol-smoke.mjs']) {
     const command = script === 'codex-protocol-smoke.mjs'
       ? ['node', '--input-type=module', '-e', `import {spawn} from 'node:child_process'; await Promise.all([0,1].map(() => new Promise((resolve,reject) => { const child=spawn(process.execPath,['/app/scripts/${script}'],{stdio:'inherit'}); child.once('error',reject); child.once('exit',(code,signal)=>code===0?resolve():reject(new Error('Parallel runtime fixture failed: '+(signal??code)))); })));`]
       : ['node', `/app/scripts/${script}`];

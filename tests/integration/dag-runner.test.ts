@@ -32,9 +32,11 @@ async function dagFixture(options: Options = {}) {
   let active = 0; let maxActive = 0; let reviewActive = 0; let maxReviewActive = 0; let aborted = 0; let combinedReviews = 0;
   let release!: () => void; const twoRunning = new Promise<void>(r => { release = r; });
   const calls: EngineRequest[] = [];
+  const preparedCwds = new Set<string>();
   const engine: CodingEngine = {
     id: 'codex', async preflight() {},
     async execute(r): Promise<EngineResult> {
+      if (options.synchronizeWorkers && r.phase === 'implementation') assert.ok(preparedCwds.has(r.cwd), 'every worker must prepare before implementation');
       calls.push(r);
       if (r.phase === 'planning') {
         const branch = await git(r.cwd, ['branch', '--show-current']);
@@ -89,8 +91,8 @@ async function dagFixture(options: Options = {}) {
       } finally { active--; }
     },
   };
-  const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
-  return { ...f, runner, calls, originalHead, twoRunning, metrics: () => ({ active, maxActive, maxReviewActive, aborted, combinedReviews }), options };
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator(), options.synchronizeWorkers ? { async prepare({ cwd }) { preparedCwds.add(cwd); } } : undefined); f.service.attachRunner(runner);
+  return { ...f, runner, calls, preparedCwds, originalHead, twoRunning, metrics: () => ({ active, maxActive, maxReviewActive, aborted, combinedReviews }), options };
 }
 
 test('DAG runs parallel config-only specialists, integrates dependencies, reviews combined changes, and preserves dirty checkout', async () => {
@@ -102,6 +104,7 @@ test('DAG runs parallel config-only specialists, integrates dependencies, review
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     assert.equal(f.metrics().maxActive, 2); assert.equal(f.metrics().maxReviewActive, 1);
     assert.equal(new Set(f.calls.filter(c => c.phase === 'implementation').map(c => c.cwd)).size, 3);
+    assert.equal(f.preparedCwds.size, 4, 'three workers plus the final integration worktree');
     for (const call of f.calls.filter(c => c.phase === 'implementation')) assert.deepEqual(call.agent.permissions.writePaths, [`project:/${call.workItemId}/**`], call.workItemId);
     assert.equal(await readFile(join(f.project, 'README.md'), 'utf8'), 'Uncommitted user work');
     assert.equal(await git(f.project, ['rev-parse', 'HEAD']), f.originalHead);

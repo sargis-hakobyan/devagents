@@ -9,6 +9,7 @@ import { runtimeHome, safeEnvironment, sandboxFlags, verifyCodex } from './sandb
 import { environmentSecrets, redact, redactValues } from '../../telemetry/redact.js';
 import { configuredVault, credentialStore } from '../../security/credential-vault.js';
 import { executionAgent } from '../../domain/execution-policy.js';
+import { nodeToolPath } from '../node-tools.js';
 
 const disabled = ['apps', 'browser_use', 'browser_use_external', 'computer_use', 'code_mode', 'hooks', 'image_generation', 'multi_agent', 'multi_agent_v2', 'plugins', 'remote_plugin', 'memories', 'skill_search', 'skill_mcp_dependency_install', 'shell_snapshot', 'view_image', 'workspace_dependencies', 'goals', 'tool_suggest'];
 export class CodexAdapter implements CodingEngine {
@@ -33,6 +34,7 @@ export class CodexAdapter implements CodingEngine {
     const home = runtimeHome(this.dataDir);
     const directory = join(this.dataDir, 'runs', request.runId);
     const temp = join(directory, 'tmp'); await mkdir(temp, { recursive: true, mode: 0o700 });
+    const toolPath = await nodeToolPath(temp);
     const schema = join(directory, 'output.schema.json');
     await writeFile(schema, JSON.stringify(request.schema), { mode: 0o600 });
     const rules = request.devagentsRules ?? true;
@@ -45,7 +47,7 @@ export class CodexAdapter implements CodingEngine {
       '-c', 'agents.enabled=false', '-c', 'agents.max_depth=0',
       '-c', 'web_search="disabled"', '-c', 'project_doc_max_bytes=0',
       '-c', 'shell_environment_policy.inherit="none"',
-      '-c', `shell_environment_policy.set={PATH=${JSON.stringify(process.env.PATH ?? '')},HOME=${JSON.stringify(temp)},TMPDIR=${JSON.stringify(temp)},OPENSSL_CONF="/dev/null"}`,
+      '-c', `shell_environment_policy.set={PATH=${JSON.stringify(toolPath)},HOME=${JSON.stringify(temp)},TMPDIR=${JSON.stringify(temp)},OPENSSL_CONF="/dev/null",npm_config_update_notifier="false",npm_config_script_shell="/bin/sh"}`,
       '-c', 'allow_login_shell=false', '-c', 'features.skip_host_skill_discovery=true',
       ...disabled.flatMap(flag => ['-c', `features.${flag}=false`]),
       '-c', `features.shell_tool=${permissions.allowCommands}`,

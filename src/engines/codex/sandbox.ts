@@ -6,6 +6,7 @@ import { assertSupportedWriteGrant } from '../../domain/ownership.js';
 import { deniedSegments, protectedPath } from '../../domain/protected-paths.js';
 import { runProcess } from '../process.js';
 import { credentialRuntime } from '../../security/credential-vault.js';
+import { pnpmRoot } from '../node-tools.js';
 
 export const CODEX_VERSION = '0.160.1';
 export { deniedSegments, protectedPath };
@@ -16,12 +17,12 @@ export function toml(value: unknown): string {
 }
 const flags = (config: Record<string, unknown>) => Object.entries(config).flatMap(([key, value]) => ['-c', `${key}=${toml(value)}`]);
 export const DEFAULT_SCAN_LIMIT = 200000;
-export async function sandboxFlags(cwd: string, permissions: AgentDefinition['permissions'], temp: string, scanLimit = DEFAULT_SCAN_LIMIT, devagentsRules = true): Promise<string[]> {
+export async function sandboxFlags(cwd: string, permissions: AgentDefinition['permissions'], temp: string, scanLimit = DEFAULT_SCAN_LIMIT, devagentsRules = true, preparationNetwork = false): Promise<string[]> {
   const root = await realpath(cwd);
   const filesystem: Record<string, string> = { ':minimal': 'read' };
   const config: Record<string, unknown> = {
     default_permissions: 'devagents',
-    permissions: { devagents: { filesystem, network: { enabled: false } } },
+    permissions: { devagents: { filesystem, network: { enabled: preparationNetwork } } },
     approval_policy: 'never',
     projects: { [root]: { trust_level: 'untrusted' } },
   };
@@ -72,12 +73,13 @@ export async function sandboxFlags(cwd: string, permissions: AgentDefinition['pe
   if (credentials) filesystem[await realpath(credentials)] = 'deny';
   // Node may live under nvm on native installations, outside :minimal.
   filesystem[dirname(await realpath(process.execPath))] = 'read';
+  filesystem[await realpath(pnpmRoot)] = 'read';
   const npmRuntime = join(dirname(dirname(await realpath(process.execPath))), 'lib', 'node_modules', 'npm');
   if (await lstat(npmRuntime).then(() => true, () => false)) filesystem[npmRuntime] = 'read';
   return flags(config);
 }
 export function safeEnvironment(home: string, temp: string): NodeJS.ProcessEnv {
-  return { PATH: process.env.PATH, HOME: temp, CODEX_HOME: home, TMPDIR: temp, LANG: 'C.UTF-8', OPENSSL_CONF: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0' };
+  return { PATH: process.env.PATH, HOME: temp, CODEX_HOME: home, TMPDIR: temp, LANG: 'C.UTF-8', OPENSSL_CONF: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', npm_config_update_notifier: 'false', npm_config_script_shell: '/bin/sh' };
 }
 export async function verifyCodex(binary: string, home: string): Promise<void> {
   await mkdir(home, { recursive: true, mode: 0o700 });

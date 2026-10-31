@@ -36,7 +36,7 @@ test('Mastra persists mode and plan approval across runtime recreation without r
     assert.equal(f.store.task(task.id).state, 'completed');
     const state = await runner.workflows.state(task.id);
     assert.equal(state?.status, 'success');
-    assert.deepEqual(Object.keys(state!.steps!).filter(k => !k.startsWith('input')), ['mode', 'prepare-worktree', 'plan', 'approval', 'execute-plan']);
+    assert.deepEqual(Object.keys(state!.steps!).filter(k => !k.startsWith('input')), ['mode', 'prepare-worktree', 'plan', 'approval', 'prepare-environment', 'execute-plan']);
     assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'review']);
     assert.equal(f.store.evidence(task.id).filter(e => e.kind === 'commit-created').length, 1);
     assert.equal(JSON.stringify(state).includes('Durable greeting'), false, 'request text must not be duplicated into workflow snapshots');

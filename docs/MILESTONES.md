@@ -217,4 +217,17 @@ Verification: `npm run check` passed 148 tests, backend/UI typechecks and produc
 - [x] Verification: `npm run check` (154 tests, backend/UI typechecks and build), final targeted plan/policy/adapter/readiness regressions, 35 browser workflows, native deterministic M2/M3, native loopback Codex protocol and the full Docker suite. The Docker protocol runs two workers concurrently and exercises both policy modes. Screenshots inspected in ignored `test-results/ui-screenshots/execution-policy-{settings,task}.png`.
 - [ ] Authenticated acceptance of the new policy mode was not run; no real credentials or user project were inspected. Claude and other engine adapters remain deferred to M4.
 
-Limits: this is an optional extra-policy layer over the existing engine sandbox, not a copy of a desktop engine session. Worktree/credential and read-only planning/review boundaries, no command network or automatic external effects, structural validation, independent review and resource limits remain. Required tools/dependencies are not installed automatically. With extra rules off, ignored/generated files can influence validation without appearing in the commit; planned item scopes no longer constrain writes inside each isolated worktree.
+Limits: this is an optional extra-policy layer over the existing engine sandbox, not a copy of a desktop engine session. Worktree/credential and read-only planning/review boundaries, no command network or automatic external effects, structural validation, independent review and resource limits remain. Locked npm/pnpm dependencies are now installed by the separate environment preparation step described below; other tools need a compatible runtime. With extra rules off, ignored/generated files can influence validation without appearing in the commit; planned item scopes no longer constrain writes inside each isolated worktree.
+
+## Project environment preparation — 2026-10-31
+
+- [x] Mastra preparation gate after plan approval, plus per-worker and combined-worktree checks before implementation and validation.
+- [x] First environment adapter: root Node projects and npm/pnpm 10 workspaces, runtime checks, frozen lockfiles, metadata fingerprints and re-preparation after dependency changes.
+- [x] Docker Node 24.22.1, bundled pnpm 10.34.9, and validation-executable preflight. Missing tools/packages stop as environment failures without code-repair attempts.
+- [x] Credential-free, metadata-only dependency download sandbox; no lifecycle scripts, repository hooks, original-checkout dependencies or shared mutable node_modules. Copy-based package imports and checked internal links.
+- [x] Preserve async command output and nonzero status under the offline Linux sandbox with the newer Node runtime.
+- [x] Regression coverage: approval ordering, cancellation, no-repair environment failures, input changes, dependency-free projects, hostile links, runtime/lockfile failures, workspace metadata, real npm/pnpm downloads and workspace links against a loopback registry, preserved command output/status and blocked validation networking.
+
+Limits: private registry credentials, lifecycle builds, arbitrary Node/package-manager downloads, other provisioning adapters, dependency services and general failed-task resume remain separate work. A prepared environment enables real validation; it does not attest the correctness of the generated change or guarantee all project checks pass. M4 was not started.
+
+Verification: 168 tests plus typechecks/build, 35 browser workflows, native preparation/M2/M3, the full Docker suite, and a final Docker preparation/M2/M3 pass after the dependency-free cache correction. No authenticated model calls or pushes.
