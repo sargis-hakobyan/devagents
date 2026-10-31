@@ -1,6 +1,6 @@
 # DevAgents
 
-DevAgents runs AI development teams on your local Git projects. Agents plan changes, write code, run tests and independently review the result. Follow progress and approve work in your browser.
+DevAgents uses Mastra workflows to run AI development teams on your local Git projects. Agents plan changes, write code, run tests and independently review the result. Follow progress and approve work in your browser.
 
 Work happens in isolated Git worktrees. Results are local commits; DevAgents does not automatically merge or push them.
 

@@ -53,6 +53,15 @@
 - [x] Pre-M4 review fixes: value-only redaction for model prompts and task data; plan-time executability checks shared with execution; hidden-file integrity around implementation; shutdown recorded as failed with reason; bounded, collapsing sandbox scan; content-based conflict resolution; explicit worktree cleanup; malformed-rejection, output-truncation, protected-path, sealing, worktree-creation, list-summary and data-directory hardening.
 - [x] Scoped shell/patch containment and two concurrent runtime fixtures under Compose CPU/memory/PID limits; Linux exact-file writes fail before inference.
 
+## Production Mastra orchestration — 2026-10-31
+
+- [x] Pinned Mastra core/LibSQL promoted from spike-only development dependencies to production dependencies.
+- [x] Versioned task workflow with worktree/planning/execution steps and persisted mode/plan-approval gates.
+- [x] Mastra repair loops and bounded parallel worker waves retain domain ownership, concurrency, review and integration policy.
+- [x] Reference-only snapshots, redacted framework errors, no automatic side-effect retries/replay, child cancellation/drain and legacy approval compatibility.
+- [x] Regression coverage for runtime recreation, stale/racing approvals, duplicate scheduling, cancellation, storage failure, secret redaction and abrupt process death.
+- [x] Verification: `npm run check` (161 tests, backend/UI typechecks and build), `npm run test:ui` (35 workflows; accepted-task and completed-diff screenshots inspected), native deterministic M2/M3, and `npm run test:docker` all pass. Docker verifies production Mastra dependencies, persisted mode waits across restart, deterministic M2/M3, containment and two concurrent real-runtime protocol fixtures. No authenticated model fixtures were run.
+
 ## Post-review acceptance gate
 
 - [x] Authenticated M2 and M3 reruns passed on 2026-10-30 after the owner's authorization, against `main` at `db95711cb012a7824c5fdfed7a226a4cb5592b7f`. Rebuilt with `./devagents start --auth saved`; reused the saved ChatGPT account. Environment: Docker Linux ARM64, Node v24.18.0, Codex CLI 0.160.1.

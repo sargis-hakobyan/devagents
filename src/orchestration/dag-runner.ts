@@ -8,6 +8,7 @@ import { PolicyEngine } from '../domain/policy.js';
 import { scopeAgent } from '../domain/ownership.js';
 import type { TaskService } from './service.js';
 import { ImplementationOutput, ReviewOutput } from './outputs.js';
+import type { TaskWorkflows } from './workflows.js';
 import { readyWave, AgentSlots } from './dag-scheduler.js';
 import { WorkspaceManager, git } from '../workspace/git.js';
 import { changes, commitOwned, commitChanges } from '../workspace/changes.js';
@@ -26,6 +27,7 @@ type Hooks = {
   move(state: Task['state'], reason: string, patch?: Partial<Pick<Task, 'outcome'>>): Task;
   provider(agent: AgentDefinition): AppConfig['providers'][number];
   invoke(phase: EnginePhase, agent: AgentDefinition, prompt: string, schema: z.ZodType, signal: AbortSignal, context: Context): Promise<unknown>;
+  workflows: TaskWorkflows;
   onRepair(): number;
   stopping(): boolean;
 };
@@ -100,38 +102,43 @@ export async function runDag(h: Hooks): Promise<void> {
     try {
       check(); state(item.id, 'creating', { baseSha });
       record('worktree-intent', { owner: task.id, workItemId: item.id, branch: item.branch, baseSha });
-      worker = await new WorkspaceManager(service.dataDir).createItem(project, task.id, item.id, baseSha);
+      const ownedWorker = await new WorkspaceManager(service.dataDir).createItem(project, task.id, item.id, baseSha);
+      worker = ownedWorker;
       state(item.id, 'running', { workspace: worker });
       let feedback = '';
-      for (;;) {
+      let completed!: { item: Item; workspace: Workspace; commit: string };
+      await h.workflows.repeat(task.id, `item:${item.id}`, async () => {
         check();
-        await implement(developer, `Implement only this work item. Dependency results are already present in this worktree. Do not commit or modify Git metadata.${rules ? ' Do not modify ignored files.' : ' Generated files are permitted; keep source changes visible to review.'}\nRequest: ${task.request}\nUser acceptance criteria: ${JSON.stringify(task.acceptanceCriteria)}\nWork item: ${JSON.stringify(item)}\n${feedback}`, workerSignal, { cwd: worker.path, workItemId: item.id });
-        const before = await changes(worker, developer);
+        await implement(developer, `Implement only this work item. Dependency results are already present in this worktree. Do not commit or modify Git metadata.${rules ? ' Do not modify ignored files.' : ' Generated files are permitted; keep source changes visible to review.'}\nRequest: ${task.request}\nUser acceptance criteria: ${JSON.stringify(task.acceptanceCriteria)}\nWork item: ${JSON.stringify(item)}\n${feedback}`, workerSignal, { cwd: ownedWorker.path, workItemId: item.id });
+        const before = await changes(ownedWorker, developer);
         if (!before.files.length) throw new AppError('no_changes', `Work item ${item.id} produced no changes`);
         check(); state(item.id, 'validating');
-        const evidence = await validate(worker.path, item.validation, workerSignal, item.id);
-        const after = await changes(worker, developer);
+        const evidence = await validate(ownedWorker.path, item.validation, workerSignal, item.id);
+        const after = await changes(ownedWorker, developer);
         if (before.digest !== after.digest) throw new AppError('validation_mutated_files', 'Validation changed work item files');
         if (validationFailed(evidence)) feedback = `${describeValidationFailure(evidence)}. Repair failed validation:\n${JSON.stringify(evidence).slice(0, 50000)}`;
         else {
           check(); state(item.id, 'reviewing');
-          const assessment = await review(after, evidence, worker.path, item.id, item, workerSignal);
+          const assessment = await review(after, evidence, ownedWorker.path, item.id, item, workerSignal);
           if (assessment.approved && !assessment.findings.length) {
-            check(); const checked = await changes(worker, developer);
+            check(); const checked = await changes(ownedWorker, developer);
             if (checked.digest !== after.digest) throw new AppError('review_mutated_files', 'Files changed during work item review');
             state(item.id, 'checkpointing', { files: checked.files });
             record('item-commit-intent', { workItemId: item.id, workspace: worker, digest: checked.digest });
-            const commit = await commitOwned(worker, checked.files, `DevAgents work item ${item.id} (combined review pending)`);
+            const commit = await commitOwned(ownedWorker, checked.files, `DevAgents work item ${item.id} (combined review pending)`);
             record('item-commit-created', { workItemId: item.id, commit });
             check(); state(item.id, 'reviewed', { commit, repairCycles: localRepairs });
-            return { item, workspace: worker, commit };
+            completed = { item, workspace: ownedWorker, commit };
+            return true;
           }
           feedback = `Repair independent review findings:\n${JSON.stringify(assessment)}`;
         }
         check();
         if (localRepairs >= service.config.maxRepairCycles) throw new AppError('repair_limit', `Work item ${item.id} exhausted its repair budget. ${feedback.slice(0, 2000)}`);
         localRepairs++; repair(); state(item.id, 'repairing', { repairCycles: localRepairs });
-      }
+        return false;
+      });
+      return completed;
     } catch (error) {
       // Distinguish why a worker stopped: its own failure, a user cancellation, a service shutdown,
       // or a sibling's failure draining the wave.
@@ -142,7 +149,7 @@ export async function runDag(h: Hooks): Promise<void> {
   };
   const done = new Set<string>(); const started = new Set<string>(); let integrationRepairs = 0;
   try {
-    while (done.size < plan.items.length) {
+    await h.workflows.repeat(task.id, 'dependency-waves', async () => {
       h.active();
       const nodes = readyWave(plan.items.map(item => ({ ...item, agentId: developers.get(item.id)!.id, agentConcurrency: developers.get(item.id)!.concurrency })), done, service.config.concurrency);
       const baseSha = await integrationSnapshot(workspace, integrator);
@@ -150,16 +157,15 @@ export async function runDag(h: Hooks): Promise<void> {
       const abort = new AbortController(); const cancel = () => abort.abort(); signal.addEventListener('abort', cancel, { once: true });
       if (signal.aborted) abort.abort();
       let failure: unknown;
-      const results = await Promise.allSettled(nodes.map(node => {
+      const results = await h.workflows.parallel(task.id, nodes.length, async index => {
+        const node = nodes[index]!;
         started.add(node.id);
-        return executeItem(plan.items.find(i => i.id === node.id)!, baseSha, abort.signal).catch(error => { failure ??= error; abort.abort(); throw error; });
-      }));
-      signal.removeEventListener('abort', cancel);
-      if (failure) throw failure;
+        return executeItem(plan.items.find(i => i.id === node.id)!, baseSha, abort.signal).catch(error => {
+          failure ??= error; abort.abort(); throw failure;
+        });
+      }).finally(() => signal.removeEventListener('abort', cancel));
       h.active();
-      for (const result of results) {
-        if (result.status !== 'fulfilled') throw result.reason;
-        const completed = result.value;
+      for (const completed of results) {
         state(completed.item.id, 'integrating');
         record('integration-intent', { workItemId: completed.item.id, commit: completed.commit });
         const conflicts = await integrateItem(workspace, completed.workspace, completed.commit, integrator);
@@ -169,7 +175,7 @@ export async function runDag(h: Hooks): Promise<void> {
           // bare "=======" is only a leftover divider when neither side had that many underlines.
           const baselines = await conflictBaselines(workspace.path, conflicts);
           let resolved = false;
-          while (!resolved) {
+          await h.workflows.repeat(task.id, `conflict:${completed.item.id}`, async () => {
             h.active();
             if (integrationRepairs >= service.config.maxRepairCycles) throw new AppError('integration_conflict', 'Integration conflict exhausted the repair budget; inspect preserved worktrees and evidence.');
             integrationRepairs++; repair();
@@ -191,14 +197,16 @@ export async function runDag(h: Hooks): Promise<void> {
               if (unmerged.length) throw new AppError('integration_conflict', `Unmerged entries remain after repair: ${unmerged.join(', ')}`);
               record('integration-resolved', { workItemId: completed.item.id, files: conflicts, repairCycles: integrationRepairs });
             }
-          }
+            return resolved;
+          });
         }
         await changes(workspace, integrator);
         done.add(completed.item.id); state(completed.item.id, 'completed', { commit: completed.commit });
       }
-    }
+      return done.size === plan.items.length;
+    });
     const commands = [...new Map([...plan.items.flatMap(i => i.validation), ...plan.integration.validation].map(c => [JSON.stringify(c), c])).values()];
-    for (;;) {
+    await h.workflows.repeat(task.id, 'combined-validation-review', async () => {
       h.active(); h.move('validating', 'Validating combined work-item results');
       const before = await changes(workspace, integrator);
       if (!before.files.length) throw new AppError('no_changes', 'Combined task has no changes');
@@ -218,7 +226,7 @@ export async function runDag(h: Hooks): Promise<void> {
           const commit = await commitChanges(project, workspace, checked.files);
           record('commit-created', { commit, branch: workspace.branch });
           h.move('completed', 'DAG execution, combined validation and review passed; local commit created', { outcome: { commit, files: checked.files, summary: plan.summary, repairCycles } });
-          return;
+          return true;
         }
         feedback = `Combined review requested repairs:\n${JSON.stringify(assessment)}`;
       }
@@ -227,7 +235,8 @@ export async function runDag(h: Hooks): Promise<void> {
       integrationRepairs++; repair(); h.move('repairing', 'Bounded integration repair requested', { outcome: { repairCycles } });
       h.move('running', 'Integration agent repairing combined result');
       await implement(integrator, `Repair the combined result within the plan's owned paths. Do not commit or modify Git metadata.${rules ? ' Do not modify ignored files.' : ' Generated files are permitted; keep source changes visible to review.'}\nRequest: ${task.request}\nPlan: ${JSON.stringify(plan)}\n${feedback}`, signal, { cwd: workspace.path, workItemId: '@integration' });
-    }
+      return false;
+    });
   } catch (error) {
     for (const item of plan.items) if (!done.has(item.id) && !started.has(item.id)) state(item.id, signal.aborted && !h.stopping() ? 'cancelled' : 'blocked', { reason: h.stopping() ? 'Service shutdown stopped the task before this item started' : 'Task stopped before dependencies completed' });
     throw error;

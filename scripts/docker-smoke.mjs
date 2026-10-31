@@ -23,6 +23,25 @@ async function docker(args) {
   return result.stdout.trim();
 }
 const cli = async (...args) => JSON.parse(await docker(['exec', '-T', 'devagents', 'node', 'dist/cli/main.js', ...args]));
+const assertWorkflowWait = async taskId => {
+  const code = `
+    import assert from 'node:assert/strict';
+    import { LibSQLStore } from '@mastra/libsql';
+    const storage = new LibSQLStore({ id: 'fixture-inspection', url: 'file:/data/workflows.db' });
+    try {
+      const workflows = await storage.getStore('workflows');
+      let snapshot;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        snapshot = await workflows.loadWorkflowSnapshot({ workflowName: 'devagents-task-v1', runId: process.argv[1] });
+        if (snapshot?.status === 'suspended') break;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      assert.equal(snapshot?.status, 'suspended');
+      assert.deepEqual(snapshot.context.input, { taskId: process.argv[1] });
+    } finally { await storage.close(); }
+  `;
+  await docker(['exec', '-T', 'devagents', 'node', '--input-type=module', '-e', code, taskId]);
+};
 try {
   await exec('git', ['init', '-q', '-b', 'main', fixture]);
   await writeFile(join(fixture, 'README.md'), '# Docker fixture\n');
@@ -54,6 +73,7 @@ try {
   const task = await cli('tasks', 'submit', 'fixture', 'Persist across restart', '--key', 'docker-smoke');
   assert.equal(task.state, 'awaiting_mode');
   assert.equal(task.devagentsRules, false, 'Docker defaults to engine policy');
+  await assertWorkflowWait(task.id);
   console.log(await docker(['exec', '-T', 'devagents', 'node', 'scripts/vault-smoke.mjs', 'create']));
   const session = await (await fetch(`http://127.0.0.1:${port}/ui/session`, { headers: { cookie } })).json();
   const authHeaders = { cookie, origin: `http://127.0.0.1:${port}`, 'x-csrf-token': session.csrfToken, 'content-type': 'application/json' };
@@ -76,6 +96,8 @@ try {
   const restored = await cli('tasks', 'show', task.id);
   assert.equal(restored.state, 'awaiting_mode');
   assert.equal(restored.devagentsRules, false, 'policy snapshot persists across restart');
+  await assertWorkflowWait(task.id);
+  console.log('PASS: production Mastra dependencies and mode-wait snapshots survive container restart.');
   assert.equal((await cli('tasks', 'events', task.id)).length, 1);
   const retried = await cli('tasks', 'submit', 'fixture', 'Persist across restart', '--key', 'docker-smoke');
   assert.equal(retried.id, task.id);

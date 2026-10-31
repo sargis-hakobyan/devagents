@@ -3,9 +3,9 @@ import type { TaskState } from './schemas.js';
 
 const transitions: Record<TaskState, readonly TaskState[]> = {
   draft: ['awaiting_mode', 'planning', 'cancelled'],
-  awaiting_mode: ['planning', 'cancelled'],
+  awaiting_mode: ['planning', 'failed', 'cancelled'],
   planning: ['awaiting_plan_approval', 'ready', 'failed', 'cancelled'],
-  awaiting_plan_approval: ['ready', 'cancelled'],
+  awaiting_plan_approval: ['ready', 'failed', 'cancelled'],
   ready: ['running', 'failed', 'cancelled'],
   running: ['validating', 'failed', 'cancelled'],
   validating: ['reviewing', 'repairing', 'failed', 'cancelled'],

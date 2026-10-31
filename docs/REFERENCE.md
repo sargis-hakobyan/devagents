@@ -263,7 +263,7 @@ Keep contributions focused, add meaningful tests for behavioral/security boundar
 - Invalid agent: check capabilities, duplicate IDs and relative instruction-file paths.
 - Task remains `planning` or `ready` after restart: inspect events/evidence, then explicitly queue it with `tasks run TASK_ID`. Interrupted tasks with worktree intent are marked failed; preserved approval waits require approval as usual.
 - Leftover worktrees or branches: run `tasks cleanup TASK_ID` for each finished task; use `git worktree list` in the project to see what remains.
-- Interrupted work: a service shutdown (`SIGTERM`, `docker compose stop/restart`) marks the running task `failed` with the reason "Service shutdown interrupted execution"; a crash leaves it in its execution state and the next start marks it failed during recovery. Only an explicit `tasks cancel` produces `cancelled`. Automatic resumption is not implemented.
+- Interrupted work: a service shutdown (`SIGTERM`, `docker compose stop/restart`) marks the running task `failed` with the reason "Service shutdown interrupted execution"; a crash leaves it in its execution state and the next start marks it failed during recovery. Only an explicit `tasks cancel` produces `cancelled`. Mastra persists mode and plan-approval waits and resumes them after the corresponding domain decision. Automatic replay of interrupted execution is not implemented.
 
 For a **live container fixture**, after starting and unlocking the service:
 
@@ -275,3 +275,16 @@ docker compose exec -T devagents node scripts/m3-smoke.mjs --live
 It creates and removes only a temporary fixture repository and uses the running container’s unlocked credential profile. It does not register or modify your projects.
 
 The live M3 container fixture passed with ChatGPT sign-in on 2026-10-29 and again on 2026-10-30 at `db95711`: three items, two parallel workers, dependency integration, actual tests, independent item/combined reviews and a final local commit. The original checkout stayed unchanged. Earlier failures led to fixes for the planner schema, Linux write-scope compatibility, container process capacity and review-stage context; see [compatibility findings](M0_FINDINGS.md). Native authenticated and AMD64 execution remain unverified.
+
+
+## Mastra workflow runtime
+
+Mastra is a production dependency. `devagents-task-v1` runs mode selection, worktree preparation, planning, plan approval and execution. Mastra `dountil` controls implementation/review repair cycles and `foreach` dispatches bounded worker waves. Domain policy still selects dependency-ready workers, enforces per-role limits, validates plans, protects worktrees and requires independent review.
+
+The existing `devagents.db` remains authoritative for tasks, version-checked approvals, frozen teams and evidence. Mastra stores workflow snapshots in `workflows.db` in the same private data directory/volume. Back up the entire data directory with the service stopped. A task's Mastra run ID is its task ID; `workflow-child` evidence links worker-wave and repair-cycle runs. Snapshot inputs and outputs contain only task references and iteration metadata; failures include bounded, redacted error excerpts. Prompts, diffs, full command output and provider settings are not copied into workflow payloads. No Mastra server or Studio endpoint is exposed.
+
+Approval and workflow persistence are separate transactions: the existing API first validates the displayed task version and records approval, then queues the Mastra resume. The workflow checks durable task state again; resume payloads cannot authorize execution. Duplicate enqueue requests do not start another run. An approval received while suspension is being persisted is retained in the queue. Old tasks with no workflow snapshot can enter the workflow at their existing mode/approval boundary without replanning an approved plan.
+
+Mode and plan-approval waits survive restarts. In-flight commands, worker creation and commits are never automatically replayed: normal recovery marks interrupted tasks failed, preserves worktrees and reconciles unfinished workflow snapshots. Mastra automatic step retries and active-run restart are disabled. `planning`/`ready` tasks still require an explicit `tasks run TASK_ID` after restart; a framework snapshot showing uncertain prior execution fails closed. Cancellation drains subprocesses and sibling workers before releasing the task slot. General failed-task resume remains a separate feature.
+
+Mastra coordinates existing coding-engine adapters; it does not replace Codex with direct model API calls or change account-login/model-pinning behavior. Project dependency installation and the Claude adapter remain separate work.

@@ -1,6 +1,6 @@
 # DevAgents — Product and Engineering Specification
 
-Status: implementation in progress, v0.1 (decisions updated 2026-10-30)
+Status: implementation in progress, v0.1 (decisions updated 2026-10-31)
 
 > DevAgents is a local-first, open-source, configurable AI software development team. It dynamically plans and delegates user requests to specialized agents, executes work with replaceable coding engines, validates results, and prepares reviewable Git changes.
 
@@ -19,10 +19,10 @@ Status: implementation in progress, v0.1 (decisions updated 2026-10-30)
 - Local persistence and recovery of tasks, plans, decisions, status and execution history.
 - Project-scoped filesystem permissions, secret redaction and safe Git practices.
 
-### Proposed, subject to validation during implementation
+### Implementation choices
 
 - Final project name: **DevAgents**; repository name `devagents`.
-- TypeScript/Node.js application; **Mastra** as an initial candidate for agent/workflow orchestration. Keep domain logic framework-independent so replacing it with LangGraph or another orchestrator remains feasible.
+- TypeScript/Node.js application; **Mastra** is the production workflow runtime (owner decision, 2026-10-31). Keep domain logic and coding-engine contracts framework-independent.
 - SQLite for single-user persistence; optional PostgreSQL later.
 - Initial implementation uses CLI/API. A local browser dashboard is now approved in U1–U3: visibility, saved teams/member editing, then browser task workflows and guided setup. See `docs/FRONTEND_BRIEF.md`; Claude will design and implement it. The CLI remains supported. Mastra Studio is not a prerequisite for this UI.
 - Git worktrees for task isolation; development on macOS/Linux initially and Docker multi-arch (`linux/amd64`, `linux/arm64`).
@@ -77,9 +77,11 @@ CLI / API / future UI
         |
 Task service + durable state (framework-independent domain)
         |
-Dynamic Tech Lead (Mastra adapter) --- Agent Registry / Policy Engine
+Dynamic Tech Lead (planning workflow step) --- Agent Registry / Policy Engine
         |
-Planner / Scheduler (task DAG, concurrency, ownership, retries)
+Mastra workflows (durable gates, bounded loops and parallel workers)
+        |
+Domain DAG policy (dependencies, role limits, ownership, repair budgets)
         |
 CodingEngine interface ------ CodexAdapter / ClaudeCodeAdapter
         |
