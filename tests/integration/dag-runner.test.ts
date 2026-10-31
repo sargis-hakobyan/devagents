@@ -9,7 +9,7 @@ import { TaskRunner } from '../../src/orchestration/runner.js';
 import { git } from '../../src/workspace/git.js';
 import type { CodingEngine, EngineRequest, EngineResult } from '../../src/domain/engine.js';
 
-type Options = { devagentsRules?: boolean; projectCommands?: boolean; hidden?: boolean; markdown?: boolean; unresolved?: 'markers' | 'separator'; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
+type Options = { synchronizeWorkers?: boolean; devagentsRules?: boolean; projectCommands?: boolean; hidden?: boolean; markdown?: boolean; unresolved?: 'markers' | 'separator'; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
 async function dagFixture(options: Options = {}) {
   const f = await fixture(options.devagentsRules ?? true);
   // Modules live in per-item directories so ownership uses subtree grants, the only write-grant form the Linux runtime accepts.
@@ -65,6 +65,15 @@ async function dagFixture(options: Options = {}) {
           await Promise.race([twoRunning, delay(5000, undefined, { signal: r.signal }).then(() => { throw new Error('Concurrent workers did not start'); })]);
           if (options.failItem && r.workItemId === 'a') throw new Error('Intentional item failure');
           try { await delay(30000, undefined, { signal: r.signal }); } catch (error) { aborted++; throw error; }
+        } else if (options.synchronizeWorkers && r.workItemId !== 'c') {
+          // Prove actual overlap without assuming worktree/storage setup finishes in 150 ms.
+          // A serial scheduler cannot release this rendezvous and must fail the deadline.
+          const deadline = new AbortController();
+          try {
+            await Promise.race([twoRunning, delay(10000, undefined, { signal: AbortSignal.any([r.signal, deadline.signal]) }).then(() => {
+              throw new Error('Independent workers were not dispatched concurrently');
+            })]);
+          } finally { deadline.abort(); }
         } else await delay(150, undefined, { signal: r.signal });
         const id = r.workItemId!;
         if (options.outside && id === 'a') await writeFile(join(r.cwd, 'README.md'), 'Out of owned scope');
@@ -85,7 +94,7 @@ async function dagFixture(options: Options = {}) {
 }
 
 test('DAG runs parallel config-only specialists, integrates dependencies, reviews combined changes, and preserves dirty checkout', async () => {
-  const f = await dagFixture();
+  const f = await dagFixture({ synchronizeWorkers: true });
   try {
     await writeFile(join(f.project, 'README.md'), 'Uncommitted user work');
     const task = f.service.submit({ projectId: 'fixture', request: 'Three modules', mode: 'autonomous' }, 'dag');
