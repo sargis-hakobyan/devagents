@@ -15,7 +15,7 @@ async function nodeProject(f: Awaited<ReturnType<typeof fixture>>, extra = {}) {
   await writeFile(join(f.project, '.gitignore'), 'node_modules/\n');
   await git(f.project, ['add', '.']); await git(f.project, ['commit', '-qm', 'Node fixture']);
 }
-const request = (cwd: string) => ({ cwd, commands: [{ executable: 'node', args: ['--test'] }], signal: new AbortController().signal, rules: false });
+const request = (cwd: string) => ({ cwd, commands: [{ executable: 'node', args: ['--test'] }], signal: new AbortController().signal, rules: true });
 const fakeInstall: DependencyInstaller = { async install(cwd) {
   await mkdir(join(cwd, 'node_modules/example'), { recursive: true });
   await writeFile(join(cwd, 'node_modules/example/index.js'), 'module.exports = 42;');
@@ -97,7 +97,7 @@ test('pnpm workspace metadata retains patches and overrides but cannot load repo
 });
 
 test('Mastra prepares only after approval and environment failures never invoke implementer or consume repairs', async () => {
-  const f = await fixture(false); const engine = new FakeEngine(); let preparations = 0;
+  const f = await fixture(true); const engine = new FakeEngine(); let preparations = 0;
   const runner = new TaskRunner(f.service, engine, new FixtureValidator(), { async prepare() { preparations++; throw new Error('Environment blocked: fixture dependency unavailable'); } });
   f.service.attachRunner(runner);
   try {
@@ -114,7 +114,7 @@ test('Mastra prepares only after approval and environment failures never invoke 
 });
 
 test('missing dependency validation is retained as evidence and stops without a repair call', async () => {
-  const f = await fixture(false); const engine = new FakeEngine();
+  const f = await fixture(true); const engine = new FakeEngine();
   const runner = new TaskRunner(f.service, engine, { async execute(_cwd, command) {
     return { ...command, exitCode: 1, output: "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'jiti' imported from /workspace/" };
   } }); f.service.attachRunner(runner);
@@ -130,7 +130,7 @@ test('missing dependency validation is retained as evidence and stops without a 
 });
 
 test('cancellation during environment preparation drains the task without calling an implementer', async () => {
-  const f = await fixture(false); const engine = new FakeEngine();
+  const f = await fixture(true); const engine = new FakeEngine();
   let started!: () => void; const preparing = new Promise<void>(resolve => { started = resolve; });
   const runner = new TaskRunner(f.service, engine, new FixtureValidator(), { async prepare({ signal }) {
     started(); await new Promise<void>((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('Preparation cancelled')), { once: true }));

@@ -88,7 +88,7 @@ try {
   assert.equal(await readFile(join(project, 'result.txt'), 'utf8'), 'patched\n');
   assert.doesNotMatch(offeredNames().join(','), /exec_command|spawn_agent/);
   // Extra rules off: the runtime can write anywhere in its isolated worktree, while the
-  // core boundary still protects outside files, secrets, Git metadata and networking.
+  // core boundary still protects outside files, secrets and Git metadata.
   index = 0; requests = []; calls = [
     patch('*** Begin Patch\n*** Update File: result.txt\n@@\n-patched\n+engine-policy\n*** End Patch'),
     patch(`*** Begin Patch\n*** Update File: ${secret}\n@@\n-fake-service-secret\n+bad\n*** End Patch`),
@@ -101,6 +101,18 @@ try {
   await engine.execute({ ...base, devagentsRules: false, runId: 'engine-review', phase: 'review', agent: scopedDeveloper }, event => progress.push(event));
   assert.equal(await readFile(join(project, 'result.txt'), 'utf8'), 'engine-policy\n', 'review stays read-only');
   console.log('PASS: extra rules off expands role scope and command access, with outside and read-only review boundaries intact.');
+  // Exercise the new setup phase through the real engine with a scripted loopback model.
+  // Setup may read source, write generated files, use networking and persist a local tool.
+  const setupCode = `const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');assert.throws(()=>fs.readFileSync('.env'));assert.throws(()=>fs.readFileSync(${JSON.stringify(secret)}));assert.throws(()=>fs.writeFileSync('.git/config','bad'));assert.equal(process.env.CODEX_API_KEY,undefined);fs.writeFileSync('generated.txt',fs.readFileSync('result.txt'));fs.mkdirSync(path.join(process.env.HOME,'bin'),{recursive:true});fs.writeFileSync(path.join(process.env.HOME,'bin','setup-tool'),'#!/bin/sh\\necho setup-tool-ready\\n',{mode:0o700});fetch(${JSON.stringify(endpoint)},{signal:AbortSignal.timeout(3000)}).then(r=>fs.writeFileSync('setup-network.txt',String(r.status)));`;
+  index = 0; requests = []; calls = [`text(await tools.exec_command({cmd:${JSON.stringify(`node -e '${setupCode.replaceAll("'", "'\\''")}'`)},max_output_tokens:1000,yield_time_ms:10000}));`];
+  await engine.execute({ ...base, devagentsRules: false, runId: 'setup', phase: 'setup', agent: developer }, event => progress.push(event));
+  assert.equal(await readFile(join(project, 'generated.txt'), 'utf8'), 'engine-policy\n');
+  assert.equal(await readFile(join(project, 'setup-network.txt'), 'utf8'), '404');
+  index = 0; requests = []; calls = [`text(await tools.exec_command({cmd:"setup-tool > tool-result.txt",max_output_tokens:1000}));`];
+  await engine.execute({ ...base, devagentsRules: false, runId: 'after-setup', phase: 'implementation', agent: developer }, event => progress.push(event));
+  assert.equal(await readFile(join(project, 'tool-result.txt'), 'utf8'), 'setup-tool-ready\n');
+  assert.equal(await readFile(secret, 'utf8'), 'fake-service-secret');
+  console.log('PASS: real setup phase permits sandbox networking, source-dependent generation and persistent tooling while protecting credentials and Git.');
   index = 0; requests = []; calls = []; finalOutput = { connected: true };
   const connection = await testCodexConnection(join(root, 'data'), 'api-key', { engine: {
     id: 'codex', preflight: provider => engine.preflight(provider),
@@ -110,7 +122,7 @@ try {
   assert.equal(requests.length, 1);
   assert.doesNotMatch(offeredNames().join(','), /exec_command|spawn_agent|web_search/);
   console.log('PASS: opt-in connection check through the real Codex runtime against a loopback fixture; no paid request.');
-  console.log('PASS: real Codex JSONL/structured output, scoped shell and patch execution, outside/secret/Git denials, blocked command networking, no delegated/network tools, and read-only review.');
+  console.log('PASS: real Codex JSONL/structured output, scoped shell and patch execution, outside/secret/Git denials, strict-mode blocked command networking, default-mode setup networking, no delegated tools, and read-only review.');
 } catch (error) {
   console.error('Runtime fixture diagnostics:', JSON.stringify(progress).slice(-12000));
   throw error;

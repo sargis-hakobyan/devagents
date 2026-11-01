@@ -55,7 +55,7 @@ Users register one or more project roots, select available coding engines, set a
 4. Tech Lead produces typed plan: deliverables, agents/capabilities, task DAG, dependencies, worktree/file ownership, risks, validation commands and definition of done.
 5. In plan-approval mode, show plan and await explicit approval. In autonomous mode, proceed within permission boundaries.
 6. Schedule ready tasks, select compatible agents/engines, create isolated task worktrees and run workers with bounded concurrency.
-   Prepare supported project environments after approval and before implementation: check runtime requirements and install locked Node/npm/pnpm dependencies in every worktree. Environment failures stop without consuming code-repair attempts. See `docs/SETUP.md` for the current adapter's limits.
+   Prepare project environments after approval and before implementation. With extra rules off, the assigned coding agent installs tools/dependencies and runs necessary setup scripts in each worktree, with sandbox network access and a persistent secret-free tool HOME. Missing-tool/dependency validation failures receive one setup recovery per worktree without code-repair expenditure. With extra rules on, use restricted locked Node/npm/pnpm preparation. See `docs/SETUP.md` for the boundaries and limits.
 7. Run targeted checks, integrate independent outputs, resolve conflicts through explicit integration task; execute project-wide checks.
 8. Reviewer evaluates diff independently against requirements and tests. Failures become bounded repair tasks; do not allow endless implement-review cycles.
 9. Present final summary, evidence, test outcomes, files, commits, and any limitations. Create PR if repository integration is configured and user/policy permits.
@@ -181,7 +181,7 @@ Autonomy is **not** unrestricted tool access. The policy engine, outside the mod
 
 Use command allowlists/deny rules plus per-command context checks. Treat `curl | sh`, destructive commands, shell redirection and arbitrary tool install as high-risk; don't rely on textual denylisting alone. Sandbox worker execution appropriately, prefer non-root container user, scoped filesystem mounts, constrained network, resource/time limits and explicit escalation flow. Never put secrets into model prompts, logs or source control. Provide redaction and secure secret injection.
 
-Dependency preparation is a distinct network exception: a trusted installer may download locked npm/pnpm packages in a metadata-only sandbox, without lifecycle scripts, repository hooks, saved credentials or access to the source checkout. Coding-agent and validation commands remain offline. Only verified dependency trees are copied into task worktrees; setup does not modify source, lockfiles or the original checkout.
+With extra rules on, dependency preparation is a distinct network exception: a trusted installer may download locked npm/pnpm packages in a metadata-only sandbox, without lifecycle scripts, repository hooks, saved credentials or access to the source checkout. Coding-agent and validation commands remain offline. With extra rules off, setup, implementation and validation permit networking, project setup scripts and local tool installation within the isolated worktree and its dedicated tool HOME. Setup source/configuration changes remain subject to independent review. Both modes protect saved credentials, original checkout and Git ownership; neither grants arbitrary host access or deployment permissions.
 
 Automation modes:
 

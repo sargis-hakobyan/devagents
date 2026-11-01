@@ -7,6 +7,7 @@ import { deniedSegments, protectedPath } from '../../domain/protected-paths.js';
 import { runProcess } from '../process.js';
 import { credentialRuntime } from '../../security/credential-vault.js';
 import { pnpmRoot } from '../node-tools.js';
+import { publicPackageConfig } from './package-config.js';
 
 export const CODEX_VERSION = '0.160.1';
 export { deniedSegments, protectedPath };
@@ -17,12 +18,12 @@ export function toml(value: unknown): string {
 }
 const flags = (config: Record<string, unknown>) => Object.entries(config).flatMap(([key, value]) => ['-c', `${key}=${toml(value)}`]);
 export const DEFAULT_SCAN_LIMIT = 200000;
-export async function sandboxFlags(cwd: string, permissions: AgentDefinition['permissions'], temp: string, scanLimit = DEFAULT_SCAN_LIMIT, devagentsRules = true, preparationNetwork = false): Promise<string[]> {
+export async function sandboxFlags(cwd: string, permissions: AgentDefinition['permissions'], temp: string, scanLimit = DEFAULT_SCAN_LIMIT, devagentsRules = true, preparationNetwork = false, runtime?: string): Promise<string[]> {
   const root = await realpath(cwd);
   const filesystem: Record<string, string> = { ':minimal': 'read' };
   const config: Record<string, unknown> = {
     default_permissions: 'devagents',
-    permissions: { devagents: { filesystem, network: { enabled: preparationNetwork } } },
+    permissions: { devagents: { filesystem, network: { enabled: preparationNetwork || !devagentsRules } } },
     approval_policy: 'never',
     projects: { [root]: { trust_level: 'untrusted' } },
   };
@@ -48,6 +49,9 @@ export async function sandboxFlags(cwd: string, permissions: AgentDefinition['pe
     for (const entry of entries) {
       if (++count > scanLimit) throw new AppError('workspace_limit', `Workspace exceeds the safety scan limit of ${scanLimit} entries; remove unneeded files from the worktree or raise workspaceScanLimit in the DevAgents configuration`);
       const path = join(dir, entry.name);
+      if (!devagentsRules && entry.name === '.npmrc' && await publicPackageConfig(path)) {
+        denied.delete(path); filesystem[path] = 'read'; everyEntryDenied = false; continue;
+      }
       // Normal package-manager bin links may point to another file inside this worktree.
       // Never permit links outside it or links to protected project data.
       const internalLink = !devagentsRules && entry.isSymbolicLink() && await realpath(path).then(target => target.startsWith(`${root}/`) && !protectedPath(target.slice(root.length + 1)), () => false);
@@ -69,6 +73,7 @@ export async function sandboxFlags(cwd: string, permissions: AgentDefinition['pe
   }
   await mkdir(temp, { recursive: true, mode: 0o700 });
   filesystem[await realpath(temp)] = 'write';
+  if (runtime) filesystem[await realpath(runtime)] = 'write';
   const credentials = credentialRuntime();
   if (credentials) filesystem[await realpath(credentials)] = 'deny';
   // Node may live under nvm on native installations, outside :minimal.

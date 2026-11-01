@@ -4,11 +4,12 @@ import { mkdtemp, mkdir, writeFile, symlink, link, realpath, rm } from 'node:fs/
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { sandboxFlags } from '../../src/engines/codex/sandbox.js';
+import { publicPackageConfig } from '../../src/engines/codex/package-config.js';
 
 /** Parse the generated permission profile back into path → access, independent of flag ordering. */
-async function profile(root: string, scanLimit?: number): Promise<Map<string, string>> {
+async function profile(root: string, scanLimit?: number, rules = true): Promise<Map<string, string>> {
   const temp = join(root, '..', 'temp'); await mkdir(temp, { recursive: true });
-  const flags = await sandboxFlags(root, { readPaths: ['project:/**'], writePaths: ['project:/owned/**'], allowCommands: true, allowPush: false }, temp, scanLimit);
+  const flags = await sandboxFlags(root, { readPaths: ['project:/**'], writePaths: ['project:/owned/**'], allowCommands: true, allowPush: false }, temp, scanLimit, rules);
   const permissions = flags[flags.findIndex(f => f.startsWith('permissions=')) ]!;
   return new Map([...permissions.matchAll(/"((?:[^"\\]|\\.)*)"="(read|write|deny)"/g)].map(m => [JSON.parse(`"${m[1]}"`) as string, m[2]!]));
 }
@@ -43,5 +44,22 @@ test('sandbox profile denies links and secrets, collapses fully-denied directori
     assert.equal(access.has(join(canonical, 'keep.txt')), false);
     // The scan limit is configurable, fails closed and tells the operator what to change.
     await assert.rejects(profile(root, 1000).then(() => profile(root, 5)), /scan limit of 5 entries.*workspaceScanLimit/);
+  } finally { await rm(base, { recursive: true, force: true }); }
+});
+
+test('only recognized setting-only npmrc files become read-only in rules-off sandboxes', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'sandbox-package-config-')); const root = join(base, 'project'); await mkdir(root);
+  const config = join(await realpath(root), '.npmrc');
+  try {
+    await writeFile(config, 'node-linker=hoisted\nauto-install-peers=true\n');
+    assert.equal((await profile(root, undefined, false)).get(config), 'read');
+    assert.equal((await profile(root)).get(config), 'deny');
+    for (const text of ['//registry.npmjs.org/:_authToken=synthetic-secret', 'node-linker=${SECRET}', 'unknown=opaque-secret', '# token=synthetic-secret\n', 'node-linker=hoisted;secret']) {
+      await writeFile(config, text); assert.equal(await publicPackageConfig(config), false);
+      assert.equal((await profile(root, undefined, false)).get(config), 'deny');
+    }
+    await rm(config); const outside = join(base, 'outside'); await writeFile(outside, 'node-linker=hoisted');
+    await symlink(outside, config); assert.equal(await publicPackageConfig(config), false);
+    await rm(config); await link(outside, config); assert.equal(await publicPackageConfig(config), false);
   } finally { await rm(base, { recursive: true, force: true }); }
 });

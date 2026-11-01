@@ -9,7 +9,7 @@ import { TaskRunner } from '../../src/orchestration/runner.js';
 import { git } from '../../src/workspace/git.js';
 import type { CodingEngine, EngineRequest, EngineResult } from '../../src/domain/engine.js';
 
-type Options = { synchronizeWorkers?: boolean; devagentsRules?: boolean; projectCommands?: boolean; hidden?: boolean; markdown?: boolean; unresolved?: 'markers' | 'separator'; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
+type Options = { environmentRecovery?: boolean; synchronizeWorkers?: boolean; devagentsRules?: boolean; projectCommands?: boolean; hidden?: boolean; markdown?: boolean; unresolved?: 'markers' | 'separator'; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
 async function dagFixture(options: Options = {}) {
   const f = await fixture(options.devagentsRules ?? true);
   // Modules live in per-item directories so ownership uses subtree grants, the only write-grant form the Linux runtime accepts.
@@ -44,6 +44,7 @@ async function dagFixture(options: Options = {}) {
           id, title: `Module ${id}`, description: `Implement ${id}`, acceptanceCriteria: ['Existing test passes'], dependsOn: id === 'c' ? ['a', 'b'] : [], requiredCapabilities: ['implementation'], assignedAgent: 'module-developer', projectId: 'fixture', branch: `${branch}-${id}`, ownedPaths: [`project:/${options.conflict && id !== 'c' ? 'shared' : id}/**`], validation: [{ executable: 'node', args: options.projectCommands ? ['-e', `require('./${id}.test.cjs')`] : ['--test', `${id}.test.cjs`] }],
         })) } };
       }
+      if (r.phase === 'setup') { preparedCwds.add(r.cwd); return { output: { ready: true, summary: 'Worker prerequisites ready' } }; }
       if (r.phase === 'review') {
         reviewActive++; maxReviewActive = Math.max(maxReviewActive, reviewActive);
         try {
@@ -91,7 +92,12 @@ async function dagFixture(options: Options = {}) {
       } finally { active--; }
     },
   };
-  const runner = new TaskRunner(f.service, engine, new FixtureValidator(), options.synchronizeWorkers ? { async prepare({ cwd }) { preparedCwds.add(cwd); } } : undefined); f.service.attachRunner(runner);
+  const checkedEnvironments = new Set<string>(); const baseValidator = new FixtureValidator();
+  const validator = options.environmentRecovery ? { async execute(cwd: string, command: {executable: string; args: string[]}, signal: AbortSignal, timeout: number) {
+    if (!checkedEnvironments.has(cwd)) { checkedEnvironments.add(cwd); return {...command, exitCode: 1, output: "Cannot find package 'workspace-tool' imported from /workspace/"}; }
+    return baseValidator.execute(cwd, command, signal, timeout);
+  } } : baseValidator;
+  const runner = new TaskRunner(f.service, engine, validator, options.synchronizeWorkers ? { async prepare({ cwd }) { preparedCwds.add(cwd); } } : undefined); f.service.attachRunner(runner);
   return { ...f, runner, calls, preparedCwds, originalHead, twoRunning, metrics: () => ({ active, maxActive, maxReviewActive, aborted, combinedReviews }), options };
 }
 
@@ -291,7 +297,7 @@ test('cleanup of a completed DAG task removes every item worktree and item branc
 });
 
 test('DAG engine policy permits project commands for items and integration, generated files and advisory scopes', async () => {
-  const f = await dagFixture({ devagentsRules: false, projectCommands: true, hidden: true, outside: true });
+  const f = await dagFixture({ devagentsRules: false, projectCommands: true, hidden: true, outside: true, environmentRecovery: true });
   try {
     const task = f.service.submit({ projectId: 'fixture', request: 'Three modules', mode: 'autonomous' }, 'engine-policy-dag');
     await f.runner.idle(); const done = f.store.task(task.id);
@@ -299,7 +305,13 @@ test('DAG engine policy permits project commands for items and integration, gene
     assert.ok(f.calls.every(c => c.devagentsRules === false));
     for (const call of f.calls.filter(c => c.phase === 'implementation')) assert.deepEqual(call.agent.permissions.writePaths, ['project:/**']);
     const evidence = f.store.evidence(task.id).filter(e => e.kind === 'validation').map(e => e.data as { args: string[]; exitCode: number });
-    assert.ok(evidence.length >= 4); assert.ok(evidence.every(e => e.args[0] === '-e' && e.exitCode === 0));
+    assert.ok(evidence.length >= 4); assert.ok(evidence.every(e => e.args[0] === '-e'));
+    assert.equal(evidence.filter(e => e.exitCode !== 0).length, 4);
+    const setups = f.calls.filter(c => c.phase === 'setup');
+    assert.equal(setups.length, 8, 'each worker and integration gets initial setup and one recovery');
+    assert.equal(new Set(setups.map(c => c.cwd)).size, 4);
+    assert.equal(done.outcome?.repairCycles, 0);
+    assert.equal(f.calls.filter(c => c.phase === 'implementation').length, 3);
     assert.equal(await readFile(join(f.project, 'README.md'), 'utf8'), '# Fixture\n');
   } finally { await f.runner.stop(); await f.cleanup(); }
 });

@@ -80,7 +80,7 @@ test('queued, awaiting-mode and recovering team tasks keep their original roster
     assert.equal(ranQueued.state, 'completed', JSON.stringify(ranQueued.outcome));
     assert.equal(ranQueued.team!.revision, 1); assert.equal(ranQueued.team!.members.find(m => m.id === 'code-reviewer')!.name, 'Original reviewer');
     const queuedCalls = engine.calls.filter(c => c.cwd === ranQueued.workspace!.path);
-    assert.equal(queuedCalls.length, 3); assert.ok(queuedCalls.every(c => c.provider.id === 'openai' && c.agent.model === 'default'));
+    assert.deepEqual(queuedCalls.map(c => c.phase), ['planning', 'setup', 'implementation', 'review']); assert.ok(queuedCalls.every(c => c.provider.id === 'openai' && c.agent.model === 'default'));
     assert.equal(queuedCalls.find(c => c.phase === 'review')!.agent.name, 'Original reviewer');
     // The awaiting-mode task is still frozen; the archived team does not stop it once the mode is chosen.
     assert.equal(f.store.task(awaiting.id).team!.revision, 1);

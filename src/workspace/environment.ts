@@ -24,7 +24,8 @@ const manifestKeys = new Set(['name', 'version', 'private', 'type', 'dependencie
 const block = (message: string): never => { throw new AppError('environment_blocked', `Environment blocked: ${message}`); };
 const exists = async (file: string) => lstat(file).then(() => true, () => false);
 
-/** Extensible preparation boundary. This first adapter supports root Node/npm/pnpm workspaces.
+/** Restricted preparation adapter, selected by the runner only with extra rules enabled.
+ * Supports root Node/npm/pnpm workspaces.
  * Network installation sees only dependency metadata and patches, never the source checkout,
  * its .npmrc, login profiles or service database. Only node_modules is copied back.
  */

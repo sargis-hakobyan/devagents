@@ -19,6 +19,7 @@ export function outputJsonSchema(schema: z.ZodType): Record<string, unknown> {
 }
 
 export const ImplementationOutput = z.strictObject({ summary: z.string().min(1) });
+export const SetupOutput = z.strictObject({ ready: z.boolean(), summary: z.string().min(1) });
 export const ReviewOutput = z.strictObject({
   approved: z.boolean().describe('True only when requirements and validation pass and findings is empty.'),
   summary: z.string().min(1).describe('Review rationale, including positive observations and test evidence.'),

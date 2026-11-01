@@ -1,6 +1,6 @@
 import type { AgentDefinition, AppConfig } from './schemas.js';
 
-export type EnginePhase = 'planning' | 'implementation' | 'review';
+export type EnginePhase = 'planning' | 'setup' | 'implementation' | 'review';
 export type EngineProgress = { kind: 'started' | 'message' | 'command' | 'file-change' | 'usage'; text?: string; data?: unknown };
 export type EngineRequest = {
   devagentsRules?: boolean;

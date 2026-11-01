@@ -15,6 +15,7 @@ export class FakeEngine implements CodingEngine {
     if (request.phase === 'planning') return { output: {
       summary: 'Implement greeting', risks: [], integration: null, items: [{ id: 'greeting', ownedPaths: ['project:/**'], title: 'Greeting', description: 'Implement greeting', acceptanceCriteria: ['Returns hello'], dependsOn: [], requiredCapabilities: ['implementation'], assignedAgent: 'general-developer', projectId: 'fixture', branch: await git(request.cwd, ['branch', '--show-current']), validation: [{ executable: 'node', args: ['--test', 'greeting.test.cjs'] }] }],
     } };
+    if (request.phase === 'setup') return { output: { ready: true, summary: 'Fixture environment ready' } };
     if (request.phase === 'implementation') {
       if (this.options.waitForCancel) await new Promise<void>((_, reject) => {
         const abort = () => reject(new AppError('cancelled', 'Fixture cancelled'));
