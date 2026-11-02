@@ -269,3 +269,7 @@ Final handoff-corrected build: all 35 browser workflows, native deterministic M2
 ## Environment-limitation reporting — 2026-11-02
 
 Implemented the owner's rule that checks blocked by the environment are reported, not retried: plan `manualChecks`, implementation and review `limitations`, merged into `outcome.limitations` for single-item and DAG tasks, with prompt instructions for planner, implementer and reviewer and browser rendering in the task header, Result tab, Plan tab and task list. Regression coverage: schema bounds and merging (unit), a single-item task that completes with two reported checks and zero repairs while a failing test still repairs, a DAG task with worker and combined-review reports, and a browser workflow through the fixture's `[blocked-check]` marker. The Codex browser-runtime work-in-progress was stashed, not merged.
+
+## Limitation reporting review fixes — 2026-11-02
+
+Codex review findings F1–F4 fixed with regression tests (reports surviving repairs and item reviews, reviewer copy-forward removed in favour of an orchestrator ledger, evidence-grade redaction of display prose, a registered model-schema inventory with `$defs` traversal); F5–F8 addressed by revising the dependency-store and cleanup handoffs before implementation. Verification counts are in the commit message; Docker was not rebuilt for these commits.
