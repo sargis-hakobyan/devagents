@@ -141,6 +141,36 @@ Unresolved design decisions, left for the owner: (1) whether a rejected plan sho
 
 Team editing (U2); submission, mode choice, approval, cancellation, registration, cleanup and guided setup from the browser (U3); event streaming; the Claude adapter (M4). The separately authorized authenticated M2/M3 reruns passed on 2026-10-30 at `db95711`; see `MILESTONES.md`. This implementation plan does not authorize additional model calls.
 
+## Cleanup handoff — free disk space from the existing screens (2026-11-02)
+
+Design: `design/ui/U4-Cleanup-Task.dc.html` and `design/ui/U4-Cleanup-Lists.dc.html` (third canvas row). Owner decision: no new page; cleanup lives in the task page, the Tasks list, the Overview rail and Settings. Motivation: the data volume filled up (13 GB of kept worktrees with `node_modules`, each 1.5–2.7 GB) and a task failed with "database or disk is full". Task history is never deleted; only working files go, and only after a server-computed preview that execution revalidates.
+
+### Where it appears
+
+- **Task header** (`ui/src/pages/TaskDetail.tsx`, existing action row): for `completed`, `failed` and `cancelled` tasks a chip "2.2 GB on disk · 3 uncommitted files" next to the state chip, and a button "Free disk space · 2.2 GB" beside "Submit a new task from this request". Active tasks get the chip only (size), never the button.
+- **Result tab**: the existing "Worktree" row becomes "Working files" (size, worktree path, run data, count of uncommitted and untracked files). The existing disabled "Clean up worktrees" button becomes "Clean up working files · 2.2 GB". Both buttons expand the same inline preview panel inside the Result card, using the confirmation pattern of `useTaskActions` (no dialog, no route). After cleanup the row reads "Removed 2.2 GB on <time>" with the cleanup evidence, and a "Patch saved · View patch · Download .patch" row appears when a patch was taken.
+- **Tasks list** (`ui/src/pages/Tasks.tsx`): one more filter pill "Holding files · N" (finished tasks whose recorded worktrees still exist); while active, a bar above the table "N finished tasks hold X GB · Y have uncommitted changes · Z GB free" with "Preview cleanup of the selected"; a select column; sizes appended to the existing "Branch / result" cell. Tasks with uncommitted changes start unticked. The bulk preview lists one row per task with removed/kept/patch/size, and execution runs task by task, each with its own digest.
+- **Overview rail**: the Scheduler card gets a storage line (free of total, held by finished tasks, run data, link to the filter) with a meter; low-space warning tone below a threshold; "not measured" when the service cannot read the volume.
+- **Settings**: the "Service and browser session" card gets a Storage row with the same figures and a note that Docker image layers and build cache are outside the data volume.
+- **Top band**: a warning chip "3.1 GB free · setup needs about 2 GB per task" only while space is low.
+
+### Contracts
+
+1. `GET /status` gains `storage: { measured: boolean; freeBytes?: number; totalBytes?: number; worktreeBytes: number; runBytes: number; finishedTasksHoldingFiles: number }` computed under the existing cache; task summaries gain `footprintBytes?: number` and `uncommittedFiles?: number` for finished tasks (measured lazily and cached per task until cleanup; "not measured" is a value, not an error).
+2. `GET /tasks/:id/cleanup-preview` (session or bearer, read-only) returns `{ digest, computedAt, worktrees: [{ path, bytes, kind: 'task'|'item', uncommitted: [{ path, added, removed }], untracked: [{ path, bytes }] }], branches: { remove: string[], keep: string[] }, runs: { count, bytes }, patch: { available: boolean, bytes, reason? } }`. Ownership rules are the ones `WorkspaceManager.cleanup` already enforces: paths under the service's canonical worktrees folder named with the task ID, branches `codex/devagents-<task-id>…`; anything else makes the preview refuse with `409 cleanup_ownership`, never skip. Active tasks: `409 task_active`. The digest is an HMAC over the task ID, the sorted removal list, the uncommitted-file list with their blob hashes and the branch tips, keyed with a per-process secret, so a digest cannot be forged or reused for another task.
+3. `POST /tasks/:id/cleanup` with `{ digest, savePatch: boolean }`: recompute the preview, compare digests, and on mismatch answer `409 cleanup_preview_stale` with the fresh preview in the body. When `savePatch` is true, first write the diff of tracked uncommitted changes (bounded 4 MB, redacted with the store's secret list, text only; untracked files listed but not included) as evidence `cleanup-patch`; over the bound answer `413 patch_too_large` before deleting anything. Then run the existing `TaskService.cleanup` and record `cleanup` evidence with sizes freed. A completed task's branch is always kept, as today. Never create a commit on any branch.
+4. `GET /tasks/:id/patch` returns the saved patch as text; `GET /tasks/:id/patch/download` serves it as `text/x-patch` with a safe filename, addressed by task identity only.
+5. The bulk bar calls the per-task preview and cleanup routes; there is no bulk endpoint. A refusal for one task leaves the others done or untouched and the bar reports which.
+6. CSRF, Origin, Host and the bearer rule apply to the new mutation as to every other. The browser never sends paths, refs or branch names.
+
+### Verification
+
+- Preview on a failed task lists its uncommitted files with correct counts; on a completed task names the kept branch; refuses active tasks and foreign paths/branches.
+- Execution with the preview digest removes exactly the listed worktrees and branches, keeps a completed task's branch, records `cleanup` evidence; a changed worktree (one more edited file) refuses with `cleanup_preview_stale` and deletes nothing; a forged digest, another task's digest and a reused digest after success are refused; `savePatch` stores a redacted patch that applies cleanly to the base commit; oversized patches refuse before deleting.
+- Original checkout unchanged before and after, as in the existing cleanup tests.
+- Browser: task page preview, patch checkbox, after-cleanup rows, stale refusal rendering, bulk filter and bar with unticked uncommitted tasks, storage line states, hostile file names rendered as text, missing CSRF and foreign Origin on the new route, narrow screen.
+- Docs: README and milestones; decisions entry stating that nothing is deleted automatically and that history is never removed.
+
 ## Setup follow-up — 2026-10-30
 
 The owner authorized a short README and one-command startup with a Browser/Terminal/Later choice. This supersedes the U3-only restriction on new credential input, while preserving the prohibition on saved-secret reads and automatic paid tests. Existing approved components, shell and shared polling are reused.
