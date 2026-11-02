@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — liveness: silent workers, attention items and recovery actions (U5)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#3B3F5E;text-decoration:none;font-weight:600;font-size:14px}
+.nav a:hover{background:#E6E8F3;color:#1C1A33}.nav a.on{background:#231F4A;color:#FFFFFF}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}.btn.small{min-height:34px;font-size:13px;padding:0 12px}.btn.danger{border-color:#F3C1BD;color:#8A1C14}.btn[disabled]{opacity:.55;cursor:not-allowed}
+.btn:focus-visible,.nav a:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.note{border-radius:10px;padding:10px 12px;font-size:13.5px}
+.note.warn{background:#FFF1DB;border:1px solid #F1D18A}.note.bad{background:#FDF2F1;border:1px solid #F3C1BD}.note.info{background:#F3F6FE;border:1px solid #C9D7F7}
+.h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5A5F78}
+.strip{padding:9px 14px;display:flex;align-items:center;gap:8px;font-weight:800;font-size:13.5px;background:#FFF1DB;color:#7A4A00;border-radius:14px 14px 0 0}
+.row{padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid #EAECF5}
+dl.kv{margin:0;display:grid;grid-template-columns:150px minmax(0,1fr);gap:7px 12px;font-size:14px}dl.kv dt{color:#5A5F78}dl.kv dd{margin:0;overflow-wrap:anywhere}
+ol.timeline{list-style:none;margin:0;padding:0}ol.timeline li{display:grid;grid-template-columns:84px 130px minmax(0,1fr);gap:10px;padding:8px 0;border-top:1px solid #EAECF5;font-size:13.5px}ol.timeline li:first-child{border-top:0}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+  <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 18px"><div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div><div style="width: 1px; height: 36px; background: rgba(255,255,255,0.18)"></div><div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #B9B6D9">Local workspace</span><span style="font-weight: 700; font-size: 16px">127.0.0.1:4310 · docker · linux/arm64</span></div></div>
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6EE7A8" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Connected · updated 2 s ago</span><span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF">Codex signed in</span></div>
+  </header>
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD">
+      <a href="Main.dc.html" class="on" aria-current="page">Overview</a><a href="A-Tasks.dc.html">Tasks <span style="margin-left: auto; background: #FFB703; color: #231F4A; font-size: 11px; padding: 1px 7px; border-radius: 999px; font-weight: 800">3</span></a><a href="A-Teams.dc.html">Teams</a><a href="A-Projects.dc.html">Projects</a><a href="A-Settings.dc.html">Settings</a>
+    </nav>
+    <main style="flex: 999 1 560px; min-width: 0; padding: 24px 40px 48px; display: flex; flex-direction: column; gap: 20px">
+      <div><div class="h">Overview · the existing "Needs your attention" card grows beyond approvals</div><p class="muted" style="margin: 4px 0 0; font-size: 13.5px">Rule adopted from Paperclip: every unfinished task has a live path (engine activity), an explicit waiting path (your decision) or a recovery path (a choice offered to you). Anything else is a stall and must appear here; nothing is retried silently.</p></div>
+      <section class="card" aria-label="Needs your attention" style="border-color: #F1D18A">
+        <div class="strip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#B45309" stroke-width="2.5" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>Needs your attention · 3</div>
+        <div class="row">
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0"><div><b>Worker silent for 14 min</b> · <span class="mono">test-project</span> · item <span class="mono">validate</span></div><div class="muted" style="font-size: 13px">Add input validation to the API · implementing since 14:02 · last engine event 14:09 (command <span class="mono">pnpm install</span> started, no output since) · execution timeout in 46 min · the worker is still running, nothing was retried</div></div>
+          <div style="display: flex; gap: 8px"><a class="btn" href="#silent">Inspect</a><button class="btn small" type="button">Keep waiting 15 min</button><button class="btn danger small" type="button">Cancel task…</button></div>
+        </div>
+        <div class="row">
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0"><div><b>Awaiting your approval</b> · <span class="mono">website</span> · v2</div><div class="muted" style="font-size: 13px">Group the items in the config area · 1 item · waiting 6 min · nothing runs until you decide</div></div>
+          <a class="btn primary" href="U3-Approve.dc.html">Review plan</a>
+        </div>
+        <div class="row">
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0"><div><b>Recovery needed: provider quota exhausted</b> · <span class="mono">test-project</span></div><div class="muted" style="font-size: 13px">Display the IO name · planning stopped at 13:41 with "rate limit exceeded; retry after 03:00 UTC" · one automatic retry at 13:46 hit the same limit · no further automatic retries</div></div>
+          <div style="display: flex; gap: 8px"><button class="btn small" type="button">Retry now</button><button class="btn small" type="button">Cancel task…</button></div>
+        </div>
+        <div style="padding: 9px 14px; border-top: 1px solid #EAECF5; font-size: 12.5px; color: #5A5F78">Order: silent workers, then decisions, then recoveries. Each row names the measured fact (last event time, timeout, retry count) and offers only actions the service permits. Entries disappear when the fact changes, never on a click.</div>
+      </section>
+
+      <div class="h" id="silent">Task page · a silent worker becomes a visible state with a choice, not a timeout you discover later</div>
+      <section class="card" aria-label="Task header, worker silent" style="padding: 22px 24px; display: flex; flex-direction: column; gap: 14px">
+        <div style="display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-start">
+          <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: #E3ECFF; color: #1C3F99">▶ Running</span><span class="chip" style="background: #FFF1DB; color: #7A4A00">⚠ Worker silent for 14 min</span><span class="muted" style="font-size: 13px">autonomous · v4 · started 14:02 · elapsed 21 min</span></div>
+            <h1 style="margin: 0; font-size: 28px; letter-spacing: -0.02em; line-height: 1.2">Add input validation to the API</h1>
+            <div class="muted" style="font-size: 14px">Project <span class="mono">test-project</span> · Team: <b>Starter team</b> revision 1 · Branch <span class="mono">codex/devagents-7a21c…</span></div>
+          </div>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap"><button class="btn" type="button">Keep waiting 15 min</button><button class="btn danger" type="button">Cancel task…</button></div>
+        </div>
+        <div class="note warn" style="display: flex; gap: 10px; align-items: flex-start"><span aria-hidden="true" style="font-size: 16px">⚠</span><div><b>No engine activity since 14:09.</b><div class="muted" style="font-size: 13.5px">The implementation worker is still a live process. Its last recorded event was the command <span class="mono">pnpm --filter @adops/loop-ui install --frozen-lockfile</span> with no output for 14 min. DevAgents does not retry or restart on its own: the execution timeout at 15:02 would fail the task, and the preserved worktree would keep whatever was written. Keep waiting if installs are normally this slow here; cancel if not.</div></div></div>
+        <dl class="kv">
+          <dt>Watchdog</dt><dd>Silence threshold 10 min (configurable <span class="mono">silenceWarningMs</span>); the task state stays <span class="mono">running</span>, the attention flag is a measured fact derived from evidence, not a new lifecycle state</dd>
+          <dt>Last events</dt><dd><ol class="timeline"><li><span class="mono muted">14:09:12</span><span class="muted">general-developer</span><span>command started · <span class="mono">pnpm … install --frozen-lockfile</span></span></li><li><span class="mono muted">14:08:40</span><span class="muted">general-developer</span><span>message · "Installing dependencies before running the validator tests."</span></li><li><span class="mono muted">14:02:31</span><span class="muted">orchestrator</span><span>Implementation started</span></li></ol></dd>
+        </dl>
+      </section>
+
+      <div class="h">Task page · recovery after a bounded automatic retry</div>
+      <section class="card" aria-label="Task header, recovery needed" style="padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; border-color: #F1D18A">
+        <div style="display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-start">
+          <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: #FFF1DB; color: #7A4A00">● Recovery needed</span><span class="muted" style="font-size: 13px">autonomous · v1 · planning · stopped 13:46</span></div>
+            <h1 style="margin: 0; font-size: 28px; letter-spacing: -0.02em; line-height: 1.2">Display the IO name on the Monitor detail page</h1>
+          </div>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap"><button class="btn primary" type="button">Retry planning now</button><button class="btn danger" type="button">Cancel task…</button></div>
+        </div>
+        <div class="note warn"><b>Provider quota exhausted; waiting for you.</b> Planning failed at 13:41 with "rate limit exceeded; retry after 03:00 UTC". One automatic retry at 13:46 hit the same limit. Automatic retries are bounded to one for quota and capacity errors, and tool calls are never replayed. The worktree and all evidence are preserved; "Retry planning now" starts a fresh planning run on the same task, not a replay.</div>
+        <dl class="kv">
+          <dt>What retries automatically</dt><dd>Provider capacity and quota errors: once. Lost dispatch after a service restart: one continuation of a waiting task. Nothing else.</dd>
+          <dt>What never retries</dt><dd>Failed declared validation and review findings (repair budget instead), environment limitations (reported and moved on), cancelled or interrupted runs, unknown errors, Git failures.</dd>
+          <dt>Evidence</dt><dd><span class="mono">run-failed</span> 13:41 · <span class="mono">recovery</span> {attempt 1, reason quota, next: board} 13:46</dd>
+        </dl>
+      </section>
+
+      <div class="h">Other attention rows, same shape</div>
+      <section aria-label="Attention variants" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px">
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px"><b>Interrupted by shutdown</b><span class="muted">Task was running when the service stopped; shown as failed with the reason, worktrees preserved. Action: "Submit a new task from this request" (never an automatic replay).</span></div>
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px"><b>Repair budget exhausted</b><span class="muted">Shown as failed with the last review findings. Action: open the diff, submit a new task. Reported limitations are listed separately so a blocked check is never mistaken for a defect.</span></div>
+        <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px"><b>Environment blocker in setup</b><span class="muted">Setup could not finish (missing credentials, service or privilege) after one agent recovery. Action: "Finish setup" or cancel. Not retried on its own.</span></div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

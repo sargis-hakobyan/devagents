@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>DevAgents — task page with footprint, inline cleanup preview and after-cleanup state (U4)</title>
+<title>DevAgents — task page with footprint, compaction and removal tiers (U4)</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -50,7 +50,7 @@ table{border-collapse:collapse;width:100%;font-size:14px}th{text-align:left;font
             <div class="muted" style="font-size: 14px">Project <span class="mono">test-project</span> · Team: <b>Starter team</b> revision 1 · 4 enabled members frozen at submission · Branch <span class="mono">codex/devagents-00057c6e…</span></div>
           </div>
           <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
-            <button class="btn" type="button" aria-controls="cleanup-preview" aria-expanded="true">Free disk space · 2.2 GB</button>
+            <button class="btn" type="button" aria-controls="cleanup-preview" aria-expanded="true">Compact · frees 2.1 GB, keeps your edits</button>
             <a class="btn primary" href="U3-Submit.dc.html">Submit a new task from this request</a>
           </div>
         </div>
@@ -60,7 +60,7 @@ table{border-collapse:collapse;width:100%;font-size:14px}th{text-align:left;font
         <button class="tab" role="tab" aria-selected="false" type="button">Work · 1</button><button class="tab" role="tab" aria-selected="false" type="button">Plan</button><button class="tab" role="tab" aria-selected="false" type="button">Activity · 199</button><button class="tab on" role="tab" aria-selected="true" type="button">Result</button>
       </div>
 
-      <div class="h">2 · Existing Result tab: the "Worktree" row becomes "Working files", and the preview expands inline below it</div>
+      <div class="h">2 · Existing Result tab: the "Worktree" row becomes "Working files"; two tiers, compact first (learned from Paperclip's compaction before archiving), remove second</div>
       <section class="card" aria-label="Result" style="display: flex; flex-direction: column">
         <div style="padding: 20px 24px; display: flex; flex-direction: column; gap: 12px">
           <b style="font-size: 16px">Result</b>
@@ -70,23 +70,23 @@ table{border-collapse:collapse;width:100%;font-size:14px}th{text-align:left;font
             <dt>Working files</dt><dd><b>2.2 GB</b> · worktree <span class="mono">/data/worktrees/00057c6e…</span> (2.1 GB, mostly node_modules) · run temp data 96 MB · <b>3 uncommitted source edits</b> and 1 untracked folder, kept for inspection</dd>
             <dt>Not verified here</dt><dd>Visual check at desktop and narrow widths: no browser in this sandbox</dd>
           </dl>
-          <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center"><a class="btn" href="U3-Submit.dc.html">Submit a new task from this request</a><button class="btn" type="button" aria-controls="cleanup-preview" aria-expanded="true">Clean up working files · 2.2 GB</button><span class="muted" style="font-size: 13px">Both buttons open the same preview; nothing is removed without it.</span></div>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center"><button class="btn primary" type="button" aria-controls="cleanup-preview" aria-expanded="true">Compact · frees 2.1 GB, keeps your edits</button><button class="btn" type="button">Remove working files · 2.2 GB</button><span class="muted" style="font-size: 13px">Compact deletes only generated directories; your source edits, untracked files and the branch stay and are regenerated on reuse. Remove is the second tier and still shows its own preview.</span></div>
         </div>
         <div id="cleanup-preview" style="border-top: 1px solid #E0E2EE; background: #FFFBF2; padding: 18px 24px; display: flex; flex-direction: column; gap: 14px" aria-label="Cleanup preview">
-          <div style="display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap"><b style="font-size: 16px">Free 2.2 GB from this task?</b><span class="chip" style="background: #EAECF5; color: #3B3F5E">preview <span class="mono">c4f1…9e</span> · computed 14:31:08</span></div>
-          <div class="note warn"><b>This worktree holds 3 uncommitted source edits.</b> They exist nowhere else. Inspect the worktree first if you want; this preview does not change while you look, and execution re-checks it.</div>
+          <div style="display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap"><b style="font-size: 16px">Compact this task's worktree? Frees 2.1 GB, keeps everything you might want to read.</b><span class="chip" style="background: #EAECF5; color: #3B3F5E">preview <span class="mono">c4f1…9e</span> · computed 14:31:08</span></div>
           <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
-            <div><div class="h">Will be removed</div><table>
+            <div><div class="h">Deleted · generated, regenerated on reuse</div><table>
               <tbody>
-                <tr><td>Task worktree</td><td class="mono">/data/worktrees/00057c6e-…</td><td class="mono" style="text-align: right">2.1 GB</td></tr>
-                <tr><td>Branch (no commits of its own)</td><td class="mono">codex/devagents-00057c6e-…</td><td class="muted" style="text-align: right">—</td></tr>
+                <tr><td>Dependencies</td><td class="mono">node_modules/ (and 8 workspace node_modules)</td><td class="mono" style="text-align: right">1.3 GB</td></tr>
+                <tr><td>Build output</td><td class="mono">apps/loop-ui/.next/</td><td class="mono" style="text-align: right">640 MB</td></tr>
+                <tr><td>Caches</td><td class="mono">.turbo/ · node_modules/.cache/ · .eslintcache</td><td class="mono" style="text-align: right">110 MB</td></tr>
                 <tr><td>Run temp data · 3 runs</td><td class="mono">/data/runs/…</td><td class="mono" style="text-align: right">96 MB</td></tr>
-              </tbody></table></div>
-            <div><div class="h">Uncommitted changes</div><ul class="mono" style="margin: 4px 0 0; padding-left: 18px; font-size: 12.5px"><li>apps/loop-ui/components/MonitorDetailPanel.tsx <span class="muted" style="font-family: inherit">+13 −2</span></li><li>apps/loop-ui/messages/de.json <span class="muted" style="font-family: inherit">+1</span></li><li>apps/loop-ui/messages/en.json <span class="muted" style="font-family: inherit">+1</span></li><li>artifacts/ <span class="muted" style="font-family: inherit">untracked · 14 files · 180 KB · not patched</span></li></ul>
-              <label class="check" style="margin-top: 10px"><input type="checkbox" checked><span><b>Save the unfinished changes as a patch</b> before removing (tracked modifications, 15 lines; redacted like the diff; stored with the task, up to 4 MB).</span></label></div>
+              </tbody></table><span class="muted" style="font-size: 12.5px">Only directories Git ignores and the service recognises as generated. Anything ignored but unrecognised is listed under "kept" with its size, never deleted by compaction.</span></div>
+            <div><div class="h">Kept · exactly as it is</div><ul class="mono" style="margin: 4px 0 0; padding-left: 18px; font-size: 12.5px"><li>apps/loop-ui/components/MonitorDetailPanel.tsx <span class="muted" style="font-family: inherit">modified · +13 −2</span></li><li>apps/loop-ui/messages/de.json <span class="muted" style="font-family: inherit">modified · +1</span></li><li>apps/loop-ui/messages/en.json <span class="muted" style="font-family: inherit">modified · +1</span></li><li>artifacts/ <span class="muted" style="font-family: inherit">untracked · 14 files · 180 KB</span></li><li>branch codex/devagents-00057c6e-… <span class="muted" style="font-family: inherit">and the worktree itself, 40 MB after compaction</span></li></ul>
+              <span class="muted" style="font-size: 12.5px; display: block; margin-top: 8px">No patch is needed: the worktree stays openable and inspectable. "Submit a new task from this request" can reuse it; preparation regenerates the deleted directories from the project's dependency layer.</span></div>
           </div>
-          <div class="muted" style="font-size: 13px"><b>Kept:</b> events, evidence, plan, review outcomes, this preview and the cleanup record. No commit is created on any branch. Execution re-checks that every path sits under this service's worktrees folder with this task's ID, that the branch names match, and that the digest still describes what is on disk; anything else is refused, never skipped.</div>
-          <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center"><button class="btn danger" type="button">Remove 2.2 GB and save patch</button><button class="btn" type="button">Keep everything</button><span class="muted" style="font-size: 13px">Pending: both disabled, "Removing…" shown; the outcome comes from the service's response.</span></div>
+          <div class="muted" style="font-size: 13px"><b>Also kept:</b> events, evidence, plan, review outcomes, this preview and the compaction record. No commit is created on any branch. Execution re-checks that every path sits under this service's worktrees folder with this task's ID and that the digest still describes what is on disk; anything else is refused, never skipped. The second tier, "Remove working files", keeps the same preview shape and additionally lists the branch and the uncommitted files it would delete, with the recovery-patch option.</div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center"><button class="btn primary" type="button">Compact · free 2.1 GB</button><button class="btn" type="button">Keep everything</button><span class="muted" style="font-size: 13px">Pending: both disabled, "Compacting…" shown; the outcome comes from the service's response.</span></div>
         </div>
       </section>
 
@@ -98,18 +98,18 @@ table{border-collapse:collapse;width:100%;font-size:14px}th{text-align:left;font
           <dt>Working files</dt><dd>task worktree 2.1 GB · item worktrees a, b, c 0.6 GB · item branches <span class="mono">…-a</span>, <span class="mono">…-b</span>, <span class="mono">…-c</span> (their commits are in the kept branch) · no uncommitted changes</dd>
           <dt>Diff</dt><dd>Read the recorded base-to-final change below. It stays readable after cleanup because the branch is kept.</dd>
         </dl>
-        <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center"><button class="btn" type="button">Clean up working files · 2.7 GB</button><span class="muted" style="font-size: 13px">Preview says: branch and reviewed commit kept, nothing to patch.</span></div>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center"><button class="btn primary" type="button">Compact · frees 2.6 GB</button><button class="btn" type="button">Remove working files · 2.7 GB</button><span class="muted" style="font-size: 13px">Compact keeps the branch, the reviewed commit and the worktrees; Remove also deletes the worktrees and item branches, never the kept branch.</span></div>
       </section>
 
-      <div class="h">4 · After cleanup: the rows change, the record stays</div>
+      <div class="h">4 · After compaction: the rows change, the worktree and the record stay</div>
       <section class="card" aria-label="After cleanup" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 12px">
-        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><b style="font-size: 16px">Result</b><span class="chip" style="background: #EAECF5; color: #3B3F5E">Working files removed · 2 Nov 14:32</span></div>
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><b style="font-size: 16px">Result</b><span class="chip" style="background: #EAECF5; color: #3B3F5E">Compacted · 2 Nov 14:32 · 40 MB on disk</span></div>
         <dl class="kv">
-          <dt>Working files</dt><dd>Removed 2.2 GB on 2 Nov 14:32: worktree, branch <span class="mono">codex/devagents-00057c6e…</span>, run temp data. Recorded as evidence <span class="mono">cleanup</span>.</dd>
-          <dt>Unfinished changes</dt><dd><b>Patch saved</b> · 3 files, 15 lines · <a href="#">View patch</a> · <a href="#">Download .patch</a> · untracked <span class="mono">artifacts/</span> was not included</dd>
+          <dt>Working files</dt><dd>Compacted on 2 Nov 14:32: 2.1 GB of generated directories deleted, regenerated on reuse. Worktree <span class="mono">/data/worktrees/00057c6e…</span> and branch kept. Recorded as evidence <span class="mono">compaction</span>.</dd>
+          <dt>Unfinished changes</dt><dd>3 modified files and <span class="mono">artifacts/</span> still in the worktree, readable in the diff below and on disk · <button class="btn small" type="button">Remove working files · 40 MB</button> stays available as the second tier</dd>
           <dt>Not verified here</dt><dd>Visual check at desktop and narrow widths: no browser in this sandbox</dd>
         </dl>
-        <div style="display: flex; gap: 10px; flex-wrap: wrap"><button class="btn" type="button" disabled aria-disabled="true" title="Already cleaned up">Clean up working files</button><a class="btn primary" href="U3-Submit.dc.html">Submit a new task from this request</a></div>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap"><button class="btn" type="button" disabled aria-disabled="true" title="Already compacted">Compact</button><a class="btn primary" href="U3-Submit.dc.html">Submit a new task from this request</a></div>
       </section>
 
       <div class="h">5 · Refusals, inline where the preview was</div>

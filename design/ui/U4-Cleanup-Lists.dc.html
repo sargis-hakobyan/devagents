@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>DevAgents — Tasks filter and bulk cleanup bar, Overview and Settings storage (U4)</title>
+<title>DevAgents — Tasks filter, bulk compaction bar, Overview and Settings storage (U4)</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -41,7 +41,7 @@ dl.counts{margin:0;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px
       <a href="Main.dc.html">Overview</a><a href="A-Tasks.dc.html" class="on" aria-current="page">Tasks</a><a href="A-Teams.dc.html">Teams</a><a href="A-Projects.dc.html">Projects</a><a href="A-Settings.dc.html">Settings</a>
     </nav>
     <main style="flex: 999 1 560px; min-width: 0; padding: 32px 40px 48px; display: flex; flex-direction: column; gap: 22px">
-      <div class="h">1 · Existing Tasks page: one more filter pill, a bar while it is active, sizes in the existing result cell</div>
+      <div class="h">1 · Existing Tasks page: one more filter pill, a bar while it is active (compact first, remove second), sizes in the existing result cell</div>
       <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap">
         <div><div class="h">Tasks</div><h1 style="margin: 4px 0 0; font-size: 36px; letter-spacing: -0.03em; line-height: 1.1">All tasks</h1><p class="muted" style="margin: 6px 0 0">Summaries only; open a task for its plan, work items, activity and result.</p></div>
         <a class="btn primary" href="U3-Submit.dc.html">Submit work</a>
@@ -51,8 +51,8 @@ dl.counts{margin:0;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px
         <button class="filter" type="button" aria-pressed="false">All · 14</button><button class="filter" type="button" aria-pressed="false">Needs you · 0</button><button class="filter" type="button" aria-pressed="false">Active · 0</button><button class="filter" type="button" aria-pressed="false">Finished · 14</button><button class="filter on" type="button" aria-pressed="true">Holding files · 9</button>
       </div>
       <div class="card" style="padding: 12px 16px; display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; border-color: #F1D18A; background: #FFFBF2" role="region" aria-label="Bulk cleanup">
-        <span><b>9 finished tasks hold 13.0 GB</b> of working files · 3 of them have uncommitted changes · the data volume has 3.1 GB free</span>
-        <span style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn small" type="button" aria-expanded="true">Preview cleanup of the 6 selected · 8.4 GB</button></span>
+        <span><b>9 finished tasks hold 13.0 GB</b> of working files, 12.4 GB of it generated · 3 of them have uncommitted changes · the data volume has 3.1 GB free</span>
+        <span style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn primary small" type="button" aria-expanded="true">Compact all 9 · frees 12.4 GB, keeps every edit</button><button class="btn small" type="button">Remove the 6 selected · 8.4 GB</button></span>
       </div>
       <section class="card" aria-label="Tasks holding files" style="overflow-x: auto">
         <table>
@@ -70,19 +70,19 @@ dl.counts{margin:0;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px
       </section>
       <section class="card" aria-label="Bulk cleanup preview" style="border-color: #F1D18A; display: flex; flex-direction: column">
         <div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; background: #FFFBF2; border-radius: 14px 14px 0 0">
-          <div style="display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center"><b style="font-size: 16px">Free 8.4 GB from 6 tasks?</b><span class="chip" style="background: #EAECF5; color: #3B3F5E">6 previews · one digest each · computed 14:40:12</span></div>
+          <div style="display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center"><b style="font-size: 16px">Compact 9 tasks? Frees 12.4 GB; every worktree, branch and edit stays.</b><span class="chip" style="background: #EAECF5; color: #3B3F5E">9 previews · one digest each · computed 14:40:12</span></div>
           <table>
-            <thead><tr><th>Task</th><th>Removed</th><th>Kept</th><th>Patch</th><th>Size</th></tr></thead>
+            <thead><tr><th>Task</th><th>Deleted (generated)</th><th>Kept</th><th>Unrecognised ignored files</th><th>Frees</th></tr></thead>
             <tbody>
-              <tr><td><span class="mono">c9379d2d</span> · config area grouping</td><td>worktree, branch, run data</td><td>history</td><td class="muted">nothing uncommitted</td><td class="mono">299 MB</td></tr>
-              <tr><td><span class="mono">8b226d62</span> · saved views alignment</td><td>worktree, branch, run data</td><td>history</td><td class="muted">nothing uncommitted</td><td class="mono">1.5 GB</td></tr>
-              <tr><td><span class="mono">d5619d45</span> · Meine Aufträge</td><td>worktree, item worktrees, item branches</td><td>history · branch with <span class="mono">f5d7b50</span></td><td class="muted">—</td><td class="mono">2.7 GB</td></tr>
-              <tr><td><span class="mono">e108a85b</span> · mailbox labels</td><td>worktree, item worktrees, item branches</td><td>history · branch with <span class="mono">bc2eb6f</span></td><td class="muted">—</td><td class="mono">2.7 GB</td></tr>
-              <tr><td class="muted" colspan="5">… 2 more rows</td></tr>
+              <tr><td><span class="mono">00057c6e</span> · IO name</td><td>node_modules, .next, caches, run data</td><td>worktree with 3 edits, artifacts/, branch</td><td class="muted">none</td><td class="mono">2.1 GB</td></tr>
+              <tr><td><span class="mono">c9379d2d</span> · config area grouping</td><td>node_modules, run data</td><td>worktree, branch</td><td class="muted">none</td><td class="mono">290 MB</td></tr>
+              <tr><td><span class="mono">d5619d45</span> · Meine Aufträge</td><td>node_modules ×4, .next, caches</td><td>worktrees, branch with <span class="mono">f5d7b50</span>, item branches</td><td class="mono">coverage/ 12 MB · kept</td><td class="mono">2.6 GB</td></tr>
+              <tr><td><span class="mono">e108a85b</span> · mailbox labels</td><td>node_modules ×4, .next, caches</td><td>worktrees, branch with <span class="mono">bc2eb6f</span>, item branches</td><td class="muted">none</td><td class="mono">2.6 GB</td></tr>
+              <tr><td class="muted" colspan="5">… 5 more rows</td></tr>
             </tbody>
           </table>
-          <div class="muted" style="font-size: 13px">Executed one task at a time with its own digest; a refusal for one task (<span class="mono">409 cleanup_preview_stale</span>) leaves the others done or untouched, and the bar reports exactly which. Never a single sweeping delete.</div>
-          <div style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn danger" type="button">Remove 8.4 GB</button><button class="btn" type="button">Keep everything</button></div>
+          <div class="muted" style="font-size: 13px">Executed one task at a time with its own digest; a refusal for one task (<span class="mono">409 cleanup_preview_stale</span>) leaves the others done or untouched, and the bar reports exactly which. Never a single sweeping delete. "Remove the selected" opens the same table with the branch, worktree and uncommitted-file columns of the removal tier.</div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn primary" type="button">Compact 9 tasks · free 12.4 GB</button><button class="btn" type="button">Keep everything</button></div>
         </div>
       </section>
 

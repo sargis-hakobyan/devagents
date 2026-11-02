@@ -119,7 +119,7 @@
       "y": 4200,
       "w": 1360,
       "h": 1900,
-      "title": "U4 · Task page: footprint, inline cleanup preview, after cleanup",
+      "title": "U4 · Task page: footprint, compaction and removal tiers",
       "expand": "fill"
     },
     "U4-Cleanup-Lists.dc.html": {
@@ -127,7 +127,23 @@
       "y": 4200,
       "w": 1360,
       "h": 1500,
-      "title": "U4 · Tasks filter and bulk bar, Overview and Settings storage",
+      "title": "U4 · Tasks filter and bulk compaction, Overview and Settings storage",
+      "expand": "fill"
+    },
+    "U5-Attention.dc.html": {
+      "x": 0,
+      "y": 6300,
+      "w": 1360,
+      "h": 1700,
+      "title": "U5 · Liveness: silent workers, attention items, bounded recovery",
+      "expand": "fill"
+    },
+    "U5-Modes-Cost.dc.html": {
+      "x": 1440,
+      "y": 6300,
+      "w": 1360,
+      "h": 1500,
+      "title": "U5 · Answer-only work mode and cost rollups",
       "expand": "fill"
     }
   },
@@ -146,7 +162,9 @@
     "U3-Setup.dc.html",
     "U3-States.dc.html",
     "U4-Cleanup-Task.dc.html",
-    "U4-Cleanup-Lists.dc.html"
+    "U4-Cleanup-Lists.dc.html",
+    "U5-Attention.dc.html",
+    "U5-Modes-Cost.dc.html"
   ],
   "notes": {
     "rowA": {
@@ -196,6 +214,20 @@
       "y": 4200,
       "w": 440,
       "text": "Contract: GET /tasks/:id/cleanup-preview returns worktrees (path, size, uncommitted and untracked files), branches to delete and keep, run temp data and a digest; POST /tasks/:id/cleanup {digest, savePatch} recomputes ownership and the list and refuses with 409 when anything changed. A completed task's branch is always kept. Events and evidence are never deleted. Nothing is removed automatically.",
+      "fill": "blue"
+    },
+    "rowU5": {
+      "x": 0,
+      "y": 6000,
+      "text": "U5 — improvements taken from the Paperclip review: liveness rule, answer-only mode, visible cost; compaction added to U4",
+      "kind": "title1",
+      "maxW": 10000
+    },
+    "legendU5": {
+      "x": 2880,
+      "y": 6300,
+      "w": 440,
+      "text": "Liveness rule: every unfinished task has a live path (engine activity), an explicit waiting path (a decision of yours) or a recovery path (a choice offered to you); anything else is shown as needing attention. Automatic retries are bounded (quota/capacity once, lost dispatch once) and tool calls are never replayed. Costs are provider-reported tokens summed per task and project; prices are optional configuration, never estimates. See docs/IMPROVEMENT_PLAN.md.",
       "fill": "blue"
     }
   },

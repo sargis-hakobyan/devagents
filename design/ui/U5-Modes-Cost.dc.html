@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — answer-only work mode and cost rollups (U5)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}.btn.small{min-height:34px;font-size:13px;padding:0 12px}.btn[disabled]{opacity:.55;cursor:not-allowed}
+.btn:focus-visible,input:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.note{border-radius:10px;padding:10px 12px;font-size:13.5px}
+.note.warn{background:#FFF1DB;border:1px solid #F1D18A}.note.info{background:#F3F6FE;border:1px solid #C9D7F7}
+.h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5A5F78}
+.radio{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border:1px solid #D1D4E4;border-radius:12px;font-weight:400}.radio.on{border-color:#231F4A;box-shadow:0 0 0 3px #E6E8F3}.radio input{margin-top:4px;width:18px;height:18px}
+dl.kv{margin:0;display:grid;grid-template-columns:150px minmax(0,1fr);gap:7px 12px;font-size:14px}dl.kv dt{color:#5A5F78}dl.kv dd{margin:0;overflow-wrap:anywhere}
+dl.counts{margin:0;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;font-size:14px}dl.counts dd{margin:0;text-align:right;font-weight:800;font-variant-numeric:tabular-nums}
+table{border-collapse:collapse;width:100%;font-size:14px}th{text-align:left;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:#5A5F78;padding:8px 12px;border-bottom:1px solid #E0E2EE}td{padding:8px 12px;border-bottom:1px solid #EAECF5;vertical-align:top}
+</style>
+</helmet>
+<div style="min-height: 100vh; padding: 40px; display: flex; flex-direction: column; gap: 28px; box-sizing: border-box">
+  <div><div class="h">U5 · two more transfers from Paperclip</div><h1 style="margin: 4px 0 0; font-size: 32px; letter-spacing: -0.03em">An answer-only work mode, and costs you can see</h1><p class="muted" style="margin: 6px 0 0">Their `standard / ask / planning` modes and their per-run cost events, drawn into the existing submit form, task page and Overview rail.</p></div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; align-items: start">
+    <section class="card" aria-label="Submit form: work mode" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 14px">
+      <div class="h">Submit work · a "What kind of work" group above Autonomy</div>
+      <fieldset style="border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px"><legend style="font-size: 13.5px; font-weight: 700; color: #3B3F5E; margin-bottom: 6px">What kind of work</legend>
+        <label class="radio"><input type="radio" name="kind" value="standard"><span><b>Change the code</b> · plan, implement, validate, review, one local commit. <span class="muted">(today's only behaviour)</span></span></label>
+        <label class="radio on"><input type="radio" name="kind" value="ask" checked><span><b>Answer a question</b> · investigate in a read-only worktree and explain, with file references. No dependencies installed, no commit, no repair cycles.<br><span class="muted" style="font-size: 12.5px">Right for "why is the saved-views section aligned left?"; a change can be submitted afterwards from the answer.</span></span></label>
+        <label class="radio"><input type="radio" name="kind" value="plan"><span><b>Plan only</b> · produce the plan for your approval and stop. Approving later turns it into a change task with the same plan version.</span></span></label>
+      </fieldset>
+      <div class="note info" style="font-size: 13px">Answer-only tasks skip team readiness for implementers: any enabled planner can answer. The reviewer still checks the answer against the request and the files it cites; a wrong citation is a finding.</div>
+      <label style="display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; font-weight: 700; color: #3B3F5E"><span>What should the team answer?</span><textarea style="font: inherit; font-weight: 400; font-size: 15px; border: 1px solid #D1D4E4; border-radius: 10px; padding: 10px 12px; min-height: 90px">Why is the saved views section on the monitoring page aligned left? It looks different from the other pages.</textarea></label>
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap"><button class="btn primary" type="button">Submit question</button><span class="muted" style="font-size: 13px">Resolved summary: test-project · Starter team rev 1 · answer only · estimated 1 run, no setup</span></div>
+    </section>
+
+    <section class="card" aria-label="Task page: answer" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 12px">
+      <div class="h">Task page · an answered question</div>
+      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: #E1F5EA; color: #135E38">✓ Answered</span><span class="chip" style="background: #EAECF5; color: #3B3F5E">answer only · no commit</span><span class="muted" style="font-size: 13px">v3 · took 2 min 40 s · 48k tokens · $0.19</span></div>
+      <h2 style="margin: 0; font-size: 22px; letter-spacing: -0.02em; line-height: 1.25">Why is the saved views section on the monitoring page aligned left?</h2>
+      <div class="note info" style="display: flex; flex-direction: column; gap: 8px">
+        <b>Answer</b>
+        <span>The monitoring page renders <span class="mono">ViewSwitcher</span> directly inside <span class="mono">MonitoringToolbar</span> (<span class="mono">apps/loop-ui/components/MonitoringToolbar.tsx:41</span>) in a flex row with <span class="mono">justify-start</span>, while every other page gets it from the shared <span class="mono">DataTableToolbar</span> (<span class="mono">packages/technical-ui/src/DataTableToolbar.tsx:18</span>), which places it in a trailing <span class="mono">ml-auto</span> group. The difference dates from the toolbar split in commit <span class="mono">4c1e9a2</span>.</span>
+        <span class="muted" style="font-size: 13px">Cited files were read in a read-only worktree at base <span class="mono">8af79dd</span>. Nothing was modified.</span>
+      </div>
+      <dl class="kv">
+        <dt>Review</dt><dd>Approved · "Both citations resolve and describe the layout correctly; the commit reference matches the blame."</dd>
+        <dt>Suggested change</dt><dd>Use <span class="mono">DataTableToolbar</span> on the monitoring page or add <span class="mono">ml-auto</span> to its switcher group · <a class="btn small" href="U3-Submit.dc.html">Submit this as a change</a> <span class="muted" style="font-size: 12.5px">(prefills the request with the answer; new task, new key)</span></dd>
+        <dt>Working files</dt><dd>read-only worktree, 12 MB, no dependencies installed · compact not needed</dd>
+      </dl>
+    </section>
+  </div>
+
+  <div class="h">Costs · recorded per run today, now added up and shown</div>
+  <div style="display: grid; grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); gap: 24px; align-items: start">
+    <section class="card" aria-label="Task page: cost line and run table" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: #E1F5EA; color: #135E38">✓ Completed</span><span class="muted" style="font-size: 13px">autonomous · v9 · took 11 min · <b>312k tokens · $1.84</b> · 6 runs · 1 repair</span></div>
+      <h2 style="margin: 0; font-size: 20px; letter-spacing: -0.02em">Implement three modules and combine them</h2>
+      <div class="h" style="margin-top: 6px">Activity tab · per-run usage (from the existing run-completed evidence)</div>
+      <table>
+        <thead><tr><th>Run</th><th>Phase</th><th>Agent · model</th><th>Tokens in / out</th><th>Cost</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">0942…</td><td>planning</td><td>tech-lead · gpt-5-codex</td><td class="mono">38k / 2.1k</td><td class="mono">$0.21</td></tr>
+          <tr><td class="mono">d282…</td><td>implementation · a</td><td>backend-developer · gpt-5-codex</td><td class="mono">61k / 9.4k</td><td class="mono">$0.47</td></tr>
+          <tr><td class="mono">8fc0…</td><td>implementation · b</td><td>frontend-developer · gpt-5-codex</td><td class="mono">58k / 8.9k</td><td class="mono">$0.44</td></tr>
+          <tr><td class="mono">2193…</td><td>implementation · c</td><td>general-developer · gpt-5-codex</td><td class="mono">49k / 6.2k</td><td class="mono">$0.36</td></tr>
+          <tr><td class="mono">5de4…</td><td>review ×3 + combined</td><td>code-reviewer · gpt-5-codex</td><td class="mono">70k / 3.8k</td><td class="mono">$0.36</td></tr>
+          <tr><td colspan="3"><b>Task total</b> <span class="muted">· provider-reported usage; cost from the configured price table, "unpriced" when the model has no entry</span></td><td class="mono"><b>276k / 30k</b></td><td class="mono"><b>$1.84</b></td></tr>
+        </tbody>
+      </table>
+      <div class="muted" style="font-size: 12.5px">Tokens are what the provider reported for each run; a run that reported nothing shows "not reported" and is excluded from the total with a count. Prices come from <span class="mono">devagents.yaml</span> (<span class="mono">pricing:</span> per model, optional); without a price the UI shows tokens only, never an estimate.</div>
+    </section>
+    <div style="display: flex; flex-direction: column; gap: 16px">
+      <section class="card" aria-label="Overview rail: spend" style="padding: 12px 16px; display: flex; flex-direction: column; gap: 8px">
+        <b style="font-size: 15px">Spend · this month</b>
+        <dl class="counts"><dt>test-project</dt><dd>$14.20</dd><dt>website</dt><dd>$3.05</dd><dt>All projects</dt><dd>$17.25</dd></dl>
+        <div class="muted" style="font-size: 12px">2.9M tokens across 41 runs · 3 runs unpriced · <a href="#">By task →</a></div>
+      </section>
+      <section class="card" aria-label="Project card: budget" style="padding: 12px 16px; display: flex; flex-direction: column; gap: 8px">
+        <b style="font-size: 15px">Project card · optional monthly budget</b>
+        <dl class="kv" style="grid-template-columns: 110px minmax(0, 1fr)"><dt>Budget</dt><dd>$25 / month · <span class="chip" style="background: #FFF1DB; color: #7A4A00">57% used</span></dd><dt>At 100%</dt><dd>New submissions for this project are refused with the reason; running tasks finish. Raise the budget or wait for the next month. Nothing pauses silently.</dd></dl>
+      </section>
+      <section class="card" aria-label="Tasks list cell" style="padding: 12px 16px; display: flex; flex-direction: column; gap: 6px"><b style="font-size: 15px">Tasks list</b><span class="muted" style="font-size: 13px">The existing request cell's sub-line gains "· $1.84" after the team label; sortable by cost later, not now.</span></section>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
