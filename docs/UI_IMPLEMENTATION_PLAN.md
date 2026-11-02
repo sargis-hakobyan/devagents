@@ -198,6 +198,49 @@ Design: `design/ui/U4-Cleanup-Task.dc.html` and `design/ui/U4-Cleanup-Lists.dc.h
 - Browser: task page preview, patch checkbox, after-cleanup rows, stale refusal rendering, bulk filter and bar with unticked uncommitted tasks, storage line states, hostile file names rendered as text, missing CSRF and foreign Origin on the new route, narrow screen.
 - Docs: README and milestones; decisions entry stating that nothing is deleted automatically and that history is never removed.
 
+## U6 handoff — the Work tab as a team board (2026-11-02)
+
+Design: `design/ui/U6-Work-Team.dc.html` (fifth canvas row). Owner decision: the Work tab shows the team on this task, who is finished, who is working and who is left, as two components. Nothing else on the board is a separate screen: the roster-state cards, the opened stack, the five-failures card, the 390 px drawing and the notes are states of these two components or guidance. The three-column roster layout drawn on the board is **not** built; the ordered member list replaces it. No pan-and-zoom canvas of any kind.
+
+### Components
+
+1. **Pipeline** ("Your team on this task"), at the top of the Work tab, replacing today's "Measured: …" line. Stages left to right: Plan, Build, Review, Integrate, Commit; single-item tasks have four stages (no Integrate). Each stage shows its title, a stage chip ("✓ Done", "▶ 2 of 3 done", "▶ Working", "Up next", "✕ 5 stopped") and the members who do it: avatar (role glyph in an ink circle), status ring, status badge, name, and one or two measured lines. Connectors between stages turn green when the earlier stage is done. A legend (Finished, Working now, Up next, Needs you) sits in the header. A footer line names members the plan does not need ("Not needed for this task: QA Engineer").
+2. **Member list**, below the pipeline, replacing today's work-item cards. One card per involved member, ordered needs you → failed → working now → up next → finished → not needed. A card carries the avatar, name and id, the assignment line (item ids and titles, owned paths, dependencies), the existing stage chips (Implemented ×n, Tests ✓ / ✕ then ✓ / ✕ exit n / output truncated, Review ✓ 0 findings / n findings, Checkpoint sha, Integrated), timing (started → finished, or elapsed while working, from recorded timestamps), repairs used of the budget, and "Show activity for <item>" which switches to the Activity tab filtered to that item. A member with several items has one card that lists them; the current item cards disappear.
+
+Status rings and badges: finished green ✓; working blue ▶ (↻ while repairing); up next grey dashed …; needs you amber ! (the "You" member); failed red ✕; aborted or interrupted grey ⚠; not needed light grey –. Status is always ring + badge + text; colour never carries meaning alone.
+
+### How status is derived (no new backend field)
+
+Inputs the page already loads: `GET /tasks/:id` (state, approval, plan, `agents` roster snapshot, `team`, outcome), `GET /tasks/:id/items` (per-item state, agentId, repairCycles, commit, updatedAt, error) and the evidence log (`run-started`, `run-completed`, `run-failed` with `runId`, `phase`, `agentId` and `workItemId` for per-item runs; `validation`; `item-commit-created`; `commit-created`; `limitations`). Put the derivation in one pure module (`ui/src/team-board.ts`) with unit tests; the components only render its output.
+
+- **Members**: the roster snapshot, in roster order; "You" is added as a member while the task is `awaiting_mode` or `awaiting_plan_approval`; "DevAgents" is the Commit stage member. Involved = planner (the agent of the planning run), every `assignedAgent` of a plan item, the integration agent, every agent with a review run; everyone else is "not needed" with the reason "no item asks for <capability>" when a capability can be named, otherwise "not assigned by the plan".
+- **Plan stage**: the planning agent; done when a plan is stored; the line shows the plan version, item count and planning run duration; in plan-approval mode a second line "You approved HH:MM:SS" or "Waiting for your approval".
+- **Build stage**: one row per implementer with its items; row status from the items' states (pending → up next; creating/running/validating/reviewing/checkpointing/integrating → working, repairing → working with ↻; reviewed/completed → finished; failed → failed; aborted/interrupted → aborted; cancelled/blocked → not needed-style grey with the reason). Stage chip counts items, not members.
+- **Review stage**: the reviewer; counts item reviews approved and findings; working while a review run is open; done when the final review approved; "Next: item c, once its tests pass" while idle with work still coming.
+- **Integrate stage** (multi-item only): the integration agent; up next until the integration run starts; working during it; done when combined validation passed.
+- **Commit stage**: DevAgents; done when `outcome.commit` exists with the short sha and time; "No commit" on failure or cancellation.
+- **Durations** are differences of recorded timestamps, summed over a member's runs including repairs; a run still open shows elapsed from its start. Never estimate; show "—" when no timestamp exists.
+- **Repair** reopens a stage: while a repair cycle is open the Build stage and the member are working again, never finished.
+
+### Fold rule
+
+Each stage and the member list show up to four full rows. Past that, finished rows fold first into a stack, then up-next rows; working, failed and needs-you rows never fold. A stack is a button: up to five overlapping small avatars, the stage chip ("✓ 6 finished · 7 items"), one line of detail and "Show"; it expands in place with a "Hide" bar and the open state is kept per task in `localStorage` only. A stack is reachable by keyboard and announces its count.
+
+### States to cover
+
+Single item (four stages, reviewer working); multi-item running (fixture "Three modules": a and b integrated, c validating); awaiting mode and awaiting plan approval ("You" with the existing approve, reject and mode controls, other members "waiting for you"); completed (everyone finished, commit sha); failed (stopped member with its finding and repair count, finished members, members that did not get a turn); cancelled and interrupted (grey ⚠ rows with the recorded reason); large team (ten members, twelve items, folded and opened); five failures at once (the stage grows); narrow width (stages stack vertically, member cards full width; no horizontal scroll at 390 px).
+
+### Verification
+
+- Unit tests for the derivation module: every state above from recorded evidence fixtures, repair reopening, durations from timestamps, "not needed" reasons, the fold rule at the threshold (4 and 5 rows, finished before up next, failures never fold), "You" only in the two awaiting states.
+- Browser tests on the fixture: pipeline stage count for single and multi-item tasks, status text per member, stack expands and the state survives a reload, 390 px has no horizontal scroll, the activity link filters the Activity tab.
+- Hostile fixture text (item titles, agent names) renders as text.
+- `npm run check` and the browser suite pass; no backend change, no new dependency, no model call.
+
+### Out of scope
+
+The three-column roster, any zoomable canvas, a dependency graph view, drag-and-drop, the Overview active-task cards (unchanged), the Plan tab (already redesigned), and the U4/U5 work.
+
 ## Setup follow-up — 2026-10-30
 
 The owner authorized a short README and one-command startup with a Browser/Terminal/Later choice. This supersedes the U3-only restriction on new credential input, while preserving the prohibition on saved-secret reads and automatic paid tests. Existing approved components, shell and shared polling are reused.
