@@ -150,7 +150,7 @@
       "x": 0,
       "y": 8300,
       "w": 1360,
-      "h": 3250,
+      "h": 4900,
       "title": "U6 · Work tab: the team on this task",
       "expand": "fill"
     }
@@ -250,7 +250,7 @@
       "x": 1440,
       "y": 8300,
       "w": 440,
-      "text": "Two treatments on one page: the pipeline (plan → build → review → integrate → commit, with the members who do each stage) and the roster (Finished / Working now / Up next columns). \"You\" appears as a member whenever a decision is yours. Every value is a recorded run, event or checkpoint; durations are timestamp differences; nothing is estimated. Members the plan does not need are shown as not needed. No new backend field is required.",
+      "text": "Two treatments on one page: the pipeline (plan → build → review → integrate → commit, with the members who do each stage) and the roster (Finished / Working now / Up next columns). \"You\" appears as a member whenever a decision is yours. Every value is a recorded run, event or checkpoint; durations are timestamp differences; nothing is estimated. Members the plan does not need are shown as not needed. No new backend field is required. Large teams: each stage and roster column shows up to four full rows; finished members fold into a stack first, then up-next members; working, failed and needs-you rows never fold.",
       "fill": "blue"
     }
   },
