@@ -3,8 +3,10 @@ import { useTaskActions } from '../components/TaskActions';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { api, evidenceFacts, type Evidence, type ItemProgress, type Task, type TaskEvent } from '../api';
-import { Card, Chip, ErrorNote, ItemChip, Later, Pre, Skeleton, Stage, StateChip, pretty } from '../components/ui';
-import { limitationCount, command, elapsed, formatTime, relative, taskState } from '../format';
+import { Card, Chip, ErrorNote, Later, Pre, Skeleton, Stage, StateChip, pretty } from '../components/ui';
+import { MemberList, Pipeline } from '../components/TeamBoard';
+import { teamBoard, type TeamBoard } from '../team-board';
+import { limitationCount, command, elapsed, formatTime, taskState } from '../format';
 import { forget, useNow, usePoll } from '../state';
 
 type Tab = 'work' | 'plan' | 'activity' | 'result';
@@ -31,7 +33,8 @@ export function TaskDetailPage({ id }: { id: string }) {
   const evidence = useAppendLog<Evidence>(`/tasks/${id}/evidence`, 3000, 200);
   const task = detail.data?.task; const items = detail.data?.items ?? [];
   const renderActions = useTaskActions({ task, reload: detail.reload, showPlan: () => setTab('plan') });
-  const perItem = useMemo(() => itemEvidence(evidence.rows), [evidence.rows]);
+  const [activityItem, setActivityItem] = useState<string | undefined>(undefined);
+  const board = useMemo(() => (task ? teamBoard({ task, items, evidence: evidence.rows, now }) : undefined), [task, items, evidence.rows, now]);
   useEffect(() => { if (task?.state === 'completed' && tab === 'work' && !task.plan) setTab('result'); }, [task?.state]);
   if (!task && detail.error) return <ErrorNote message={detail.error} />;
   if (!task) return <><Skeleton rows={2} label="Loading task" /><Skeleton rows={4} /></>;
@@ -61,9 +64,9 @@ export function TaskDetailPage({ id }: { id: string }) {
     <div class="tabs" role="tablist" aria-label="Task sections">
       {([['work', `Work · ${items.length}`], ['plan', 'Plan'], ['activity', `Activity · ${events.rows.length + evidence.rows.length}`], ['result', 'Result']] as [Tab, string][]).map(([t, label]) => <button key={t} type="button" role="tab" class="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{label}</button>)}
     </div>
-    {tab === 'work' && <WorkTab task={task} items={items} perItem={perItem} now={now} />}
+    {tab === 'work' && board && <WorkTab task={task} board={board} now={now} onActivity={item => { setActivityItem(item); setTab('activity'); }} />}
     {tab === 'plan' && <><PlanTab task={task} />{task.state === 'awaiting_plan_approval' && <div class="decision-bar">{renderActions()}</div>}</>}
-    {tab === 'activity' && <ActivityTab task={task} events={events.rows} evidence={evidence.rows} />}
+    {tab === 'activity' && <ActivityTab task={task} events={events.rows} evidence={evidence.rows} filter={activityItem} onClear={() => setActivityItem(undefined)} />}
     {tab === 'result' && <ResultTab task={task} evidence={evidence.rows} />}
   </>;
 }
@@ -86,42 +89,11 @@ function summarize(task: Task, items: ItemProgress[]): { title: string; detail: 
 }
 const itemVerb = (s: string) => ({ running: 'implementing', validating: 'validating', reviewing: 'reviewing', repairing: 'repairing', creating: 'preparing a worktree for', checkpointing: 'checkpointing', integrating: 'integrating' } as Record<string, string>)[s] ?? s;
 
-type PerItem = Record<string, { tests?: { exitCode: number; truncated?: boolean }[]; review?: { approved: boolean; findingsCount: number }; commit?: string; implementations: number }>;
-function itemEvidence(rows: Evidence[]): PerItem {
-  const out: PerItem = {};
-  const at = (id: string) => (out[id] ??= { implementations: 0 });
-  for (const e of rows) {
-    const d = evidenceFacts(e); const id = typeof d.workItemId === 'string' ? d.workItemId : undefined;
-    if (e.kind === 'validation' && id) at(id).tests = [...(at(id).tests ?? []), { exitCode: Number(d.exitCode), ...(d.truncated ? { truncated: true } : {}) }];
-    if (e.kind === 'run-completed' && id && d.phase === 'review') { const o = d.output as ReviewFacts | undefined; if (o) at(id).review = { approved: reviewPassed(o), findingsCount: findingCount(o) ?? 0 }; }
-    if (e.kind === 'run-completed' && id && d.phase === 'implementation') at(id).implementations++;
-    if (e.kind === 'item-commit-created' && id && typeof d.commit === 'string') at(id).commit = d.commit;
-  }
-  return out;
-}
-function WorkTab({ task, items, perItem, now }: { task: Task; items: ItemProgress[]; perItem: PerItem; now: number }) {
-  if (!task.plan) return <Card><div class="empty"><b>No work items yet</b><span>Items appear once the Tech Lead's plan is stored{task.state === 'awaiting_mode' ? ', after a mode is chosen' : ''}.</span></div></Card>;
-  const multi = task.plan.items.length > 1; const integrated = items.filter(i => i.state === 'completed').length;
+/** The team on this task: a pipeline of stages with the members who do them, then one card per member. Everything is derived in team-board.ts from recorded runs. */
+function WorkTab({ task, board, now, onActivity }: { task: Task; board: TeamBoard; now: number; onActivity: (item: string) => void }) {
   return <div class="stack">
-    <div class="muted" style={{ fontSize: '13px' }}>{multi ? `Measured: ${integrated} of ${items.length} integrated · repairs are bounded per item plus one shared integration budget` : 'Single work item: validation and review run in the task worktree'} · stages can revisit tests, review and implementation during repair.</div>
-    <div class="items">{task.plan.items.map(planned => {
-      const p = items.find(i => i.itemId === planned.id); const ev = perItem[planned.id] ?? perItem['@integration'];
-      const st = p?.state ?? 'pending'; const current = ['running', 'validating', 'reviewing', 'repairing', 'creating', 'checkpointing', 'integrating'].includes(st);
-      const lastTest = ev?.tests?.[ev.tests.length - 1]; const testsRan = ev?.tests?.length ?? 0;
-      return <article key={planned.id} class={`card item ${current ? 'current' : ''}`}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}><b class="wrap-anywhere"><span class="mono">{planned.id}</span> · {planned.title}</b><ItemChip state={st} /></div>
-        <div class="muted" style={{ fontSize: '13px' }}>{planned.assignedAgent ?? 'any eligible agent'}{planned.ownedPaths?.length ? <> · {(task.devagentsRules ?? true) ? 'owns' : 'planned scope'} <span class="mono">{planned.ownedPaths.join(', ')}</span></> : null}{planned.dependsOn.length ? <> · depends on <span class="mono">{planned.dependsOn.join(', ')}</span></> : ' · no dependencies'}</div>
-        <div class="stages">
-          <Stage tone={ev?.implementations ? 'ok' : current && st === 'running' ? 'run' : 'neutral'}>Implemented{ev?.implementations ? ` ×${ev.implementations}` : ''}</Stage>
-          <Stage tone={!testsRan ? (st === 'validating' ? 'run' : 'neutral') : lastTest && lastTest.exitCode === 0 && !lastTest.truncated ? (testsRan > 1 ? 'warn' : 'ok') : 'bad'}>{!testsRan ? 'Tests' : lastTest!.exitCode === 0 && !lastTest!.truncated ? (testsRan > 1 ? `Tests ✕ then ✓ (${testsRan} runs)` : 'Tests ✓') : lastTest!.truncated ? 'Tests · output truncated' : `Tests ✕ (exit ${lastTest!.exitCode})`}</Stage>
-          <Stage tone={!ev?.review ? (st === 'reviewing' ? 'run' : 'neutral') : ev.review.approved && ev.review.findingsCount === 0 ? 'ok' : 'warn'}>{!ev?.review ? 'Review' : ev.review.approved && ev.review.findingsCount === 0 ? 'Review ✓' : `Review · ${ev.review.findingsCount} finding${ev.review.findingsCount === 1 ? '' : 's'}`}</Stage>
-          {multi && <Stage tone={ev?.commit || p?.commit ? 'ok' : 'neutral'}>{p?.commit || ev?.commit ? `Checkpoint ${(p?.commit ?? ev?.commit)!.slice(0, 7)}` : 'Checkpoint'}</Stage>}
-        </div>
-        <div class="muted" style={{ fontSize: '12.5px' }}>Repairs: {p?.repairCycles ?? 0} · validation <span class="mono">{planned.validation.map(command).join(' ; ')}</span>{p?.updatedAt && <> · updated {relative(p.updatedAt, now)}</>}</div>
-        {(p?.error || p?.reason) && <div class="note bad" style={{ fontSize: '12.5px' }}>{p.reason ?? ''}{p.reason && p.error ? ' · ' : ''}{p.error ?? ''}</div>}
-      </article>;
-    })}</div>
-    {multi && <Card><div style={{ padding: '12px 14px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}><b>Then</b><Stage tone={['validating', 'reviewing', 'committing', 'completed'].includes(task.state) && integrated === items.length ? 'ok' : 'neutral'}>Combined validation · {new Set([...task.plan.items.flatMap(i => i.validation), ...(task.plan.integration?.validation ?? [])].map(command)).size} commands</Stage><Stage tone={task.state === 'completed' ? 'ok' : task.state === 'reviewing' ? 'run' : 'neutral'}>Independent review</Stage><Stage tone={task.state === 'completed' ? 'ok' : task.state === 'committing' ? 'run' : 'neutral'}>Final local commit</Stage></div></Card>}
+    <Pipeline board={board} taskId={task.id} now={now} />
+    {task.plan ? <MemberList board={board} taskId={task.id} now={now} rulesOn={task.devagentsRules ?? true} terminal={['completed', 'failed', 'cancelled'].includes(task.state)} onActivity={onActivity} /> : <Card><div class="empty"><b>No work items yet</b><span>Members get their work once the Tech Lead's plan is stored{task.state === 'awaiting_mode' ? ', after a mode is chosen' : ''}.</span></div></Card>}
   </div>;
 }
 function PlanTab({ task }: { task: Task }) {
@@ -171,17 +143,22 @@ function PlanTab({ task }: { task: Task }) {
     </article></li>)}</ol>
   </div>;
 }
-function ActivityTab({ task, events, evidence }: { task: Task; events: TaskEvent[]; evidence: Evidence[] }) {
+function ActivityTab({ task, events, evidence, filter, onClear }: { task: Task; events: TaskEvent[]; evidence: Evidence[]; filter?: string | undefined; onClear?: () => void }) {
   type Row = { at: string; actor: string; sequence: number; kind: 'event' | 'evidence'; body: string; detail?: unknown; truncated?: boolean; evidenceSequence?: number };
   // Completed and failed runs carry the run id, not the agent; the start entry names the agent.
   const agentByRun = new Map<string, string>();
   for (const e of evidence) { const d = evidenceFacts(e); if (e.kind === 'run-started' && typeof d.runId === 'string' && typeof d.agentId === 'string') agentByRun.set(d.runId, d.agentId); }
+  // "Show activity for <item>" from the Work tab: evidence recorded for that item, and events whose reason names it.
+  const mentions = filter ? new RegExp(`(^|[^A-Za-z0-9_-])${filter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_-])`) : undefined;
+  // A single-item task runs without the DAG, so its runs and validations carry no item id and belong to the only item.
+  const single = task.plan?.items.length === 1 && task.plan.items[0]?.id === filter;
+  const forItem = (e: Evidence) => { const d = evidenceFacts(e); return d.workItemId === filter || d.itemId === filter || (single && d.workItemId === undefined && d.itemId === undefined && !['commit-intent', 'commit-created', 'worktree-intent', 'environment'].includes(e.kind)); };
   const rows: Row[] = [
-    ...events.map(e => ({ at: e.timestamp, actor: e.actor, sequence: e.sequence, kind: 'event' as const, body: `${taskState({ state: e.state, error: '' }).label} · ${e.reason}` })),
-    ...evidence.map(e => ({ at: e.at, actor: evidenceActor(e, agentByRun), sequence: e.sequence, kind: 'evidence' as const, body: evidenceTitle(e), detail: e.data, ...(e.truncated ? { truncated: true } : {}), evidenceSequence: e.sequence })),
+    ...events.filter(e => !mentions || mentions.test(e.reason)).map(e => ({ at: e.timestamp, actor: e.actor, sequence: e.sequence, kind: 'event' as const, body: `${taskState({ state: e.state, error: '' }).label} · ${e.reason}` })),
+    ...evidence.filter(e => !filter || forItem(e)).map(e => ({ at: e.at, actor: evidenceActor(e, agentByRun), sequence: e.sequence, kind: 'evidence' as const, body: evidenceTitle(e), detail: e.data, ...(e.truncated ? { truncated: true } : {}), evidenceSequence: e.sequence })),
   ].sort((a, b) => b.at.localeCompare(a.at) || b.sequence - a.sequence);
   const [limit, setLimit] = useState(40);
-  return <Card title="Activity" right={<span class="muted" style={{ fontSize: '12.5px' }}>{events.length} events · {evidence.length} evidence entries · newest first · entries bounded to 16 KB</span>}>
+  return <Card title={filter ? <>Activity · item <span class="mono">{filter}</span> <button type="button" class="btn small" style={{ marginLeft: '8px' }} onClick={onClear}>Show all</button></> : 'Activity'} right={<span class="muted" style={{ fontSize: '12.5px' }}>{filter ? `${rows.length} entries for this item · ` : ''}{events.length} events · {evidence.length} evidence entries · newest first · entries bounded to 16 KB</span>}>
     {rows.length === 0 ? <div class="empty"><b>No activity recorded</b></div> : <ol class="timeline" style={{ padding: '4px 14px' }}>{rows.slice(0, limit).map(r => <li key={`${r.kind}-${r.sequence}`}>
       <span class="mono muted">{formatTime(r.at)}</span><span class="muted" style={{ fontSize: '13px' }}>{r.actor}</span>
       {r.detail === undefined ? <span class="wrap-anywhere">{r.body}</span> : <EvidenceRow taskId={task.id} row={r} />}

@@ -63,11 +63,12 @@ test('a completed multi-item task shows real items, plan, activity and result', 
   await page.goto(`${base}/ui/tasks/${t.id}`);
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Implement three modules');
   await expect(page.locator('.chip.ok', { hasText: 'Completed' }).first()).toBeVisible();
-  await expect(page.getByText('Measured: 3 of 3 integrated')).toBeVisible();
-  const items = page.locator('article.item');
-  await expect(items).toHaveCount(3);
-  await expect(items.nth(2)).toContainText('depends on a, b');
-  await expect(items.nth(0)).toContainText('Tests ✓'); await expect(items.nth(0)).toContainText('Review ✓'); await expect(items.nth(0)).toContainText('Checkpoint');
+  await expect(page.getByText(/5 of 6 members involved · 5 finished/)).toBeVisible();
+  const items = page.locator('.memberlist article[data-member]');
+  await expect(items).toHaveCount(7); // six involved members plus the unused QA engineer
+  await expect(page.locator('.memberlist article[data-member="general-developer"]')).toContainText('depends on a, b');
+  const first = page.locator('.memberlist article[data-member="backend-developer"]');
+  await expect(first).toContainText('Tests ✓'); await expect(first).toContainText('Review ✓'); await expect(first).toContainText('Checkpoint');
   await page.getByRole('tab', { name: 'Plan' }).click();
   await expect(page.getByText('Fixture risk: module c depends on both a and b')).toBeVisible();
   await expect(page.getByText('node --test a.test.cjs b.test.cjs c.test.cjs').first()).toBeVisible();

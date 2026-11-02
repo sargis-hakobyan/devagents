@@ -224,7 +224,7 @@ Inputs the page already loads: `GET /tasks/:id` (state, approval, plan, `agents`
 
 ### Fold rule
 
-Each stage and the member list show up to four full rows. Past that, finished rows fold first into a stack, then up-next rows; working, failed and needs-you rows never fold. A stack is a button: up to five overlapping small avatars, the stage chip ("✓ 6 finished · 7 items"), one line of detail and "Show"; it expands in place with a "Hide" bar and the open state is kept per task in `localStorage` only. A stack is reachable by keyboard and announces its count.
+Each pipeline stage shows up to four full rows and the member list up to six; a finished task's list never folds. Past the limit, finished rows fold first into a stack, then up-next rows; working, failed and needs-you rows never fold. A stack is a button: up to five overlapping small avatars, the stage chip ("✓ 6 finished · 7 items"), one line of detail and "Show"; it expands in place with a "Hide" bar and the open state is kept per task in `localStorage` only. A stack is reachable by keyboard and announces its count.
 
 ### States to cover
 
