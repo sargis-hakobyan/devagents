@@ -6,6 +6,7 @@ import { AppError } from '../domain/errors.js';
 import { assertTransition } from '../domain/lifecycle.js';
 import { Mode, TaskInput, TeamInput, type Project, type Task, type TaskEvent, type TaskState, type TaskSummary, type TaskTeam, type TeamRecord } from '../domain/schemas.js';
 import { environmentSecrets, redact, redactValues } from '../telemetry/redact.js';
+import { limitationCount, normalizeLegacyLimitations, redactReportProse } from '../domain/limitations.js';
 import { STARTER_TEAM_ID } from '../domain/starter-team.js';
 
 export class Store {
@@ -54,8 +55,11 @@ export class Store {
     try { const value = fn(); this.db.exec('COMMIT'); return value; }
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
-  /** Task rows feed model prompts: remove secret values only, never rewrite request or plan text. */
-  private taskJson(value: unknown): string { return JSON.stringify(redactValues(value, this.secrets)); }
+  /** Redact display prose separately; preserve code-bearing requests, commands and plan descriptions. */
+  private safeTask(task: Task): Task {
+    return { ...task, ...(task.plan ? { plan: redactReportProse(task.plan, this.secrets) } : {}), ...(task.outcome ? { outcome: normalizeLegacyLimitations(redactReportProse(task.outcome, this.secrets)) } : {}) };
+  }
+  private taskJson(value: Task): string { return JSON.stringify(redactValues(this.safeTask(value), this.secrets)); }
   /** Events and evidence are logs: apply the heuristic credential redaction as well. */
   private json(value: unknown): string { return JSON.stringify(redact(value, this.secrets)); }
   registerProject(project: Project, starterTeamId?: string): Project {
@@ -165,15 +169,16 @@ export class Store {
     const source = this.team(id);
     return this.createTeam({ name, description: source.description, members: structuredClone(source.members) }, `Duplicated from team ${id} revision ${source.revision}`);
   }
-  tasks(): Task[] { return this.db.prepare('SELECT data FROM tasks ORDER BY rowid DESC').all().map(r => JSON.parse(r.data as string) as Task); }
+  tasks(): Task[] { return this.db.prepare('SELECT data FROM tasks ORDER BY rowid DESC').all().map(r => this.safeTask(JSON.parse(r.data as string) as Task)); }
   private summarize(t: Task, sequence: number): TaskSummary {
+    t = this.safeTask(t);
     return {
       id: t.id, projectId: t.projectId, state: t.state, version: t.version, createdAt: t.createdAt, updatedAt: t.updatedAt, sequence,
       request: t.request.length > 200 ? `${t.request.slice(0, 200)}…` : t.request,
       ...(t.mode ? { mode: t.mode } : {}), ...(t.workspace ? { branch: t.workspace.branch } : {}), ...(t.plan ? { items: t.plan.items.length } : {}),
       ...(t.outcome?.commit ? { commit: t.outcome.commit } : {}), ...(t.outcome?.error ? { error: t.outcome.error } : {}),
       ...(t.team ? { team: { id: t.team.id, revision: t.team.revision, name: t.team.name } } : {}),
-      ...(t.outcome?.limitations?.length ? { limitations: t.outcome.limitations.length } : {}),
+      ...(limitationCount(t.outcome) ? { limitations: limitationCount(t.outcome), ...(t.outcome?.limitationOverflow ? { limitationOverflow: t.outcome.limitationOverflow } : {}) } : {}),
     };
   }
   /** The list view: no agent snapshots, plans or instructions, which grow to hundreds of kilobytes per task. Newest first, cursor by row id. */
@@ -213,7 +218,7 @@ export class Store {
   task(id: string): Task {
     const row = this.db.prepare('SELECT data FROM tasks WHERE id=?').get(id);
     if (!row) throw new AppError('not_found', 'Unknown task', 404);
-    return JSON.parse(row.data as string) as Task;
+    return this.safeTask(JSON.parse(row.data as string) as Task);
   }
   /**
    * Creates a task atomically with its frozen team configuration. The idempotency check runs first,

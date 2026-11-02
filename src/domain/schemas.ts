@@ -107,7 +107,7 @@ export type Task = z.infer<typeof TaskInput> & {
   agents?: AgentDefinition[];
   team?: TaskTeam;
   /** `limitations`: checks that could not run in this environment, reported rather than retried. */
-  outcome?: { commit?: string; files?: string[]; summary?: string; error?: string; repairCycles: number; limitations?: string[] };
+  outcome?: { commit?: string; files?: string[]; summary?: string; error?: string; repairCycles: number; limitations?: string[]; limitationCount?: number; limitationsOmitted?: number; limitationOverflow?: number };
 };
-export type TaskSummary = Pick<Task, 'id' | 'projectId' | 'state' | 'version' | 'createdAt' | 'updatedAt'> & { sequence: number; request: string; mode?: Task['mode']; branch?: string; items?: number; commit?: string; error?: string; team?: { id: string; revision: number; name: string }; limitations?: number };
+export type TaskSummary = Pick<Task, 'id' | 'projectId' | 'state' | 'version' | 'createdAt' | 'updatedAt'> & { sequence: number; request: string; mode?: Task['mode']; branch?: string; items?: number; commit?: string; error?: string; team?: { id: string; revision: number; name: string }; limitations?: number; limitationOverflow?: number };
 export type TaskEvent = { sequence: number; taskId: string; runId: string; actor: string; reason: string; state: TaskState; timestamp: string };

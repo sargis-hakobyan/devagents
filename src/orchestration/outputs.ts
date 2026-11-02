@@ -23,7 +23,7 @@ export const ImplementationOutput = z.strictObject({
   summary: z.string().min(1),
   limitations: z.array(Limitation).max(10).default([]).describe('Checks that could not run in this environment (missing browser, library, network, tool), each with its reason. Tried once at most; not failures.'),
 });
-export const SetupOutput = z.strictObject({ ready: z.boolean(), summary: z.string().min(1) });
+export const SetupOutput = z.strictObject({ ready: z.boolean(), summary: z.string().min(1), limitations: z.array(Limitation).max(10).default([]).describe('Optional checks unavailable here, not failures of declared validation. Report newly noticed limitations only.') });
 export const ReviewOutput = z.strictObject({
   approved: z.boolean().describe('True only when requirements and validation pass and findings is empty.'),
   summary: z.string().min(1).describe('Review rationale, including positive observations and test evidence.'),

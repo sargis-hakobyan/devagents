@@ -25,6 +25,7 @@ type Workspace = NonNullable<Task['workspace']>;
 type Item = z.infer<typeof WorkItem>;
 type Context = { cwd: string; workItemId: string };
 type Hooks = {
+  ledger: LimitationLedger;
   service: TaskService; engine: CodingEngine; validator: Validator; task: Task; agents: AgentDefinition[]; signal: AbortSignal;
   active(): Task;
   move(state: Task['state'], reason: string, patch?: Partial<Pick<Task, 'outcome'>>): Task;
@@ -73,13 +74,12 @@ export async function runDag(h: Hooks): Promise<void> {
   };
   /** With extra rules enabled, hidden (ignored) files must stay untouched. */
   // Checks that could not run in this environment, reported by any worker or reviewer at any gate; kept with the result, never retried.
-  const ledger = new LimitationLedger(service.store.secrets); ledger.add(plan.manualChecks);
+  const ledger = h.ledger;
   const implement = async (agent: AgentDefinition, prompt: string, workerSignal: AbortSignal, context: Context) => {
     await prepare(context.cwd, context.workItemId === '@integration' ? plan.integration!.validation : plan.items.find(i => i.id === context.workItemId)!.validation, workerSignal, context.workItemId);
     const before = rules ? await hiddenFiles(context.cwd) : undefined;
     const output = await invoke('implementation', agent, `${prompt}\n${implementationLimitationInstructions}`, ImplementationOutput, workerSignal, context) as z.infer<typeof ImplementationOutput>;
     h.active(); if (before) assertHiddenUnchanged(before, await hiddenFiles(context.cwd), context.workItemId === '@integration' ? 'Integration repair' : `Work item ${context.workItemId}`);
-    if (output.limitations.length) record('limitations', { workItemId: context.workItemId, phase: 'implementation', reported: output.limitations, added: ledger.add(output.limitations) });
     return output;
   };
   const validate = async (currentWorkspace: Workspace, commands: Item['validation'], workerSignal: AbortSignal, itemId: string): Promise<ValidationResult[]> => {
@@ -111,9 +111,8 @@ export async function runDag(h: Hooks): Promise<void> {
       ? 'FINAL COMBINED GATE: assess the complete request, all user acceptance criteria, the full diff and combined validation. Approval permits the final task commit. Missing combined validation or any actionable defect must block approval.'
       : 'ITEM INTEGRATION GATE: assess only this item\'s deliverable, owned changes and declared item validation. Approval permits integration of this item, not task completion. Task-wide tests and acceptance checks run at the mandatory final combined gate after all items are integrated. Do not demand combined validation at this item gate or ask the implementer to access the original checkout. Report defects in this item; defer checks explicitly reserved for the combined gate.';
     const assessment = await invoke('review', readOnlyReviewer,
-      `Independently review this ${combined ? 'combined change' : 'work item'} against its acceptance criteria. ${stage} Do not modify files.${rules ? ' Do not execute commands.' : ' Read-only inspection commands are available.'} Findings must contain only actionable defects requiring repair. Positive observations belong in summary. Approve only with approved=true and findings=[]. ${reviewLimitationInstructions}\nRecorded limitations so far: ${JSON.stringify(ledger.list())}\nOrchestrator workspace evidence: ${JSON.stringify(workspaceEvidence)}. Git-status comparisons do not attest ignored files or the contents of already-dirty/untracked files.\nUser request: ${task.request}\nUser acceptance criteria (task-wide context): ${JSON.stringify(task.acceptanceCriteria)}\nScope and acceptance criteria: ${JSON.stringify(criteria)}\nDiff:\n${current.diff}\nActual validation:\n${validationEvidence(evidence)}`,
+      `Independently review this ${combined ? 'combined change' : 'work item'} against its acceptance criteria. ${stage} Do not modify files.${rules ? ' Do not execute commands.' : ' Read-only inspection commands are available.'} Findings must contain only actionable defects requiring repair. Positive observations belong in summary. Approve only with approved=true and findings=[]. ${reviewLimitationInstructions}\nRecorded limitations so far: ${JSON.stringify(ledger.snapshot())}\nOrchestrator workspace evidence: ${JSON.stringify(workspaceEvidence)}. Git-status comparisons do not attest ignored files or the contents of already-dirty/untracked files.\nUser request: ${task.request}\nUser acceptance criteria (task-wide context): ${JSON.stringify(task.acceptanceCriteria)}\nScope and acceptance criteria: ${JSON.stringify(criteria)}\nDiff:\n${current.diff}\nActual validation:\n${validationEvidence(evidence)}`,
       ReviewOutput, workerSignal, { cwd, workItemId: itemId }) as z.infer<typeof ReviewOutput>;
-    if (assessment.limitations.length) record('limitations', { workItemId: itemId, phase: 'review', reported: assessment.limitations, added: ledger.add(assessment.limitations) });
     return assessment;
   };
   const executeItem = async (item: Item, baseSha: string, workerSignal: AbortSignal) => {
@@ -150,7 +149,7 @@ export async function runDag(h: Hooks): Promise<void> {
             completed = { item, workspace: ownedWorker, commit };
             return true;
           }
-          feedback = `Repair independent review findings:\n${JSON.stringify(assessment)}`;
+          feedback = `Repair independent review findings:\n${JSON.stringify(assessment.findings)}`;
         }
         check();
         if (localRepairs >= service.config.maxRepairCycles) throw new AppError('repair_limit', `Work item ${item.id} exhausted its repair budget. ${feedback.slice(0, 2000)}`);
@@ -243,11 +242,11 @@ export async function runDag(h: Hooks): Promise<void> {
           record('commit-intent', { branch: workspace.branch, digest: checked.digest, files: checked.files });
           const commit = await commitChanges(project, workspace, checked.files);
           record('commit-created', { commit, branch: workspace.branch });
-          const reported = ledger.list();
-          h.move('completed', `DAG execution, combined validation and review passed; local commit created${describeLimitations(reported)}`, { outcome: { commit, files: checked.files, summary: plan.summary, repairCycles, ...(reported.length ? { limitations: reported } : {}) } });
+          const reported = ledger.snapshot();
+          h.move('completed', `DAG execution, combined validation and review passed; local commit created${describeLimitations(reported)}`, { outcome: { commit, files: checked.files, summary: plan.summary, repairCycles, ...reported } });
           return true;
         }
-        feedback = `Combined review requested repairs:\n${JSON.stringify(assessment)}`;
+        feedback = `Combined review requested repairs:\n${JSON.stringify(assessment.findings)}`;
       }
       h.active();
       if (integrationRepairs >= service.config.maxRepairCycles) throw new AppError('repair_limit', `Combined integration repair budget exhausted. ${feedback.slice(0, 2000)}`);

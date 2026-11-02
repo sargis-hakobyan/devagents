@@ -47,7 +47,7 @@ export function OverviewPage() {
             <thead><tr><th>Finished</th><th>Task</th><th>Project</th><th>Outcome</th><th>Result</th></tr></thead>
             <tbody>{overview.recent.map(t => <tr key={t.id} class="row">
               <td class="muted mono">{relative(t.updatedAt, now)}</td><td><a href={`/ui/tasks/${t.id}`} style={{ fontWeight: 600, color: 'var(--text)', textDecoration: 'none' }}>{truncate(t.request, 80)}</a></td><td class="mono">{t.projectId}</td><td><StateChip task={t} /></td>
-              <td class={t.commit ? 'mono' : 'muted'}>{t.commit ? `${t.commit.slice(0, 7)} · ${t.branch ?? ''}` : t.error ? truncate(t.error, 90) : 'No commit'}{t.limitations ? <div class="muted" style={{ fontSize: '12px', fontFamily: 'var(--font)' }}>{t.limitations} check{t.limitations === 1 ? '' : 's'} not run here</div> : null}</td>
+              <td class={t.commit ? 'mono' : 'muted'}>{t.commit ? `${t.commit.slice(0, 7)} · ${t.branch ?? ''}` : t.error ? truncate(t.error, 90) : 'No commit'}{t.limitations ? <div class="muted" style={{ fontSize: '12px', fontFamily: 'var(--font)' }}>{t.limitationOverflow ? 'At least ' : ''}{t.limitations} check{t.limitations === 1 ? '' : 's'} not run here</div> : null}</td>
             </tr>)}</tbody></table></div>}
         </Card>
       </div>

@@ -41,7 +41,7 @@ export function TasksPage() {
         <thead><tr><th>Request</th><th>Project</th><th>State</th><th>Items</th><th>Updated</th><th>Branch / result</th></tr></thead>
         <tbody>{tasks.map(t => <tr key={t.id} class="row">
           <td><a href={`/ui/tasks/${t.id}`} style={{ fontWeight: 700, color: 'var(--text)', textDecoration: 'none' }} class="wrap-anywhere">{truncate(t.request, 110)}</a><div class="muted wrap-anywhere" style={{ fontSize: '12.5px' }}>{t.mode ?? 'mode not chosen'} · v{t.version} · <span class="mono">{t.id.slice(0, 8)}</span> · {teamLabel(t.team)}</div></td>
-          <td class="mono">{t.projectId}</td><td><StateChip task={t} />{t.limitations ? <div class="muted" style={{ fontSize: '12px', marginTop: '4px' }}>{t.limitations} check{t.limitations === 1 ? '' : 's'} not run here</div> : null}</td><td class="mono">{t.items ? `${t.items} planned` : '—'}</td><td class="muted">{relative(t.updatedAt, now)}</td>
+          <td class="mono">{t.projectId}</td><td><StateChip task={t} />{t.limitations ? <div class="muted" style={{ fontSize: '12px', marginTop: '4px' }}>{t.limitationOverflow ? 'At least ' : ''}{t.limitations} check{t.limitations === 1 ? '' : 's'} not run here</div> : null}</td><td class="mono">{t.items ? `${t.items} planned` : '—'}</td><td class="muted">{relative(t.updatedAt, now)}</td>
           <td class={t.commit ? 'mono' : 'muted'}>{t.commit ? `${t.commit.slice(0, 7)} · ${t.branch ?? ''}` : t.error ? truncate(t.error, 100) : t.branch ? <span class="mono">{t.branch}</span> : '—'}</td>
         </tr>)}</tbody></table></div>}
     </Card>}

@@ -3,7 +3,7 @@ import { useTaskActions } from '../components/TaskActions';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { api, evidenceFacts, type Evidence, type ItemProgress, type Task, type TaskEvent } from '../api';
 import { Card, Chip, ErrorNote, ItemChip, Later, Pre, Skeleton, Stage, StateChip, pretty } from '../components/ui';
-import { command, elapsed, formatTime, relative, taskState } from '../format';
+import { limitationCount, command, elapsed, formatTime, relative, taskState } from '../format';
 import { forget, useNow, usePoll } from '../state';
 
 type Tab = 'work' | 'plan' | 'activity' | 'result';
@@ -77,7 +77,7 @@ function summarize(task: Task, items: ItemProgress[]): { title: string; detail: 
     case 'ready': return { title: 'Queued', tone: 'info', detail: 'One top-level request runs at a time; this one starts when the scheduler is free.' };
     case 'running': case 'validating': case 'reviewing': case 'repairing': return { title: current ? `Now: ${itemVerb(current.state)} work item ${current.itemId}${current.agentId ? ` (${current.agentId})` : ''}` : `Now: ${task.state}`, tone: 'info', detail: items.length > 1 ? `${done} of ${items.length} items integrated. After every item is integrated, the combined result is validated and reviewed before one local commit. No merge, push or deployment happens.` : 'Implementation, real validation and an independent review precede one local commit on the task branch. No merge, push or deployment happens.' };
     case 'committing': return { title: 'Creating the reviewed local commit', tone: 'info', detail: 'This boundary cannot be cancelled; the outcome appears in Result.' };
-    case 'completed': { const n = task.outcome?.limitations?.length ?? 0; return { title: n ? `Completed with ${n} check${n === 1 ? '' : 's'} not run in this environment` : 'Completed: one reviewed local commit on the task branch', tone: n ? 'warn' : 'info', detail: `Commit ${task.outcome?.commit?.slice(0, 7) ?? '—'} on ${task.workspace?.branch ?? 'the task branch'}. Nothing was merged or pushed; you integrate it yourself.${n ? ' The Result tab lists what you should verify yourself.' : ''}` }; }
+    case 'completed': { const n = limitationCount(task.outcome); return { title: n ? `Completed with ${task.outcome?.limitationOverflow ? 'at least ' : ''}${n} check${n === 1 ? '' : 's'} not run in this environment` : 'Completed: one reviewed local commit on the task branch', tone: n ? 'warn' : 'info', detail: `Commit ${task.outcome?.commit?.slice(0, 7) ?? '—'} on ${task.workspace?.branch ?? 'the task branch'}. Nothing was merged or pushed; you integrate it yourself.${n ? ' The Result tab lists what you should verify yourself.' : ''}` }; }
     case 'failed': return { title: /Service shutdown interrupted/.test(task.outcome?.error ?? '') ? 'Interrupted by a service shutdown' : 'Stopped: the task failed', tone: 'bad', detail: task.outcome?.error ?? 'See Activity for the last recorded step.' };
     case 'cancelled': return { title: 'Cancelled by you', tone: 'warn', detail: 'Workers were stopped and worktrees preserved. Resubmitting creates a new task.' };
     default: return { title: task.state, tone: 'info', detail: '' };
@@ -192,12 +192,19 @@ function evidenceTitle(e: Evidence): string {
     default: return `${e.kind}${item}`;
   }
 }
+function LimitationReports({ outcome }: { outcome: Task['outcome'] }) {
+  return <>
+    {outcome?.limitations?.length ? <ul class="criteria" aria-label="Checks not run in this environment">{outcome.limitations.map((l, i) => <li key={i} class="wrap-anywhere">{l}</li>)}</ul> : <span class="muted">No limitations recorded</span>}
+    {!!outcome?.limitationsOmitted && <p class="muted">{outcome.limitationsOmitted} further distinct reports are omitted from this list; see Activity for the evidence.</p>}
+    {!!outcome?.limitationOverflow && <p class="muted">{outcome.limitationOverflow} additional report occurrences have no retained distinct identities. The total is a lower bound; see Activity for every report.</p>}
+  </>;
+}
 function ResultTab({ task, evidence }: { task: Task; evidence: Evidence[] }) {
   const reviews = evidence.filter(e => e.kind === 'run-completed' && evidenceFacts(e).phase === 'review');
   const last = reviews[reviews.length - 1]; const review = last ? evidenceFacts(last).output as ReviewFacts | undefined : undefined;
   const validations = evidence.filter(e => e.kind === 'validation');
   if (task.state !== 'completed') return <Card tone={task.state === 'failed' ? 'bad' : undefined}><div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-    <b>Result</b><span>Diff inspection is offered for completed tasks only.</span>
+    <b>Result</b><span>Diff inspection is offered for completed tasks only.</span><div><b>Not verified here</b><LimitationReports outcome={task.outcome} /></div>
     {task.state === 'failed' || task.state === 'cancelled' ? <><div class="wrap-anywhere">{task.outcome?.error ?? 'No commit was created.'}</div><div class="muted" style={{ fontSize: '13px' }}>Worktrees are preserved for inspection{task.workspace ? <> under <span class="mono">{task.workspace.path}</span></> : null}. Resubmitting creates a new task. Cleanup is a separate, previewed action.</div><div style={{ display: 'flex', gap: '8px' }}><a class="btn" href={`/ui/tasks/new?from=${task.id}`}>Submit a new task from this request</a><Later label="Clean up worktrees" increment="U3" reason="Cleanup with a preview arrives in U3. CLI: devagents tasks cleanup" /></div></> : <div class="muted">Not available yet. Completion means one reviewed local commit{task.workspace ? <> on <span class="mono">{task.workspace.branch}</span></> : null}; you merge it yourself. Changed files, test evidence and the review outcome appear here afterwards.</div>}
   </div></Card>;
   return <div class="stack">
@@ -208,7 +215,7 @@ function ResultTab({ task, evidence }: { task: Task; evidence: Evidence[] }) {
       <dt>Repairs used</dt><dd>{task.outcome?.repairCycles ?? 0}</dd>
       <dt>Tests</dt><dd>{validations.length ? `${validations.filter(v => evidenceFacts(v).exitCode === 0 && !evidenceFacts(v).truncated).length} of ${validations.length} validation runs passed; see Activity for output` : 'none recorded'}</dd>
       <dt>Review</dt><dd class="wrap-anywhere">{review ? `${reviewPassed(review) ? 'Approved' : 'Changes requested'} · ${review.summary ?? ''}` : '—'}</dd>
-      <dt>Not verified here</dt><dd>{task.outcome?.limitations?.length ? <ul class="criteria" aria-label="Checks not run in this environment">{task.outcome.limitations.map((l, i) => <li key={i} class="wrap-anywhere">{l}</li>)}</ul> : <span class="muted">No limitations recorded</span>}</dd>
+      <dt>Not verified here</dt><dd><LimitationReports outcome={task.outcome} /></dd>
       <dt>Diff</dt><dd>Read the recorded base-to-final change below.</dd>
       <dt>Worktree</dt><dd class="mono wrap-anywhere">{task.workspace?.path ?? '—'}</dd>
     </dl></div>

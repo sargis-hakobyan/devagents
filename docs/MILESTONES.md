@@ -273,3 +273,10 @@ Implemented the owner's rule that checks blocked by the environment are reported
 ## Limitation reporting review fixes — 2026-11-02
 
 Codex review findings F1–F4 fixed with regression tests (reports surviving repairs and item reviews, reviewer copy-forward removed in favour of an orchestrator ledger, evidence-grade redaction of display prose, a registered model-schema inventory with `$defs` traversal); F5–F8 addressed by revising the dependency-store and cleanup handoffs before implementation. Verification counts are in the commit message; Docker was not rebuilt for these commits.
+
+
+## Limitation reporting follow-up — 2026-11-02
+
+Implemented R1–R4 from `CODEX_REVIEW_LIMITATIONS_FIXES.md`: bounded identity deduplication and explicit counts, redaction before handoff and in legacy display projections, setup-report capture, failed/cancelled outcome retention, and run/attempt provenance. Result, Overview and task-list counts no longer include a generated omission notice. R5–R9 are handoff revisions only; shared dependency storage and cleanup remain unimplemented.
+
+Backend and UI compiler checks passed during the follow-up. Added regression tests remain unrun by owner instruction; no runtime/UI, Docker, protocol, M2/M3 or authenticated verification is claimed. Changes are prepared for Claude's independent review.

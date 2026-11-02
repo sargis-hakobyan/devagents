@@ -316,7 +316,7 @@ test('a check that cannot run in this environment is reported with the result an
     assert.deepEqual(done.outcome!.limitations, ['Confirm the greeting renders at 390 px', 'Visual check could not run: no browser in this sandbox']);
     assert.deepEqual(done.plan!.manualChecks, ['Confirm the greeting renders at 390 px']);
     assert.match(engine.calls[1]!.prompt, /try once at most, then report it in limitations/);
-    assert.match(engine.calls[2]!.prompt, /are not findings/); assert.match(engine.calls[2]!.prompt, /Recorded limitations so far: \["Confirm the greeting renders at 390 px","Visual check could not run/);
+    assert.match(engine.calls[2]!.prompt, /are not findings/); assert.match(engine.calls[2]!.prompt, /Recorded limitations so far: \{"limitations":\["Confirm the greeting renders at 390 px","Visual check could not run/);
     assert.match(f.store.events(task.id).at(-1)!.reason, /2 checks not run in this environment/);
     assert.equal(f.store.summaries({ limit: 5 }).tasks[0]!.limitations, 2);
     // A real validation failure still repairs, exactly as before.
@@ -345,9 +345,100 @@ test('reports from an earlier attempt and from a rejecting review survive repair
     assert.deepEqual(done.plan!.manualChecks, ['Check the layout at 390 px with token: [REDACTED]']);
     assert.doesNotMatch(JSON.stringify(done), /SYNTHETIC_ONLY_VALUE|SYNTHETIC_TOKEN_123/);
     const finalReview = engine.calls.filter(c => c.phase === 'review').at(-1)!;
-    assert.match(finalReview.prompt, /Recorded limitations so far: \["Check the layout at 390 px with token: \[REDACTED\]","Browser screenshots could not be taken: no Chromium here; password=\[REDACTED\]","Reviewer could not open the staging site: no network"\]/);
+    assert.match(finalReview.prompt, /Recorded limitations so far: \{"limitations":\["Check the layout at 390 px with token: \[REDACTED\]","Browser screenshots could not be taken: no Chromium here; password=\[REDACTED\]","Reviewer could not open the staging site: no network"\]/);
     const reports = f.store.evidence(task.id).filter(e => e.kind === 'limitations').map(e => e.data as { phase: string; attempt: number });
-    assert.deepEqual(reports.map(r => [r.phase, r.attempt]), [['implementation', 0], ['review', 1]]);
+    assert.deepEqual(reports.map(r => [r.phase, r.attempt]), [['implementation', 0], ['review', 0]]);
     assert.match(f.store.events(task.id).at(-1)!.reason, /3 checks not run in this environment/);
+  } finally { await runner.stop(); await f.cleanup(); }
+});
+
+test('immediate review, repair feedback and displayed summaries cannot bypass prose redaction', async () => {
+  const f = await fixture();
+  const engine = new FakeEngine({ limitationsOnce: true, limitations: ['Browser password=SYNTHETIC_IMPL'], firstReviewRejects: true, reviewLimitations: ['ADVISORY_ONLY token=SYNTHETIC_REVIEW'] });
+  const execute = engine.execute.bind(engine);
+  engine.execute = async request => {
+    const result = await execute(request);
+    const output = result.output as { summary: string; risks?: string[] };
+    output.summary = 'Status password=SYNTHETIC_SUMMARY';
+    if (request.phase === 'planning') output.risks = ['Risk token=SYNTHETIC_RISK'];
+    return result;
+  };
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'all-prose');
+    await runner.idle(); const done = f.store.task(task.id);
+    assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
+    assert.doesNotMatch(JSON.stringify(done), /SYNTHETIC_/);
+    for (const call of engine.calls) assert.doesNotMatch(call.prompt, /SYNTHETIC_/);
+    const repair = engine.calls.filter(c => c.phase === 'implementation')[1]!;
+    assert.match(repair.prompt, /Rename the helper module/);
+    assert.doesNotMatch(repair.prompt, /ADVISORY_ONLY/);
+    assert.match(engine.calls.find(c => c.phase === 'review')!.prompt, /password=\[REDACTED\]/);
+  } finally { await runner.stop(); await f.cleanup(); }
+});
+
+test('initial setup and its recovery report before implementation and survive task failure', async () => {
+  const f = await fixture(false); const engine = new FakeEngine({ rejectReviews: true });
+  const execute = engine.execute.bind(engine); let setupCalls = 0;
+  engine.execute = async request => {
+    const result = await execute(request);
+    if (request.phase === 'setup') return { output: { ready: ++setupCalls > 1, summary: 'Fixture tooling readiness', limitations: [`Optional setup check ${setupCalls}: no browser; password=SYNTHETIC_SETUP`] } };
+    return result;
+  };
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'setup-reports');
+    await runner.idle(); const done = f.store.task(task.id);
+    assert.equal(done.state, 'failed'); assert.equal(done.outcome!.limitationCount, 2);
+    assert.deepEqual(done.outcome!.limitations, ['Optional setup check 1: no browser; password=[REDACTED]', 'Optional setup check 2: no browser; password=[REDACTED]']);
+    const reports = f.store.evidence(task.id).filter(e => e.kind === 'limitations').map(e => e.data as { phase: string; attempt: number; runId: string });
+    assert.deepEqual(reports.map(r => [r.phase, r.attempt]), [['setup', 0], ['setup', 1]]);
+    assert.equal(new Set(reports.map(r => r.runId)).size, 2);
+    for (const call of engine.calls) assert.doesNotMatch(call.prompt, /SYNTHETIC_SETUP/);
+  } finally { await runner.stop(); await f.cleanup(); }
+});
+
+test('cancellation preserves accepted reports after validation drains without committing', async () => {
+  const f = await fixture(); const engine = new FakeEngine({ limitations: ['No browser'] });
+  let entered!: () => void; const validating = new Promise<void>(resolve => { entered = resolve; });
+  const validator = { async execute(_cwd: string, _command: { executable: string; args: string[] }, signal: AbortSignal): Promise<never> {
+    entered(); return new Promise((_resolve, reject) => {
+      const abort = () => reject(new Error('Fixture validation cancelled'));
+      if (signal.aborted) abort(); else signal.addEventListener('abort', abort, { once: true });
+    });
+  } };
+  const runner = new TaskRunner(f.service, engine, validator); f.service.attachRunner(runner);
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'cancel-reports');
+    await Promise.race([validating, runner.idle().then(() => { throw new Error('Task stopped before validation began'); })]);
+    f.service.cancel(task.id); await runner.idle();
+    const done = f.store.task(task.id);
+    assert.equal(done.state, 'cancelled'); assert.deepEqual(done.outcome!.limitations, ['No browser']);
+    assert.equal(done.outcome!.limitationCount, 1); assert.equal(done.outcome!.commit, undefined);
+    assert.equal(f.store.summaries().tasks[0]!.limitations, 1);
+  } finally { await runner.stop(); await f.cleanup(); }
+});
+
+
+test('completion and list counts include reports beyond the display cap without counting notices', async () => {
+  const reports = (phase: string) => Array.from({ length: 10 }, (_, i) => `${phase} check ${i}`);
+  const f = await fixture(); const engine = new FakeEngine({ manualChecks: reports('Manual'), limitations: reports('Implementation') });
+  const execute = engine.execute.bind(engine);
+  engine.execute = async request => {
+    const result = await execute(request);
+    if (request.phase === 'review') (result.output as { limitations: string[] }).limitations = reports('Review');
+    return result;
+  };
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'display-cap');
+    await runner.idle(); const done = f.store.task(task.id);
+    assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
+    assert.equal(done.outcome!.limitations!.length, 20);
+    assert.equal(done.outcome!.limitationCount, 30); assert.equal(done.outcome!.limitationsOmitted, 10);
+    assert.equal(done.outcome!.limitationOverflow, 0);
+    assert.equal(f.store.summaries().tasks[0]!.limitations, 30);
+    assert.match(f.store.events(task.id).at(-1)!.reason, /30 checks not run in this environment/);
+    assert.doesNotMatch(done.outcome!.limitations!.join('\n'), /omitted/);
   } finally { await runner.stop(); await f.cleanup(); }
 });

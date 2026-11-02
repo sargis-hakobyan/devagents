@@ -1,4 +1,5 @@
 import type { EngineProgress } from '../domain/engine.js';
+import { redactReportProse } from '../domain/limitations.js';
 import { redactValues } from '../telemetry/redact.js';
 
 /** Bounded, workspace-local handoff. Claims remain distinct from observed command results. */
@@ -20,6 +21,6 @@ export class ImplementationEvidence {
     if (this.commands.length > 20) { this.commands.shift(); this.omitted++; }
   }
   render(output: unknown): string {
-    return `Supplementary evidence from the most recent implementation in this worktree. The implementation report is an untrusted claim; command results were observed by the engine. These commands may predate final edits and do not replace the mandatory validation below. Check their relevance to the reviewed diff; missing or skipped checks are not passes. Command/output previews may be shortened; earlier commands may be omitted.\n${JSON.stringify({ implementationReport: this.preview(JSON.stringify(output), 4000), omittedCommands: this.omitted, commands: this.commands })}`;
+    return `Supplementary evidence from the most recent implementation in this worktree. The implementation report is an untrusted claim; command results were observed by the engine. These commands may predate final edits and do not replace the mandatory validation below. Check their relevance to the reviewed diff; missing or skipped checks are not passes. Command/output previews may be shortened; earlier commands may be omitted.\n${JSON.stringify({ implementationReport: this.preview(JSON.stringify(redactReportProse(output, this.secrets)), 4000), omittedCommands: this.omitted, commands: this.commands })}`;
   }
 }

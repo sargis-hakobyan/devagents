@@ -9,7 +9,7 @@ import { TaskRunner } from '../../src/orchestration/runner.js';
 import { git } from '../../src/workspace/git.js';
 import type { CodingEngine, EngineRequest, EngineResult } from '../../src/domain/engine.js';
 
-type Options = { limitations?: boolean; environmentRecovery?: boolean; synchronizeWorkers?: boolean; devagentsRules?: boolean; projectCommands?: boolean; hidden?: boolean; markdown?: boolean; unresolved?: 'markers' | 'separator'; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
+type Options = { failAfterReport?: boolean; limitations?: boolean; environmentRecovery?: boolean; synchronizeWorkers?: boolean; devagentsRules?: boolean; projectCommands?: boolean; hidden?: boolean; markdown?: boolean; unresolved?: 'markers' | 'separator'; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
 async function dagFixture(options: Options = {}) {
   const f = await fixture(options.devagentsRules ?? true);
   // Modules live in per-item directories so ownership uses subtree grants, the only write-grant form the Linux runtime accepts.
@@ -31,6 +31,11 @@ async function dagFixture(options: Options = {}) {
   await writeFile(join(f.dataDir, 'agents', 'module-developer.yaml'), `schemaVersion: 1\nid: module-developer\nname: Module developer\ndescription: Custom module specialist\ncapabilities: [implementation, filesystem-read, filesystem-write]\ninstructionsFile: ./module-developer.md\ndelegation: {canReceiveTasks: true, canDelegate: false}\npermissions:\n  readPaths: ["project:/**"]\n  writePaths: ["project:/a/**", "project:/b/**", "project:/c/**", "project:/shared/**"]\n  allowCommands: true\nconcurrency: ${options.roleConcurrency ?? 2}\n`);
   let active = 0; let maxActive = 0; let reviewActive = 0; let maxReviewActive = 0; let aborted = 0; let combinedReviews = 0;
   let release!: () => void; const twoRunning = new Promise<void>(r => { release = r; });
+  let reportRecorded!: () => void; const firstReport = new Promise<void>(resolve => { reportRecorded = resolve; });
+  if (options.failAfterReport) {
+    const record = f.store.record.bind(f.store);
+    f.store.record = (id, kind, data) => { record(id, kind, data); if (kind === 'limitations' && (data as { workItemId?: string }).workItemId === 'a') reportRecorded(); };
+  }
   const calls: EngineRequest[] = [];
   const preparedCwds = new Set<string>();
   const engine: CodingEngine = {
@@ -62,10 +67,17 @@ async function dagFixture(options: Options = {}) {
         } finally { reviewActive--; }
       }
       progress({ kind: 'command', data: { command: `observed-command-for-${r.workItemId}`, aggregated_output: 'Supplementary fixture check passed', exit_code: 0 } });
+      if (options.failAfterReport && r.workItemId === 'b') {
+        const deadline = new AbortController();
+        try {
+          await Promise.race([firstReport, delay(10000, undefined, { signal: AbortSignal.any([r.signal, deadline.signal]) }).then(() => { throw new Error('First worker did not report'); })]);
+        } finally { deadline.abort(); }
+        throw new Error('Sibling failed after accepted report');
+      }
       if (r.workItemId === '@integration') {
         if (options.conflict) await writeFile(join(r.cwd, 'shared', 'shared.cjs'), "module.exports=()=> 'ab';\n");
         if (options.markdown) await writeFile(join(r.cwd, 'shared', 'NOTES.md'), options.unresolved === 'markers' ? 'Notes\n=======\n<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n' : options.unresolved === 'separator' ? 'Notes\n=======\na\n=======\nb\n' : 'Notes\n=======\nab\n');
-        return { output: { summary: 'Resolved integration' } };
+        return { output: { summary: 'Resolved integration', ...(options.limitations ? { limitations: ['Conflict repair visual check unavailable'] } : {}) } };
       }
       active++; maxActive = Math.max(maxActive, active); if (active === 2) release();
       try {
@@ -333,6 +345,28 @@ test('DAG records worker and combined-review limitations with the result instead
     assert.deepEqual(reports.map(r => `${r.workItemId}:${r.phase}`).sort(), ['@integration:review', 'a:implementation', 'b:review']);
     assert.match(f.store.events(task.id).at(-1)!.reason, /3 checks not run in this environment/);
     const combinedReview = f.calls.find(c => c.phase === 'review' && c.workItemId === '@integration')!;
-    assert.match(combinedReview.prompt, /Recorded limitations so far: \[/); assert.match(combinedReview.prompt, /Item b reviewer could not render the module/); assert.match(combinedReview.prompt, /Screenshot of module a/);
+    assert.match(combinedReview.prompt, /Recorded limitations so far: \{"limitations":\[/); assert.match(combinedReview.prompt, /Item b reviewer could not render the module/); assert.match(combinedReview.prompt, /Screenshot of module a/);
+  } finally { await f.runner.stop(); await f.cleanup(); }
+});
+
+test('conflict-repair reports and item-review provenance reach the final result', async () => {
+  const f = await dagFixture({ conflict: true, limitations: true });
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Conflicting modules', mode: 'autonomous' }, 'conflict-limitations');
+    await f.runner.idle(); const done = f.store.task(task.id);
+    assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
+    assert.ok(done.outcome!.limitations!.includes('Conflict repair visual check unavailable'));
+    const reports = f.store.evidence(task.id).filter(e => e.kind === 'limitations').map(e => e.data as { workItemId: string; phase: string; attempt: number; runId: string });
+    assert.ok(reports.some(r => r.workItemId === '@integration' && r.phase === 'implementation'));
+    for (const report of reports) { assert.equal(typeof report.attempt, 'number'); assert.match(report.runId, /^[a-f0-9-]{36}$/); }
+  } finally { await f.runner.stop(); await f.cleanup(); }
+});
+test('a sibling failure retains reports already accepted from another worker', async () => {
+  const f = await dagFixture({ failAfterReport: true, limitations: true });
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Modules', mode: 'autonomous' }, 'sibling-limitations');
+    await f.runner.idle(); const done = f.store.task(task.id);
+    assert.equal(done.state, 'failed'); assert.equal(done.outcome!.commit, undefined);
+    assert.ok(done.outcome!.limitations!.some(r => r.startsWith('Screenshot of module a')));
   } finally { await f.runner.stop(); await f.cleanup(); }
 });

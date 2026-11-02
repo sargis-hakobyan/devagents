@@ -60,6 +60,7 @@ test('every registered model schema lists all properties as required, as strict 
   for (const [name, schema] of Object.entries(inventory)) assertStrict(schema, name);
   const planning = outputJsonSchema(PlanningOutput) as z.core.JSONSchema.ObjectSchema;
   assert.ok((planning.required as string[]).includes('manualChecks'));
+  assert.ok((inventory.setup!.required as string[]).includes('limitations'), 'setup reports must also use strict structured output');
   // The walker itself catches an optional property hidden behind a definition.
   assert.throws(() => assertStrict({ type: 'object', properties: { a: { $ref: '#/$defs/inner' } }, required: ['a'], additionalProperties: false, $defs: { inner: { type: 'object', properties: { x: { type: 'string' } }, required: [], additionalProperties: false } } }), /must be required/);
 });

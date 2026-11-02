@@ -70,3 +70,8 @@ export function elapsed(fromIso: string, toIso?: string, now = Date.now()): stri
 export function shortSha(sha: string | undefined, n = 7): string { return sha ? sha.slice(0, n) : '—'; }
 export function command(c: { executable: string; args: string[] }): string { return [c.executable, ...c.args].join(' '); }
 export function truncate(text: string, max: number): string { return text.length > max ? `${text.slice(0, max)}…` : text; }
+
+/** Counts are independent of the bounded report list; old tasks have only the list. */
+export function limitationCount(outcome: { limitationCount?: number; limitations?: readonly string[] } | undefined): number {
+  return outcome?.limitationCount ?? outcome?.limitations?.length ?? 0;
+}
