@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — Tasks filter and bulk cleanup bar, Overview and Settings storage (U4)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#3B3F5E;text-decoration:none;font-weight:600;font-size:14px}
+.nav a:hover{background:#E6E8F3;color:#1C1A33}.nav a.on{background:#231F4A;color:#FFFFFF}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}.btn.small{min-height:34px;font-size:13px;padding:0 12px}.btn.danger{border-color:#F3C1BD;color:#8A1C14}.btn[disabled]{opacity:.55;cursor:not-allowed}
+.btn:focus-visible,.nav a:focus-visible,.filter:focus-visible,input:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.filter{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:999px;border:1px solid #D1D4E4;background:#FFFFFF;font:inherit;font-size:13px;font-weight:600;color:#3B3F5E;cursor:pointer}.filter.on{background:#231F4A;color:#FFFFFF;border-color:#231F4A}
+.note{border-radius:10px;padding:10px 12px;font-size:13.5px}
+.note.warn{background:#FFF1DB;border:1px solid #F1D18A}.note.info{background:#F3F6FE;border:1px solid #C9D7F7}
+.h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5A5F78}
+table{border-collapse:collapse;width:100%;font-size:14px}th{text-align:left;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:#5A5F78;padding:9px 14px;border-bottom:1px solid #E0E2EE}td{padding:10px 14px;border-bottom:1px solid #EAECF5;vertical-align:top}
+dl.kv{margin:0;display:grid;grid-template-columns:150px minmax(0,1fr);gap:7px 12px;font-size:14px}dl.kv dt{color:#5A5F78}dl.kv dd{margin:0;overflow-wrap:anywhere}
+dl.counts{margin:0;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;font-size:14px}dl.counts dd{margin:0;text-align:right;font-weight:800}
+.meter{height:8px;border-radius:999px;background:#EAECF5;overflow:hidden;display:flex}.meter i{display:block;height:100%}
+.check{display:flex;gap:8px;align-items:center}.check input{width:16px;height:16px}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+  <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 18px"><div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div><div style="width: 1px; height: 36px; background: rgba(255,255,255,0.18)"></div><div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #B9B6D9">Local workspace</span><span style="font-weight: 700; font-size: 16px">127.0.0.1:4310 · docker · linux/arm64</span></div></div>
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6EE7A8" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Connected · updated 1 s ago</span><span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF">Codex signed in</span><span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF" title="New in the band only while the data volume is low on space"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFD166" stroke-width="3" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>3.1 GB free · setup needs about 2 GB per task</span></div>
+  </header>
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD">
+      <a href="Main.dc.html">Overview</a><a href="A-Tasks.dc.html" class="on" aria-current="page">Tasks</a><a href="A-Teams.dc.html">Teams</a><a href="A-Projects.dc.html">Projects</a><a href="A-Settings.dc.html">Settings</a>
+    </nav>
+    <main style="flex: 999 1 560px; min-width: 0; padding: 32px 40px 48px; display: flex; flex-direction: column; gap: 22px">
+      <div class="h">1 · Existing Tasks page: one more filter pill, a bar while it is active, sizes in the existing result cell</div>
+      <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap">
+        <div><div class="h">Tasks</div><h1 style="margin: 4px 0 0; font-size: 36px; letter-spacing: -0.03em; line-height: 1.1">All tasks</h1><p class="muted" style="margin: 6px 0 0">Summaries only; open a task for its plan, work items, activity and result.</p></div>
+        <a class="btn primary" href="U3-Submit.dc.html">Submit work</a>
+      </div>
+      <div role="group" aria-label="Filters" style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center">
+        <span class="muted" style="font-size: 13px; font-weight: 600">State</span>
+        <button class="filter" type="button" aria-pressed="false">All · 14</button><button class="filter" type="button" aria-pressed="false">Needs you · 0</button><button class="filter" type="button" aria-pressed="false">Active · 0</button><button class="filter" type="button" aria-pressed="false">Finished · 14</button><button class="filter on" type="button" aria-pressed="true">Holding files · 9</button>
+      </div>
+      <div class="card" style="padding: 12px 16px; display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; border-color: #F1D18A; background: #FFFBF2" role="region" aria-label="Bulk cleanup">
+        <span><b>9 finished tasks hold 13.0 GB</b> of working files · 3 of them have uncommitted changes · the data volume has 3.1 GB free</span>
+        <span style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn small" type="button" aria-expanded="true">Preview cleanup of the 6 selected · 8.4 GB</button></span>
+      </div>
+      <section class="card" aria-label="Tasks holding files" style="overflow-x: auto">
+        <table>
+          <thead><tr><th><span class="muted" style="font-size: 11.5px">Select</span></th><th>Request</th><th>Project</th><th>State</th><th>Items</th><th>Updated</th><th>Branch / result</th></tr></thead>
+          <tbody>
+            <tr><td><label class="check"><input type="checkbox"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Select task</span></label></td><td><a href="U4-Cleanup-Task.dc.html" style="font-weight: 700; color: #1C1A33; text-decoration: none">Display the IO name on the Monitor detail page</a><div class="muted" style="font-size: 12.5px">autonomous · v18 · <span class="mono">00057c6e</span> · Starter team · revision 1</div></td><td class="mono">test-project</td><td><span class="chip" style="background: #FDE8E6; color: #8A1C14">✕ Failed</span></td><td class="mono">1 planned</td><td class="muted">1 h ago</td><td><span class="muted">No commit</span><div class="muted" style="font-size: 12.5px"><b>2.2 GB on disk</b> · 3 uncommitted files · unticked by default: inspect first</div></td></tr>
+            <tr><td><label class="check"><input type="checkbox" checked><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Select task</span></label></td><td><a href="A-Task.dc.html" style="font-weight: 700; color: #1C1A33; text-decoration: none">We need to group the items in the config area</a><div class="muted" style="font-size: 12.5px">autonomous · v2 · <span class="mono">c9379d2d</span> · Starter team · revision 1</div></td><td class="mono">test-project</td><td><span class="chip" style="background: #FDE8E6; color: #8A1C14">✕ Failed</span></td><td class="muted">—</td><td class="muted">55 min ago</td><td><span class="muted">No commit</span><div class="muted" style="font-size: 12.5px"><b>299 MB on disk</b> · no uncommitted changes</div></td></tr>
+            <tr><td><label class="check"><input type="checkbox" checked><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Select task</span></label></td><td><a href="A-Task.dc.html" style="font-weight: 700; color: #1C1A33; text-decoration: none">Why is the saved views section on the monitoring page aligned left?</a><div class="muted" style="font-size: 12.5px">autonomous · v4 · <span class="mono">8b226d62</span> · Starter team · revision 1</div></td><td class="mono">test-project</td><td><span class="chip" style="background: #FDE8E6; color: #8A1C14">✕ Failed</span></td><td class="mono">1 planned</td><td class="muted">48 min ago</td><td><span class="muted">database or disk is full</span><div class="muted" style="font-size: 12.5px"><b>1.5 GB on disk</b> · no uncommitted changes</div></td></tr>
+            <tr><td><label class="check"><input type="checkbox" checked><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Select task</span></label></td><td><a href="A-Task.dc.html" style="font-weight: 700; color: #1C1A33; text-decoration: none">Unter der Ansicht "Meine Aufträge" erscheinen Aufträge anderer Campaign Manager</a><div class="muted" style="font-size: 12.5px">autonomous · v11 · <span class="mono">d5619d45</span> · Starter team · revision 1</div></td><td class="mono">test-project</td><td><span class="chip" style="background: #E1F5EA; color: #135E38">✓ Completed</span></td><td class="mono">1 planned</td><td class="muted">3 h ago</td><td><span class="mono">f5d7b50 · codex/devagents-d5619d…</span><div class="muted" style="font-size: 12.5px"><b>2.7 GB on disk</b> · branch and commit are kept by cleanup</div></td></tr>
+            <tr><td><label class="check"><input type="checkbox" checked><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Select task</span></label></td><td><a href="A-Task.dc.html" style="font-weight: 700; color: #1C1A33; text-decoration: none">Some teams want to use different labels for their mailbox</a><div class="muted" style="font-size: 12.5px">autonomous · v9 · <span class="mono">e108a85b</span> · Starter team · revision 1</div></td><td class="mono">test-project</td><td><span class="chip" style="background: #E1F5EA; color: #135E38">✓ Completed</span></td><td class="mono">1 planned</td><td class="muted">3 h ago</td><td><span class="mono">bc2eb6f · codex/devagents-e108a8…</span><div class="muted" style="font-size: 12.5px"><b>2.7 GB on disk</b> · branch and commit are kept by cleanup</div></td></tr>
+            <tr><td><label class="check"><input type="checkbox"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Select task</span></label></td><td><a href="A-Task.dc.html" style="font-weight: 700; color: #1C1A33; text-decoration: none">Some teams want to use different labels for their mailbox</a><div class="muted" style="font-size: 12.5px">autonomous · v3 · <span class="mono">224874b0</span> · Starter team · revision 1</div></td><td class="mono">test-project</td><td><span class="chip" style="background: #FDE8E6; color: #8A1C14">✕ Failed</span></td><td class="mono">1 planned</td><td class="muted">3 h ago</td><td><span class="muted">Environment setup could not complete</span><div class="muted" style="font-size: 12.5px"><b>2.1 GB on disk</b> · 1 uncommitted file · unticked by default</div></td></tr>
+          </tbody>
+        </table>
+        <div style="padding: 9px 14px; border-top: 1px solid #EAECF5; font-size: 12.5px; color: #5A5F78">Showing 6 of 9 · newest first · tasks with uncommitted changes start unticked so nothing unfinished is swept away by habit. Ticking one still goes through the same preview with its patch checkbox.</div>
+      </section>
+      <section class="card" aria-label="Bulk cleanup preview" style="border-color: #F1D18A; display: flex; flex-direction: column">
+        <div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; background: #FFFBF2; border-radius: 14px 14px 0 0">
+          <div style="display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center"><b style="font-size: 16px">Free 8.4 GB from 6 tasks?</b><span class="chip" style="background: #EAECF5; color: #3B3F5E">6 previews · one digest each · computed 14:40:12</span></div>
+          <table>
+            <thead><tr><th>Task</th><th>Removed</th><th>Kept</th><th>Patch</th><th>Size</th></tr></thead>
+            <tbody>
+              <tr><td><span class="mono">c9379d2d</span> · config area grouping</td><td>worktree, branch, run data</td><td>history</td><td class="muted">nothing uncommitted</td><td class="mono">299 MB</td></tr>
+              <tr><td><span class="mono">8b226d62</span> · saved views alignment</td><td>worktree, branch, run data</td><td>history</td><td class="muted">nothing uncommitted</td><td class="mono">1.5 GB</td></tr>
+              <tr><td><span class="mono">d5619d45</span> · Meine Aufträge</td><td>worktree, item worktrees, item branches</td><td>history · branch with <span class="mono">f5d7b50</span></td><td class="muted">—</td><td class="mono">2.7 GB</td></tr>
+              <tr><td><span class="mono">e108a85b</span> · mailbox labels</td><td>worktree, item worktrees, item branches</td><td>history · branch with <span class="mono">bc2eb6f</span></td><td class="muted">—</td><td class="mono">2.7 GB</td></tr>
+              <tr><td class="muted" colspan="5">… 2 more rows</td></tr>
+            </tbody>
+          </table>
+          <div class="muted" style="font-size: 13px">Executed one task at a time with its own digest; a refusal for one task (<span class="mono">409 cleanup_preview_stale</span>) leaves the others done or untouched, and the bar reports exactly which. Never a single sweeping delete.</div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn danger" type="button">Remove 8.4 GB</button><button class="btn" type="button">Keep everything</button></div>
+        </div>
+      </section>
+
+      <div class="h" style="margin-top: 8px">2 · Existing Overview rail: a storage line in the Scheduler card</div>
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start">
+        <section class="card" aria-label="Scheduler" style="padding: 12px 16px; display: flex; flex-direction: column; gap: 8px">
+          <b style="font-size: 15px">Scheduler</b>
+          <div class="mono">concurrency 2 · repairs 1 · wave scheduling</div>
+          <div class="muted" style="font-size: 12px">The next request starts after the current one finishes.</div>
+          <div style="border-top: 1px solid #EAECF5; padding-top: 8px; display: flex; flex-direction: column; gap: 6px">
+            <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 13px"><span><b>Data volume</b></span><span class="mono">3.1 GB free of 59 GB</span></div>
+            <div class="meter" aria-hidden="true"><i style="width: 22%; background: #2457C5"></i><i style="width: 2%; background: #B45309"></i><i style="width: 71%; background: #C7CAE0"></i></div>
+            <div class="muted" style="font-size: 12px">13 GB held by 9 finished tasks · 1.4 GB run data · <a href="#">Free space →</a></div>
+            <div class="note warn" style="font-size: 12.5px; padding: 8px 10px"><b>Low space.</b> Setup needs about 2 GB per task; the last task failed with "disk is full".</div>
+          </div>
+        </section>
+        <section class="card" aria-label="Scheduler, healthy" style="padding: 12px 16px; display: flex; flex-direction: column; gap: 8px">
+          <b style="font-size: 15px">Scheduler <span class="muted" style="font-weight: 500; font-size: 12.5px">· healthy state</span></b>
+          <div class="mono">concurrency 2 · repairs 1 · wave scheduling</div>
+          <div style="border-top: 1px solid #EAECF5; padding-top: 8px; display: flex; flex-direction: column; gap: 6px">
+            <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 13px"><span><b>Data volume</b></span><span class="mono">38 GB free of 59 GB</span></div>
+            <div class="meter" aria-hidden="true"><i style="width: 9%; background: #2457C5"></i><i style="width: 2%; background: #B45309"></i><i style="width: 25%; background: #C7CAE0"></i></div>
+            <div class="muted" style="font-size: 12px">5.4 GB held by 2 finished tasks · <a href="#">Free space →</a></div>
+          </div>
+        </section>
+        <section class="card" aria-label="Scheduler, unknown" style="padding: 12px 16px; display: flex; flex-direction: column; gap: 8px">
+          <b style="font-size: 15px">Scheduler <span class="muted" style="font-weight: 500; font-size: 12.5px">· not measured</span></b>
+          <div class="mono">concurrency 2 · repairs 1 · wave scheduling</div>
+          <div style="border-top: 1px solid #EAECF5; padding-top: 8px; display: flex; flex-direction: column; gap: 6px">
+            <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 13px"><span><b>Data volume</b></span><span class="muted">not measured</span></div>
+            <div class="muted" style="font-size: 12px">The service could not read the volume's free space (status reports the error). Sizes per task still come from the worktrees it can read.</div>
+          </div>
+        </section>
+      </div>
+
+      <div class="h" style="margin-top: 8px">3 · Existing Settings card "Service and browser session": one Storage row</div>
+      <section class="card" aria-label="Service and browser session" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px">
+        <b style="font-size: 16px">Service and browser session</b>
+        <dl class="kv">
+          <dt>Listening</dt><dd class="mono">0.0.0.0:4310 · data /data</dd>
+          <dt>Storage</dt><dd><b>3.1 GB free of 59 GB</b> on the data volume · 13 GB in 9 finished tasks' working files · 1.4 GB run data · databases 5 MB · <a href="#">Free space in Tasks →</a><div class="muted" style="font-size: 12.5px; margin-top: 4px">Outside the data volume: Docker image layers and build cache from rebuilds (not measured here). Prune them with <code>docker image prune</code> and <code>docker builder prune</code>; the launcher removes only the images it built itself.</div></dd>
+          <dt>Browser session</dt><dd>Signed in with a one-time link; ends after 12 h idle, 24 h in total, or when the service restarts.</dd>
+          <dt>Version</dt><dd class="mono">devagents 0.1.0 · node v24.18.0 · linux/arm64</dd>
+        </dl>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
