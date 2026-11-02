@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { Command, Id, ScopedPath } from '../../src/domain/schemas.js';
-import { outputJsonSchema, ReviewOutput } from '../../src/orchestration/outputs.js';
+import { outputJsonSchema, ImplementationOutput, ReviewOutput, SetupOutput } from '../../src/orchestration/outputs.js';
+import { PlanningOutput } from '../../src/orchestration/runner.js';
 
 test('model schema omits the incompatible path regex without weakening local path validation', () => {
   const schema = z.strictObject({ id: Id, ownedPaths: z.array(ScopedPath).min(1), validation: z.array(Command) });
@@ -33,4 +34,24 @@ test('review output schema still generates for the model and rejects a rejection
   assert.deepEqual(ReviewOutput.parse({ approved: true, summary: 'ok', findings: [] }).limitations, []);
   assert.equal(ReviewOutput.safeParse({ approved: false, summary: 'needs work', findings: ['Fix x'] }).success, true);
   assert.equal(ReviewOutput.safeParse({ approved: false, summary: 'needs work', findings: [] }).success, false);
+});
+
+/** OpenAI strict structured output rejects any object whose `required` omits a property. Walk every model-facing schema. */
+function assertStrict(schema: Record<string, unknown>, path = '$'): void {
+  const properties = schema.properties as Record<string, Record<string, unknown>> | undefined;
+  if (properties) {
+    assert.equal(schema.additionalProperties, false, `${path}: additionalProperties`);
+    assert.deepEqual([...(schema.required as string[] ?? [])].sort(), Object.keys(properties).sort(), `${path}: every property must be required`);
+    for (const [key, child] of Object.entries(properties)) assertStrict(child, `${path}.${key}`);
+  }
+  for (const key of ['items', 'anyOf', 'oneOf', 'allOf'] as const) {
+    const value = schema[key];
+    if (Array.isArray(value)) value.forEach((child, i) => assertStrict(child as Record<string, unknown>, `${path}.${key}[${i}]`));
+    else if (value && typeof value === 'object') assertStrict(value as Record<string, unknown>, `${path}.${key}`);
+  }
+}
+test('every model-facing output schema lists all properties as required, as strict structured output demands', () => {
+  for (const [name, schema] of Object.entries({ PlanningOutput, ImplementationOutput, ReviewOutput, SetupOutput })) assertStrict(outputJsonSchema(schema), name);
+  const planning = outputJsonSchema(PlanningOutput) as z.core.JSONSchema.ObjectSchema;
+  assert.ok((planning.required as string[]).includes('manualChecks'));
 });

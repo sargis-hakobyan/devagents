@@ -14,7 +14,7 @@ test('limitations are optional reports with bounds; a rejection still needs find
   const review = ReviewOutput.parse({ approved: true, summary: 'ok', findings: [], limitations: ['Screenshots not taken: no Chromium'] });
   assert.equal(review.approved, true); assert.equal(review.limitations.length, 1);
   assert.throws(() => ReviewOutput.parse({ approved: false, summary: 'no', findings: [], limitations: ['x'] }), /at least one actionable finding/);
-  assert.equal(Plan.parse(plan).manualChecks, undefined);
+  assert.deepEqual(Plan.parse(plan).manualChecks, [], 'defaulted, never optional: strict model schemas require every property');
   assert.deepEqual(Plan.parse({ ...plan, manualChecks: ['Check the layout at 390 px'] }).manualChecks, ['Check the layout at 390 px']);
   assert.throws(() => Plan.parse({ ...plan, manualChecks: Array.from({ length: 11 }, () => 'x') }));
 });

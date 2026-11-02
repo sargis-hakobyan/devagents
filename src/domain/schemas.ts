@@ -62,10 +62,11 @@ export const WorkItem = z.strictObject({
   validation: z.array(Command), assignedAgent: Id.optional(), ownedPaths: z.array(ScopedPath).min(1).optional(),
 });
 export const Integration = z.strictObject({ assignedAgent: Id, validation: z.array(Command).min(1) });
-/** Checks the planner knows need tools the sandbox lacks; shown to the user, never enforced. */
+/** Checks the planner knows need tools the sandbox lacks; shown to the user, never enforced. Defaulted, not optional: strict model output schemas must list every property as required. */
 export const ManualChecks = z.array(z.string().min(1).max(1000)).max(10);
-export const Plan = z.strictObject({ summary: z.string().min(1), risks: z.array(z.string()), items: z.array(WorkItem).min(1).max(30), integration: Integration.nullable().optional(), manualChecks: ManualChecks.optional() });
-export type TaskPlan = z.infer<typeof Plan>;
+export const Plan = z.strictObject({ summary: z.string().min(1), risks: z.array(z.string()), items: z.array(WorkItem).min(1).max(30), integration: Integration.nullable().optional(), manualChecks: ManualChecks.default([]) });
+/** Plans stored before manualChecks existed lack the field, so it stays optional on the stored type. */
+export type TaskPlan = Omit<z.infer<typeof Plan>, 'manualChecks'> & { manualChecks?: string[] };
 export const ProjectInput = z.strictObject({ id: Id, path: z.string().min(1), defaultMode: Mode.optional() });
 /** `version` guards default-team changes against lost updates; legacy rows read as version 0. */
 export type Project = z.infer<typeof ProjectInput> & { baseSha: string; registeredAt: string; defaultTeamId?: string; version?: number };

@@ -25,7 +25,8 @@ import { ImplementationOutput, ReviewOutput, SetupOutput, outputJsonSchema } fro
 import { validateWithSetup } from './validate.js';
 
 export const SHUTDOWN_REASON = 'Service shutdown interrupted execution; inspect preserved worktrees and evidence before submitting a new task';
-const PlanningOutput = Plan.extend({ items: z.array(WorkItem.extend({ assignedAgent: z.string(), ownedPaths: z.array(ScopedPath).min(1) })).min(1).max(30), integration: Integration.nullable() });
+/** Exported so the schema test can assert strict-mode compatibility (every property required). */
+export const PlanningOutput = Plan.extend({ items: z.array(WorkItem.extend({ assignedAgent: z.string(), ownedPaths: z.array(ScopedPath).min(1) })).min(1).max(30), integration: Integration.nullable() });
 
 export class TaskRunner {
   private readonly queued = new Set<string>();
