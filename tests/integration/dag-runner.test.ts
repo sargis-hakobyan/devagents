@@ -58,7 +58,7 @@ async function dagFixture(options: Options = {}) {
             if (options.diverge) { await writeFile(join(f.project, 'new.txt'), 'External change'); await git(f.project, ['add', '.']); await git(f.project, ['commit', '-m', 'User change']); }
             if (options.rejectCombined && combinedReviews === 1) return { output: { approved: false, summary: 'Repair requested', findings: ['Clarify implementation'] } };
           }
-          return { output: { approved: true, summary: 'Tests and requirements satisfied', findings: [], ...(options.limitations && r.workItemId === '@integration' ? { limitations: ['Combined visual check skipped: no browser in this sandbox'] } : {}) } };
+          return { output: { approved: true, summary: 'Tests and requirements satisfied', findings: [], ...(options.limitations && r.workItemId === '@integration' ? { limitations: ['Combined visual check skipped: no browser in this sandbox'] } : options.limitations && r.workItemId === 'b' ? { limitations: ['Item b reviewer could not render the module: no browser in this sandbox'] } : {}) } };
         } finally { reviewActive--; }
       }
       progress({ kind: 'command', data: { command: `observed-command-for-${r.workItemId}`, aggregated_output: 'Supplementary fixture check passed', exit_code: 0 } });
@@ -327,10 +327,12 @@ test('DAG records worker and combined-review limitations with the result instead
     const task = f.service.submit({ projectId: 'fixture', request: 'Three modules with a visual check', mode: 'autonomous' }, 'dag-limitations');
     await f.runner.idle(); const done = f.store.task(task.id);
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome)); assert.equal(done.outcome!.repairCycles, 0);
-    assert.deepEqual(done.outcome!.limitations, ['Screenshot of module a could not be taken: Chromium is not available in this sandbox', 'Combined visual check skipped: no browser in this sandbox']);
-    assert.ok(f.store.evidence(task.id).some(e => e.kind === 'limitations' && (e.data as { workItemId: string }).workItemId === 'a'));
-    assert.match(f.store.events(task.id).at(-1)!.reason, /2 checks not run in this environment/);
+    // Worker, item-reviewer and combined-reviewer reports all reach the outcome (review F1).
+    assert.deepEqual([...done.outcome!.limitations!].sort(), ['Combined visual check skipped: no browser in this sandbox', 'Item b reviewer could not render the module: no browser in this sandbox', 'Screenshot of module a could not be taken: Chromium is not available in this sandbox']);
+    const reports = f.store.evidence(task.id).filter(e => e.kind === 'limitations').map(e => e.data as { workItemId: string; phase: string });
+    assert.deepEqual(reports.map(r => `${r.workItemId}:${r.phase}`).sort(), ['@integration:review', 'a:implementation', 'b:review']);
+    assert.match(f.store.events(task.id).at(-1)!.reason, /3 checks not run in this environment/);
     const combinedReview = f.calls.find(c => c.phase === 'review' && c.workItemId === '@integration')!;
-    assert.match(combinedReview.prompt, /Implementation reported limitations so far: \["Screenshot of module a/);
+    assert.match(combinedReview.prompt, /Recorded limitations so far: \[/); assert.match(combinedReview.prompt, /Item b reviewer could not render the module/); assert.match(combinedReview.prompt, /Screenshot of module a/);
   } finally { await f.runner.stop(); await f.cleanup(); }
 });

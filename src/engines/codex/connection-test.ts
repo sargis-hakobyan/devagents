@@ -1,3 +1,4 @@
+import { connectionCheckSchema } from '../../orchestration/outputs.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -41,7 +42,7 @@ export async function testCodexConnection(dataDir: string, method: AuthMethod, o
       provider: { id: 'openai', kind: 'openai', auth: 'login' },
       agent: { ...Agent.parse({ schemaVersion: 1, id: 'connection-check', name: 'Connection check', description: 'Check the saved Codex login', capabilities: ['review'], instructionsFile: 'unused', delegation: { canReceiveTasks: false, canDelegate: false }, permissions: { readPaths: ['project:/**'], writePaths: [], allowCommands: false } }), instructions: '', source: 'internal' },
       prompt: 'This is a connection check. Do not use tools. Return only the JSON object {"connected":true}.',
-      schema: { type: 'object', properties: { connected: { type: 'boolean', enum: [true] } }, required: ['connected'], additionalProperties: false },
+      schema: connectionCheckSchema,
     }, () => {});
     if (!result.output || typeof result.output !== 'object' || (result.output as { connected?: unknown }).connected !== true) throw new AppError('invalid_response', 'Unexpected connection-check output');
     return { ok: true, message: 'Connection verified: the default Codex model responded. You can now register a project and run a task. Other agent models may have different access requirements.' };

@@ -1,13 +1,13 @@
 import { validationEvidence } from './validation-evidence.js';
 import { ImplementationEvidence } from './implementation-evidence.js';
-import { describeLimitations, implementationLimitationInstructions, mergeLimitations, planningLimitationInstructions, reviewLimitationInstructions } from '../domain/limitations.js';
+import { describeLimitations, implementationLimitationInstructions, LimitationLedger, planningLimitationInstructions, reviewLimitationInstructions } from '../domain/limitations.js';
 import { executionAgent, taskRules, validationInstructions } from '../domain/execution-policy.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { CodingEngine, EnginePhase, Validator } from '../domain/engine.js';
 import { PolicyEngine } from '../domain/policy.js';
 import { protectedPath } from '../domain/protected-paths.js';
-import { Plan, WorkItem, Integration, ScopedPath, type AgentDefinition, type Task } from '../domain/schemas.js';
+import type { AgentDefinition, Task } from '../domain/schemas.js';
 import { AppError } from '../domain/errors.js';
 import { terminalStates } from '../domain/lifecycle.js';
 import type { TaskService } from './service.js';
@@ -21,12 +21,10 @@ import { assertValidationCommands, validationFailed, describeValidationFailure }
 import { NodeEnvironmentPreparer, type EnvironmentPreparer } from '../workspace/environment.js';
 import { CodexDependencyInstaller } from '../engines/codex/preparation.js';
 import { selectImplementer, independentReviewer } from '../domain/roles.js';
-import { ImplementationOutput, ReviewOutput, SetupOutput, outputJsonSchema } from './outputs.js';
+import { ImplementationOutput, PlanningOutput, ReviewOutput, SetupOutput, outputJsonSchema } from './outputs.js';
 import { validateWithSetup } from './validate.js';
 
 export const SHUTDOWN_REASON = 'Service shutdown interrupted execution; inspect preserved worktrees and evidence before submitting a new task';
-/** Exported so the schema test can assert strict-mode compatibility (every property required). */
-export const PlanningOutput = Plan.extend({ items: z.array(WorkItem.extend({ assignedAgent: z.string(), ownedPaths: z.array(ScopedPath).min(1) })).min(1).max(30), integration: Integration.nullable() });
 
 export class TaskRunner {
   private readonly queued = new Set<string>();
@@ -211,6 +209,8 @@ export class TaskRunner {
     // An approved plan cannot silently switch its worktree/branch.
     if (item.branch !== task.workspace!.branch) throw new AppError('branch_mismatch', `Plan branch must be ${task.workspace!.branch}`);
     let feedback = '';
+    // Every attempt's and every review's reports are kept here, whichever attempt finally succeeds.
+    const ledger = new LimitationLedger(this.service.store.secrets); ledger.add(task.plan.manualChecks);
     await this.workflows.repeat(id, 'implement-validate-review', async () => {
       this.ensureActive(id, signal);
       await this.prepareEnvironment(id, task.workspace!.path, item.validation, signal);
@@ -218,6 +218,7 @@ export class TaskRunner {
       const hiddenBefore = rules ? await hiddenFiles(task.workspace!.path) : undefined;
       const result = await this.invoke(id, 'implementation', developer, `Implement this work item in the current worktree. Do not commit or modify Git metadata.${rules ? ' Do not modify ignored files.' : ' Generated files and necessary setup scripts are permitted in this worktree. If implementation changes prerequisites, install or regenerate them before returning; keep source changes visible to review.'} ${implementationLimitationInstructions}\nRequest: ${task.request}\nUser acceptance criteria: ${JSON.stringify(task.acceptanceCriteria)}\nPlan: ${JSON.stringify(item)}\n${feedback}`, ImplementationOutput, signal) as z.infer<typeof ImplementationOutput>;
       this.ensureActive(id, signal); if (hiddenBefore) assertHiddenUnchanged(hiddenBefore, await hiddenFiles(task.workspace!.path), 'Implementation');
+      if (result.limitations.length) this.service.store.record(id, 'limitations', { phase: 'implementation', attempt: this.repairs, reported: result.limitations, added: ledger.add(result.limitations) });
       await this.prepareEnvironment(id, task.workspace!.path, item.validation, signal);
       const before = await changes(task.workspace!, developer);
       if (!before.files.length) throw new AppError('no_changes', 'Implementation produced no reviewable changes');
@@ -234,7 +235,8 @@ export class TaskRunner {
         this.ensureActive(id, signal); this.move(id, 'reviewing', 'Independent review of the diff and validation evidence');
         for (const file of after.files) await new PolicyEngine().file(reviewer, task.workspace!.path, file, 'read');
         const readOnlyReviewer = { ...reviewer, permissions: { ...reviewer.permissions, writePaths: [], allowCommands: !rules } };
-        const review = await this.invoke(id, 'review', readOnlyReviewer, `Independently assess this change against the request and acceptance criteria. Do not modify files.${rules ? ' Do not execute commands.' : ' Read-only inspection commands are available.'} Approve only if requirements and tests are satisfied. The findings array contains only actionable defects requiring repair. Put positive observations and passed checks in summary. For approval return approved=true and findings=[]. For rejection return approved=false and explain the required repairs in findings. ${reviewLimitationInstructions}\nRequest: ${task.request}\nUser acceptance criteria: ${JSON.stringify(task.acceptanceCriteria)}\nPlan: ${JSON.stringify(task.plan)}\nImplementation reported limitations: ${JSON.stringify(result.limitations)}\nDiff and new files:\n${after.diff}\nActual validation evidence:\n${validationEvidence(evidence)}`, ReviewOutput, signal) as z.infer<typeof ReviewOutput>;
+        const review = await this.invoke(id, 'review', readOnlyReviewer, `Independently assess this change against the request and acceptance criteria. Do not modify files.${rules ? ' Do not execute commands.' : ' Read-only inspection commands are available.'} Approve only if requirements and tests are satisfied. The findings array contains only actionable defects requiring repair. Put positive observations and passed checks in summary. For approval return approved=true and findings=[]. For rejection return approved=false and explain the required repairs in findings. ${reviewLimitationInstructions}\nRequest: ${task.request}\nUser acceptance criteria: ${JSON.stringify(task.acceptanceCriteria)}\nPlan: ${JSON.stringify(task.plan)}\nRecorded limitations so far: ${JSON.stringify(ledger.list())}\nDiff and new files:\n${after.diff}\nActual validation evidence:\n${validationEvidence(evidence)}`, ReviewOutput, signal) as z.infer<typeof ReviewOutput>;
+        if (review.limitations.length) this.service.store.record(id, 'limitations', { phase: 'review', attempt: this.repairs, reported: review.limitations, added: ledger.add(review.limitations) });
         if (review.approved && review.findings.length === 0) {
           this.ensureActive(id, signal);
           const reviewed = await changes(task.workspace!, developer);
@@ -245,7 +247,7 @@ export class TaskRunner {
           const commit = await commitChanges(this.service.store.project(task.projectId), task.workspace!, reviewed.files);
           this.service.store.record(id, 'commit-created', { commit, branch: task.workspace!.branch });
           // Checks that could not run here are recorded with the result, not retried.
-          const limitations = mergeLimitations(task.plan!.manualChecks, result.limitations, review.limitations);
+          const limitations = ledger.list();
           // Finalization is an atomic lifecycle boundary: cancellation cannot report a commit as cancelled.
           this.move(id, 'completed', `Validation and independent review passed; local commit created${describeLimitations(limitations)}`, { outcome: { commit, files: reviewed.files, summary: result.summary, repairCycles: this.repairs, ...(limitations.length ? { limitations } : {}) } });
           return true;

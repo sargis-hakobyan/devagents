@@ -2,8 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { Command, Id, ScopedPath } from '../../src/domain/schemas.js';
-import { outputJsonSchema, ImplementationOutput, ReviewOutput, SetupOutput } from '../../src/orchestration/outputs.js';
-import { PlanningOutput } from '../../src/orchestration/runner.js';
+import { outputJsonSchema, modelSchemas, PlanningOutput, ReviewOutput } from '../../src/orchestration/outputs.js';
 
 test('model schema omits the incompatible path regex without weakening local path validation', () => {
   const schema = z.strictObject({ id: Id, ownedPaths: z.array(ScopedPath).min(1), validation: z.array(Command) });
@@ -49,9 +48,18 @@ function assertStrict(schema: Record<string, unknown>, path = '$'): void {
     if (Array.isArray(value)) value.forEach((child, i) => assertStrict(child as Record<string, unknown>, `${path}.${key}[${i}]`));
     else if (value && typeof value === 'object') assertStrict(value as Record<string, unknown>, `${path}.${key}`);
   }
+  // Objects moved behind references must satisfy the same rule.
+  for (const key of ['$defs', 'definitions'] as const) {
+    const defs = schema[key] as Record<string, Record<string, unknown>> | undefined;
+    if (defs) for (const [name, child] of Object.entries(defs)) assertStrict(child, `${path}.${key}.${name}`);
+  }
 }
-test('every model-facing output schema lists all properties as required, as strict structured output demands', () => {
-  for (const [name, schema] of Object.entries({ PlanningOutput, ImplementationOutput, ReviewOutput, SetupOutput })) assertStrict(outputJsonSchema(schema), name);
+test('every registered model schema lists all properties as required, as strict structured output demands', () => {
+  const inventory = modelSchemas();
+  assert.deepEqual(Object.keys(inventory).sort(), ['connectionCheck', 'implementation', 'planning', 'review', 'setup'], 'a new model call site must register its schema here');
+  for (const [name, schema] of Object.entries(inventory)) assertStrict(schema, name);
   const planning = outputJsonSchema(PlanningOutput) as z.core.JSONSchema.ObjectSchema;
   assert.ok((planning.required as string[]).includes('manualChecks'));
+  // The walker itself catches an optional property hidden behind a definition.
+  assert.throws(() => assertStrict({ type: 'object', properties: { a: { $ref: '#/$defs/inner' } }, required: ['a'], additionalProperties: false, $defs: { inner: { type: 'object', properties: { x: { type: 'string' } }, required: [], additionalProperties: false } } }), /must be required/);
 });

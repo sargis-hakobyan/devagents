@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ScopedPath } from '../domain/schemas.js';
+import { Integration, Plan, ScopedPath, WorkItem } from '../domain/schemas.js';
 import { Limitation } from '../domain/limitations.js';
 
 /** Generation hints are separate from the authoritative local Zod/policy checks. */
@@ -28,8 +28,21 @@ export const ReviewOutput = z.strictObject({
   approved: z.boolean().describe('True only when requirements and validation pass and findings is empty.'),
   summary: z.string().min(1).describe('Review rationale, including positive observations and test evidence.'),
   findings: z.array(z.string().min(1)).describe('Actionable defects requiring repair only. Empty when approved. Do not include positive observations or passed checks.'),
-  limitations: z.array(Limitation).max(10).default([]).describe('Checks that could not run in this environment, carried over from the implementation report and the plan. Never findings.'),
+  limitations: z.array(Limitation).max(10).default([]).describe('Only limitations newly noticed by this review (checks that could not run in this environment). Recorded reports are carried forward by the orchestrator; never findings.'),
 }).superRefine((review, ctx) => {
   // A rejection with nothing to repair is malformed output, not a repair request worth a cycle.
   if (!review.approved && review.findings.length === 0) ctx.addIssue({ code: 'custom', path: ['findings'], message: 'A rejection must list at least one actionable finding' });
 });
+
+/** The planner's response: items must name an agent and owned paths; integration is explicit. */
+export const PlanningOutput = Plan.extend({ items: z.array(WorkItem.extend({ assignedAgent: z.string(), ownedPaths: z.array(ScopedPath).min(1) })).min(1).max(30), integration: Integration.nullable() });
+/** The literal schema of the opt-in connection check; registered here so the strict-schema test covers it. */
+export const connectionCheckSchema: Record<string, unknown> = { type: 'object', properties: { connected: { type: 'boolean', enum: [true] } }, required: ['connected'], additionalProperties: false };
+/**
+ * Every JSON schema this build sends to a model. Strict structured output refuses any object whose
+ * `required` omits a property, so each entry is asserted by tests/unit/output-schema.test.ts; a new
+ * model call site must register its schema here.
+ */
+export function modelSchemas(): Record<string, Record<string, unknown>> {
+  return { planning: outputJsonSchema(PlanningOutput), setup: outputJsonSchema(SetupOutput), implementation: outputJsonSchema(ImplementationOutput), review: outputJsonSchema(ReviewOutput), connectionCheck: connectionCheckSchema };
+}

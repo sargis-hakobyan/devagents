@@ -8,7 +8,7 @@ import { AppError } from '../../src/domain/errors.js';
 export class FakeEngine implements CodingEngine {
   readonly id = 'codex';
   calls: EngineRequest[] = [];
-  constructor(readonly options: { failFirstTest?: boolean; noisyFirstTest?: boolean; rejectReviews?: boolean; emptyRejection?: boolean; contradictoryReview?: boolean; mutateReview?: boolean; waitForCancel?: boolean; limitations?: string[]; manualChecks?: string[] } = {}) {}
+  constructor(readonly options: { failFirstTest?: boolean; noisyFirstTest?: boolean; rejectReviews?: boolean; emptyRejection?: boolean; contradictoryReview?: boolean; mutateReview?: boolean; waitForCancel?: boolean; limitations?: string[]; manualChecks?: string[]; limitationsOnce?: boolean; firstReviewRejects?: boolean; reviewLimitations?: string[] } = {}) {}
   async preflight(): Promise<void> {}
   async execute(request: EngineRequest): Promise<EngineResult> {
     this.calls.push(request);
@@ -25,12 +25,16 @@ export class FakeEngine implements CodingEngine {
       await writeFile(join(request.cwd, 'greeting.cjs'), `module.exports = () => '${broken ? 'broken' : 'hello'}';\n`);
       const noisy = this.options.noisyFirstTest && this.calls.filter(c => c.phase === 'implementation').length === 1;
       await writeFile(join(request.cwd, 'greeting.test.cjs'), `${noisy ? "console.log('BEGIN-NOISE'); console.log('n'.repeat(1536 * 1024)); console.log('END-NOISE');\n" : ''}const test = require('node:test'); const assert = require('node:assert/strict'); const greet = require('./greeting.cjs'); test('greeting', () => assert.equal(greet(), 'hello'));\n`);
-      return { output: { summary: 'Implemented greeting and tests', ...(this.options.limitations ? { limitations: this.options.limitations } : {}) } };
+      const first = this.calls.filter(c => c.phase === 'implementation').length === 1;
+      return { output: { summary: 'Implemented greeting and tests', ...(this.options.limitations && (!this.options.limitationsOnce || first) ? { limitations: this.options.limitations } : {}) } };
     }
     if (this.options.mutateReview) await writeFile(join(request.cwd, 'greeting.cjs'), "module.exports = () => 'tampered';\n");
     if (this.options.emptyRejection) return { output: { approved: false, summary: 'Rejected without saying why', findings: [] } };
-    // The reviewer carries reported limitations forward; they are never findings.
-    return { output: { approved: !this.options.rejectReviews, summary: 'Independent fixture review', findings: this.options.rejectReviews || this.options.contradictoryReview ? ['Greeting needs work'] : [], ...(this.options.limitations ? { limitations: this.options.limitations } : {}) } };
+    const firstReview = this.calls.filter(c => c.phase === 'review').length === 1;
+    // A rejecting review may itself notice a limitation; the orchestrator must keep it although this review is not the final one.
+    if (this.options.firstReviewRejects && firstReview) return { output: { approved: false, summary: 'First review requests a rename', findings: ['Rename the helper module'], limitations: this.options.reviewLimitations ?? [] } };
+    // The reviewer reports only what it newly notices; the orchestrator carries recorded reports forward.
+    return { output: { approved: !this.options.rejectReviews, summary: 'Independent fixture review', findings: this.options.rejectReviews || this.options.contradictoryReview ? ['Greeting needs work'] : [], ...(this.options.limitations && (!this.options.limitationsOnce || firstReview) ? { limitations: this.options.limitations } : {}) } };
   }
 }
 // Only used with the hardcoded fixture above, never exposed to user/model commands.

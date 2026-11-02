@@ -6,6 +6,7 @@ import { Store } from '../persistence/store.js';
 import { Mode, TaskInput, TeamInput, TEAM_INSTRUCTION_BYTES, type AgentDefinition, type AppConfig, type Task, type TaskTeam, type TeamMember, type TeamRecord, type TeamReadiness, type TeamSummary } from '../domain/schemas.js';
 import { terminalStates } from '../domain/lifecycle.js';
 import { AppError } from '../domain/errors.js';
+import { redact } from '../telemetry/redact.js';
 import { inspectProject, WorkspaceManager } from '../workspace/git.js';
 import { builtinCapabilities, builtinDirectory, loadRegistry } from '../agents/registry.js';
 import { providerExecutable, resolveEngine, resolveProviderId, teamReadiness, type RuntimeSupport } from '../domain/readiness.js';
@@ -124,6 +125,8 @@ export class TaskService {
     const task = this.store.task(id);
     if (task.state !== 'planning') throw new AppError('invalid_transition', 'Task is not awaiting a plan', 409);
     const plan = validatePlan(input, task.projectId, snapshot ?? task.agents ?? await this.agents(task.projectId), { platform: this.platform, devagentsRules: taskRules(task) });
+    // Manual checks are display prose shown to the user: evidence-grade redaction, like every other report.
+    if (plan.manualChecks?.length) plan.manualChecks = plan.manualChecks.map(c => String(redact(c, this.store.secrets)));
     if (task.workspace && plan.items.some(item => item.branch !== (plan.items.length === 1 ? task.workspace!.branch : `${task.workspace!.branch}-${item.id}`))) throw new AppError('branch_mismatch', 'Plan branches must match their managed task/work-item branches');
     return this.store.transition(id, task.version, task.mode === 'plan-approval' ? 'awaiting_plan_approval' : 'ready', 'planner', 'Validated plan stored', { plan });
   }

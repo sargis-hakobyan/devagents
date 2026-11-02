@@ -208,7 +208,7 @@ function ResultTab({ task, evidence }: { task: Task; evidence: Evidence[] }) {
       <dt>Repairs used</dt><dd>{task.outcome?.repairCycles ?? 0}</dd>
       <dt>Tests</dt><dd>{validations.length ? `${validations.filter(v => evidenceFacts(v).exitCode === 0 && !evidenceFacts(v).truncated).length} of ${validations.length} validation runs passed; see Activity for output` : 'none recorded'}</dd>
       <dt>Review</dt><dd class="wrap-anywhere">{review ? `${reviewPassed(review) ? 'Approved' : 'Changes requested'} · ${review.summary ?? ''}` : '—'}</dd>
-      <dt>Not verified here</dt><dd>{task.outcome?.limitations?.length ? <ul class="criteria" aria-label="Checks not run in this environment">{task.outcome.limitations.map((l, i) => <li key={i} class="wrap-anywhere">{l}</li>)}</ul> : <span class="muted">None reported · every declared check ran here</span>}</dd>
+      <dt>Not verified here</dt><dd>{task.outcome?.limitations?.length ? <ul class="criteria" aria-label="Checks not run in this environment">{task.outcome.limitations.map((l, i) => <li key={i} class="wrap-anywhere">{l}</li>)}</ul> : <span class="muted">No limitations recorded</span>}</dd>
       <dt>Diff</dt><dd>Read the recorded base-to-final change below.</dd>
       <dt>Worktree</dt><dd class="mono wrap-anywhere">{task.workspace?.path ?? '—'}</dd>
     </dl></div>

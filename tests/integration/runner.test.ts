@@ -6,7 +6,7 @@ import { fixture } from '../helpers.js';
 import { FakeEngine, FixtureValidator } from '../fixtures/fake-engine.js';
 import { TaskRunner } from '../../src/orchestration/runner.js';
 import { git } from '../../src/workspace/git.js';
-import { Plan } from '../../src/domain/schemas.js';
+import { Config, Plan } from '../../src/domain/schemas.js';
 import { TaskService } from '../../src/orchestration/service.js';
 import { Store } from '../../src/persistence/store.js';
 
@@ -316,7 +316,7 @@ test('a check that cannot run in this environment is reported with the result an
     assert.deepEqual(done.outcome!.limitations, ['Confirm the greeting renders at 390 px', 'Visual check could not run: no browser in this sandbox']);
     assert.deepEqual(done.plan!.manualChecks, ['Confirm the greeting renders at 390 px']);
     assert.match(engine.calls[1]!.prompt, /try once at most, then report it in limitations/);
-    assert.match(engine.calls[2]!.prompt, /are not findings/); assert.match(engine.calls[2]!.prompt, /Implementation reported limitations: \["Visual check could not run/);
+    assert.match(engine.calls[2]!.prompt, /are not findings/); assert.match(engine.calls[2]!.prompt, /Recorded limitations so far: \["Confirm the greeting renders at 390 px","Visual check could not run/);
     assert.match(f.store.events(task.id).at(-1)!.reason, /2 checks not run in this environment/);
     assert.equal(f.store.summaries({ limit: 5 }).tasks[0]!.limitations, 2);
     // A real validation failure still repairs, exactly as before.
@@ -325,5 +325,29 @@ test('a check that cannot run in this environment is reported with the result an
     await second.idle(); const result = f.store.task(repaired.id);
     assert.equal(result.state, 'completed', JSON.stringify(result.outcome)); assert.equal(result.outcome!.repairCycles, 1); assert.deepEqual(result.outcome!.limitations, ['No browser']);
     await second.stop();
+  } finally { await runner.stop(); await f.cleanup(); }
+});
+
+test('reports from an earlier attempt and from a rejecting review survive repairs, and display prose is redacted like evidence (review F1, F3)', async () => {
+  const f = await fixture();
+  const service = new TaskService(f.store, Config.parse({ schemaVersion: 1, maxRepairCycles: 3 }), f.dataDir);
+  const engine = new FakeEngine({ failFirstTest: true, limitationsOnce: true, limitations: ['Browser screenshots could not be taken: no Chromium here; password=SYNTHETIC_ONLY_VALUE'], firstReviewRejects: true, reviewLimitations: ['Reviewer could not open the staging site: no network'], manualChecks: ['Check the layout at 390 px with token: SYNTHETIC_TOKEN_123'] });
+  const runner = new TaskRunner(service, engine, new FixtureValidator()); service.attachRunner(runner);
+  try {
+    const task = service.submit({ projectId: 'fixture', request: 'Greeting with reports that must survive repair', mode: 'autonomous' }, 'limitations-survive');
+    await runner.idle();
+    const done = f.store.task(task.id);
+    assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
+    assert.equal(done.outcome!.repairCycles, 2, 'one real test failure and one rejecting review were repaired');
+    assert.equal(engine.calls.filter(c => c.phase === 'implementation').length, 3); assert.equal(engine.calls.filter(c => c.phase === 'review').length, 2);
+    // Only the first implementation and the rejecting review reported anything; both reports reach the outcome.
+    assert.deepEqual(done.outcome!.limitations, ['Check the layout at 390 px with token: [REDACTED]', 'Browser screenshots could not be taken: no Chromium here; password=[REDACTED]', 'Reviewer could not open the staging site: no network']);
+    assert.deepEqual(done.plan!.manualChecks, ['Check the layout at 390 px with token: [REDACTED]']);
+    assert.doesNotMatch(JSON.stringify(done), /SYNTHETIC_ONLY_VALUE|SYNTHETIC_TOKEN_123/);
+    const finalReview = engine.calls.filter(c => c.phase === 'review').at(-1)!;
+    assert.match(finalReview.prompt, /Recorded limitations so far: \["Check the layout at 390 px with token: \[REDACTED\]","Browser screenshots could not be taken: no Chromium here; password=\[REDACTED\]","Reviewer could not open the staging site: no network"\]/);
+    const reports = f.store.evidence(task.id).filter(e => e.kind === 'limitations').map(e => e.data as { phase: string; attempt: number });
+    assert.deepEqual(reports.map(r => [r.phase, r.attempt]), [['implementation', 0], ['review', 1]]);
+    assert.match(f.store.events(task.id).at(-1)!.reason, /3 checks not run in this environment/);
   } finally { await runner.stop(); await f.cleanup(); }
 });
