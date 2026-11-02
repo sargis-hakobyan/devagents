@@ -303,7 +303,8 @@ test('cleanup of a completed DAG task removes every item worktree and item branc
     const task = f.service.submit({ projectId: 'fixture', request: 'Three modules', mode: 'autonomous' }, 'dag-cleanup'); await f.runner.idle();
     const done = f.store.task(task.id); assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     const before = (await git(f.project, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/'])).split('\n').filter(Boolean);
-    assert.equal(before.filter(b => b.startsWith(`codex/devagents-${task.id}-`)).length, 3);
+    assert.equal(done.workspace!.branch, `devagents/three-modules-${task.id.slice(0, 8)}`);
+    assert.equal(before.filter(b => b.startsWith(`${done.workspace!.branch}-`)).length, 3);
     const result = await f.service.cleanup(task.id);
     assert.equal(result.removedWorktrees.length, 4); assert.equal(result.removedBranches.length, 3); assert.deepEqual(result.keptBranches, [done.workspace!.branch]);
     const after = (await git(f.project, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/'])).split('\n').filter(Boolean).sort();

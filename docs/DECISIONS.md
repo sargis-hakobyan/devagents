@@ -291,3 +291,10 @@ The display list now contains up to twenty real reports. Separate total, omitted
 R5–R9 revise the handoffs only: private dependency views with measured clone/copy capability, complete input keys, immutable pinned tool generations and executable-bit preservation; cleanup with short lifecycle locking, live descendant drain, explicit content hashing, unconditional crash-safe branch archives and separate base-to-index/index-to-working recovery artifacts. No preparation, sandbox or cleanup implementation is changed by this follow-up.
 
 Verification for this working-tree change is compiler-only plus diff inspection. Regression test source was added but tests were not run at the owner's request. Docker, protocol, M2/M3 and authenticated fixtures remain unrun; no service rebuild or M4 work is included.
+
+## 2026-11-02 — Branch names from the request; Plan tab redesign
+
+Owner decision: managed branches must not carry an engine prefix and must say what the task is. Task branches are now `devagents/<slug>-<short id>` (slug from the first request line, transliterated to ASCII, cut at a word boundary at 48 characters; short id is the first eight characters of the task id), work-item branches append `-<item id>`, and the final commit subject is the first request line instead of a fixed string. Ownership checks (diff, commit, cleanup) go through `src/workspace/branches.ts`, which also accepts the legacy `codex/devagents-<task id>` form so existing tasks keep their diffs and cleanup. Worktree directory names are unchanged (full task id), so path ownership checks are untouched. The planner's item-branch schema no longer requires a `codex/` prefix.
+
+The Plan tab now shows the summary with fact chips (items, agents, validation commands, branch), risks, manual checks, acceptance criteria and integration in a responsive grid, and full-width numbered work-item cards with "done when" criteria beside scope, dependencies, validation and branch. The sticky decision bar appears only while the plan awaits approval; other states keep their actions in the task header.
+

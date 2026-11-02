@@ -12,6 +12,7 @@ import { AppError } from '../domain/errors.js';
 import { terminalStates } from '../domain/lifecycle.js';
 import type { TaskService } from './service.js';
 import { WorkspaceManager, git } from '../workspace/git.js';
+import { commitSubject } from '../workspace/branches.js';
 import { changes, commitChanges } from '../workspace/changes.js';
 import { hiddenFiles, assertHiddenUnchanged } from '../workspace/hidden.js';
 import { scopeAgent } from '../domain/ownership.js';
@@ -174,7 +175,7 @@ export class TaskRunner {
     this.ensureActive(id, signal);
     if (!task.workspace) {
       this.service.store.record(id, 'worktree-intent', { owner: task.id });
-      const workspace = await new WorkspaceManager(this.service.dataDir).create(this.service.store.project(task.projectId), task.id);
+      const workspace = await new WorkspaceManager(this.service.dataDir).create(this.service.store.project(task.projectId), task.id, task.request);
       task = this.ensureActive(id, signal);
       task = this.service.store.checkpoint(id, task.version, { workspace, agents: roster }, 'Worktree created and agent definitions snapshotted');
     }
@@ -255,7 +256,7 @@ export class TaskRunner {
           this.ensureActive(id, signal);
           this.move(id, 'committing', 'Finalizing reviewed local commit');
           this.service.store.record(id, 'commit-intent', { branch: task.workspace!.branch, digest: reviewed.digest, files: reviewed.files });
-          const commit = await commitChanges(this.service.store.project(task.projectId), task.workspace!, reviewed.files);
+          const commit = await commitChanges(this.service.store.project(task.projectId), task.workspace!, reviewed.files, commitSubject(task.request));
           this.service.store.record(id, 'commit-created', { commit, branch: task.workspace!.branch });
           // Checks that could not run here are recorded with the result, not retried.
           const limitations = ledger.snapshot();

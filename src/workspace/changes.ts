@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { BRANCH_NAMESPACE } from './branches.js';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { git } from './git.js';
 import { PolicyEngine } from '../domain/policy.js';
@@ -29,12 +30,12 @@ export async function changes(workspace: NonNullable<Task['workspace']>, agent: 
   if (review.length > 250000) throw new AppError('diff_limit', 'Diff exceeds review limit');
   return { files, digest: digest.digest('hex'), diff: review };
 }
-export async function commitChanges(project: Project, workspace: NonNullable<Task['workspace']>, files: string[]): Promise<string> {
+export async function commitChanges(project: Project, workspace: NonNullable<Task['workspace']>, files: string[], message = 'Implement reviewed DevAgents task'): Promise<string> {
   if (await git(project.path, ['rev-parse', 'HEAD']) !== workspace.baseSha) throw new AppError('base_diverged', 'Original project HEAD changed; inspect the worktree before integrating');
-  return commitOwned(workspace, files, 'Implement reviewed DevAgents task');
+  return commitOwned(workspace, files, message);
 }
 export async function commitOwned(workspace: NonNullable<Task['workspace']>, files: string[], message: string): Promise<string> {
-  if (!workspace.branch.startsWith('codex/devagents-')) throw new AppError('branch_denied', 'Commit is not on an owned branch');
+  if (!workspace.branch.startsWith(BRANCH_NAMESPACE) && !workspace.branch.startsWith('codex/devagents-')) throw new AppError('branch_denied', 'Commit is not on an owned branch');
   if (await git(workspace.path, ['rev-parse', 'HEAD']) !== workspace.baseSha || await git(workspace.path, ['branch', '--show-current']) !== workspace.branch) throw new AppError('worktree_changed', 'Worktree changed before commit');
   const config = await git(workspace.path, ['config', '--local', '--includes', '--name-only', '--list']);
   if (config.split('\n').some(k => k.startsWith('filter.'))) throw new AppError('unsafe_git_config', 'Git filters require additional isolation');

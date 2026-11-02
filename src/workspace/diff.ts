@@ -1,4 +1,5 @@
 import { realpath } from 'node:fs/promises';
+import { isTaskBranch } from './branches.js';
 import { join, resolve } from 'node:path';
 import { AppError } from '../domain/errors.js';
 import type { Project, Task } from '../domain/schemas.js';
@@ -15,7 +16,7 @@ function prefix(text: string, budget: number): string { const b = Buffer.from(te
 export async function readTaskDiff(project: Project, task: Task, dataDir: string, secrets: readonly string[] = environmentSecrets()): Promise<TaskDiff> {
   const workspace = task.workspace; const final = task.outcome?.commit;
   if (task.state !== 'completed' || !workspace || !final) return unavailable('Diffs are offered only for completed tasks with a recorded final commit.');
-  if (!/^[a-f0-9-]{36}$/.test(task.id) || workspace.branch !== `codex/devagents-${task.id}` || !/^[a-f0-9]{40}$/.test(workspace.baseSha) || !/^[a-f0-9]{40}$/.test(final)) return unavailable('Recorded commit or branch identity does not belong to this task.');
+  if (!/^[a-f0-9-]{36}$/.test(task.id) || !isTaskBranch(workspace.branch, task.id) || !/^[a-f0-9]{40}$/.test(workspace.baseSha) || !/^[a-f0-9]{40}$/.test(final)) return unavailable('Recorded commit or branch identity does not belong to this task.');
   let phase = 'ownership';
   try {
     const parent = await realpath(resolve(dataDir, 'worktrees'));

@@ -84,7 +84,7 @@ npm run cli -- tasks items TASK_ID
 
 Authenticate Codex before selecting a mode. Approve the version you actually reviewed. `tasks cancel TASK_ID` also rejects a pending plan. Submission with `--mode autonomous` skips the mode prompt and plan approval. Task mode overrides project default (`projects add ... --mode ...`), which overrides the global default. With no default the wait is persisted exactly once.
 
-Reuse `--key` with identical input to retry submission without duplication. Use `tasks show` to find the managed branch, worktree path and final commit. One top-level request runs at a time. Within it, ready items run in deterministic waves bounded by global `concurrency` and each role’s `concurrency`. Integration is serial and dependent items start only after prior waves are integrated. Nothing is pushed or merged into the original checkout automatically.
+Reuse `--key` with identical input to retry submission without duplication. Use `tasks show` to find the managed branch, worktree path and final commit. The managed branch is named after the request and the task: `devagents/<slug>-<first eight characters of the task id>`, for example `devagents/fix-my-orders-12b1ca2d`; work items use `<task branch>-<item id>`. Branches created by earlier versions (`codex/devagents-<task id>`) stay recognised for diffs and cleanup. The final commit's subject is the first line of the request. One top-level request runs at a time. Within it, ready items run in deterministic waves bounded by global `concurrency` and each role’s `concurrency`. Integration is serial and dependent items start only after prior waves are integrated. Nothing is pushed or merged into the original checkout automatically.
 
 ## Browser UI
 

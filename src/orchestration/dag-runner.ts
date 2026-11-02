@@ -13,6 +13,7 @@ import { ImplementationOutput, ReviewOutput } from './outputs.js';
 import type { TaskWorkflows } from './workflows.js';
 import { readyWave, AgentSlots } from './dag-scheduler.js';
 import { WorkspaceManager, git } from '../workspace/git.js';
+import { commitSubject } from '../workspace/branches.js';
 import { changes, commitOwned, commitChanges } from '../workspace/changes.js';
 import { integrationSnapshot, integrateItem, assertIntegrationConfig } from '../workspace/integration.js';
 import { hiddenFiles, assertHiddenUnchanged } from '../workspace/hidden.js';
@@ -121,7 +122,7 @@ export async function runDag(h: Hooks): Promise<void> {
     try {
       check(); state(item.id, 'creating', { baseSha });
       record('worktree-intent', { owner: task.id, workItemId: item.id, branch: item.branch, baseSha });
-      const ownedWorker = await new WorkspaceManager(service.dataDir).createItem(project, task.id, item.id, baseSha);
+      const ownedWorker = await new WorkspaceManager(service.dataDir).createItem(project, task.id, task.workspace!.branch, item.id, baseSha);
       worker = ownedWorker;
       state(item.id, 'running', { workspace: worker });
       let feedback = '';
@@ -240,7 +241,7 @@ export async function runDag(h: Hooks): Promise<void> {
           if (checked.digest !== after.digest) throw new AppError('review_mutated_files', 'Files changed during combined review');
           h.active(); h.move('committing', 'Finalizing reviewed combined local commit');
           record('commit-intent', { branch: workspace.branch, digest: checked.digest, files: checked.files });
-          const commit = await commitChanges(project, workspace, checked.files);
+          const commit = await commitChanges(project, workspace, checked.files, commitSubject(task.request));
           record('commit-created', { commit, branch: workspace.branch });
           const reported = ledger.snapshot();
           h.move('completed', `DAG execution, combined validation and review passed; local commit created${describeLimitations(reported)}`, { outcome: { commit, files: checked.files, summary: plan.summary, repairCycles, ...reported } });

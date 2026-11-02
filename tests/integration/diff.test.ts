@@ -10,7 +10,7 @@ import type { Task } from '../../src/domain/schemas.js';
 async function completed(files: Record<string, string | Buffer>) {
   const f = await fixture();
   const task = f.service.submit({ projectId: 'fixture', request: 'Read diff', mode: 'autonomous' }, 'diff');
-  const workspace = await new WorkspaceManager(f.dataDir).create(f.store.project('fixture'), task.id);
+  const workspace = await new WorkspaceManager(f.dataDir).create(f.store.project('fixture'), task.id, task.request);
   for (const [name, text] of Object.entries(files)) await writeFile(join(workspace.path, name), text);
   await git(workspace.path, ['add', '.']);
   await git(workspace.path, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'Diff fixture']);
@@ -85,7 +85,7 @@ test('configured provider secrets outside the environment-name heuristic are red
   try {
     await service.registerProject({ id: 'fixture', path: f.project });
     const task = service.submit({ projectId: 'fixture', request: 'leak', mode: 'autonomous' }, 'leak');
-    const workspace = await new WorkspaceManager(f.dataDir).create(store.project('fixture'), task.id);
+    const workspace = await new WorkspaceManager(f.dataDir).create(store.project('fixture'), task.id, task.request);
     await writeFile(join(workspace.path, 'leak.txt'), `const k = "${value}";\n`);
     await git(workspace.path, ['add', '.']); await git(workspace.path, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'leak']);
     const final = await git(workspace.path, ['rev-parse', 'HEAD']);

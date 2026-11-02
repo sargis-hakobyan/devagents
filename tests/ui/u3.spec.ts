@@ -294,7 +294,7 @@ test('real HTTP diffs distinguish hostile truncated text, binary, empty and miss
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const complete = async (files: Record<string, string | Buffer>) => {
     const task = f.service.submit({ projectId: 'fixture', request: 'Browser diff fixture', mode: 'autonomous' }, crypto.randomUUID());
-    const workspace = await new WorkspaceManager(f.dataDir).create(f.store.project('fixture'), task.id);
+    const workspace = await new WorkspaceManager(f.dataDir).create(f.store.project('fixture'), task.id, task.request);
     for (const [name, contents] of Object.entries(files)) await writeFile(join(workspace.path, name), contents);
     await git(workspace.path, ['add', '.']);
     await git(workspace.path, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'Browser diff fixture']);

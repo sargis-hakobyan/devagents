@@ -58,7 +58,7 @@ export const WorkItem = z.strictObject({
   id: Id, title: z.string().min(1), description: z.string().min(1),
   acceptanceCriteria: z.array(z.string().min(1)).min(1), dependsOn: z.array(Id),
   requiredCapabilities: z.array(Id).min(1), projectId: Id,
-  branch: z.string().regex(/^codex\/[a-z0-9][a-z0-9/-]*$/),
+  branch: z.string().regex(/^[a-z0-9][a-z0-9/-]*$/),
   validation: z.array(Command), assignedAgent: Id.optional(), ownedPaths: z.array(ScopedPath).min(1).optional(),
 });
 export const Integration = z.strictObject({ assignedAgent: Id, validation: z.array(Command).min(1) });

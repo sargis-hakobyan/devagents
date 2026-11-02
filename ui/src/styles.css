@@ -168,3 +168,25 @@ fieldset:disabled .field input, fieldset:disabled .field select, fieldset:disabl
 .diff-grid{grid-template-columns:minmax(0,1fr) minmax(0,2fr)}
 .decision-bar{position:sticky;bottom:12px;background:var(--panel,#fff);padding:12px;border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 28px rgba(35,31,74,.12)}
 @media(max-width:800px){.diff-grid{grid-template-columns:minmax(0,1fr)}.submit-action{position:sticky;bottom:12px;box-shadow:0 6px 16px rgba(35,31,74,.16)}}
+
+/* Plan tab */
+.plan-summary{padding:16px 18px;border-bottom:1px solid var(--row)}
+.plan-lead{margin:0;font-size:15.5px;line-height:1.55;max-width:84ch}
+.plan-facts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.plan-facts .chip{white-space:normal;overflow-wrap:anywhere}
+.plan-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px 32px;padding:14px 18px 16px}
+.plan-section{min-width:0}
+.plan-section .criteria{margin-top:6px}.plan-section .criteria li{margin-bottom:4px}
+.plan-note{font-size:12.5px;margin-top:6px}
+.plan-items-head{margin-top:4px}
+.plan-items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:14px}
+.plan-item.item{padding:0;gap:0}
+.plan-item-head{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--row)}
+.plan-item-n{flex:0 0 28px;height:28px;border-radius:999px;background:var(--ink);color:#fff;font-weight:800;font-size:13px;display:grid;place-items:center}
+.plan-item-title{display:flex;flex-direction:column;min-width:0;flex:1}
+.plan-item-title b{font-size:15px;line-height:1.3}
+.plan-item-title .mono{font-size:12px}
+.plan-item-text{margin:0;padding:12px 18px 0;max-width:90ch;font-size:13.5px}
+.plan-item-body{display:grid;grid-template-columns:minmax(0,3fr) minmax(300px,2fr);gap:12px 32px;padding:12px 18px 16px}
+.plan-item-facts{font-size:13px;grid-template-columns:96px minmax(0,1fr);align-content:start}
+@media(max-width:900px){.plan-item-body{grid-template-columns:minmax(0,1fr)}.plan-item-head{flex-wrap:wrap}}

@@ -37,7 +37,7 @@ test('cleanup of a failed task deletes its branch and refuses forged workspace p
     const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'cleanup-failed');
     await runner.idle(); const failed = f.store.task(task.id); assert.equal(failed.state, 'failed');
     // Evidence is append-only data; a workspace entry pointing at the user's checkout must never be removed.
-    f.store.record(task.id, 'work-item', { itemId: 'forged', state: 'running', workspace: { path: f.project, branch: `codex/devagents-${task.id}-forged` } });
+    f.store.record(task.id, 'work-item', { itemId: 'forged', state: 'running', workspace: { path: f.project, branch: `${failed.workspace!.branch}-forged` } });
     await assert.rejects(f.service.cleanup(task.id), /Refusing to remove/);
     assert.equal(await worktrees(f.project), 2, 'nothing removed when any entry is refused');
     const taskOnly = await import('../../src/workspace/git.js').then(m => new m.WorkspaceManager(f.dataDir).cleanup(f.store.project('fixture'), task.id, [failed.workspace!]));

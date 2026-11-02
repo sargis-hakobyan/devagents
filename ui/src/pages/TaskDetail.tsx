@@ -1,6 +1,7 @@
 import { TaskDiff } from '../components/TaskDiff';
 import { useTaskActions } from '../components/TaskActions';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import type { ComponentChildren } from 'preact';
 import { api, evidenceFacts, type Evidence, type ItemProgress, type Task, type TaskEvent } from '../api';
 import { Card, Chip, ErrorNote, ItemChip, Later, Pre, Skeleton, Stage, StateChip, pretty } from '../components/ui';
 import { limitationCount, command, elapsed, formatTime, relative, taskState } from '../format';
@@ -61,7 +62,7 @@ export function TaskDetailPage({ id }: { id: string }) {
       {([['work', `Work · ${items.length}`], ['plan', 'Plan'], ['activity', `Activity · ${events.rows.length + evidence.rows.length}`], ['result', 'Result']] as [Tab, string][]).map(([t, label]) => <button key={t} type="button" role="tab" class="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{label}</button>)}
     </div>
     {tab === 'work' && <WorkTab task={task} items={items} perItem={perItem} now={now} />}
-    {tab === 'plan' && <><div class="note info">Plan · version {task.version}. Approval applies to this version.</div><PlanTab task={task} /><div class="decision-bar">{renderActions()}</div></>}
+    {tab === 'plan' && <><PlanTab task={task} />{task.state === 'awaiting_plan_approval' && <div class="decision-bar">{renderActions()}</div>}</>}
     {tab === 'activity' && <ActivityTab task={task} events={events.rows} evidence={evidence.rows} />}
     {tab === 'result' && <ResultTab task={task} evidence={evidence.rows} />}
   </>;
@@ -126,26 +127,48 @@ function WorkTab({ task, items, perItem, now }: { task: Task; items: ItemProgres
 function PlanTab({ task }: { task: Task }) {
   const plan = task.plan;
   if (!plan) return <Card><div class="empty"><b>No plan yet</b><span>{task.state === 'awaiting_mode' ? 'Planning starts after a mode is chosen.' : task.state === 'planning' ? 'The Tech Lead is planning now.' : 'This task ended before a plan was stored.'}</span></div></Card>;
-  return <div class="stack">
-    <Card title={<>Plan · {approvalLabel(task)}{task.approval?.timestamp ? ` · ${formatTime(task.approval.timestamp)}` : ''}</>} right={<Chip tone="neutral">saved plan</Chip>}>
-      <div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
-        <div><div class="h">Summary</div><div class="wrap-anywhere">{plan.summary}</div><div class="h" style={{ marginTop: '10px' }}>Risks</div>{plan.risks.length ? <ul class="criteria">{plan.risks.map((r, i) => <li key={i} class="wrap-anywhere">{r}</li>)}</ul> : <div class="muted">None declared by the planner.</div>}{plan.manualChecks?.length ? <><div class="h" style={{ marginTop: '10px' }}>Manual checks for you</div><ul class="criteria">{plan.manualChecks.map((c, i) => <li key={i} class="wrap-anywhere">{c}</li>)}</ul><div class="muted" style={{ fontSize: '12.5px' }}>Need tools the sandbox does not provide; reported with the result, never enforced by repair.</div></> : null}</div>
-        <div><div class="h">Your acceptance criteria</div>{task.acceptanceCriteria.length ? <ul class="criteria">{task.acceptanceCriteria.map((c, i) => <li key={i} class="wrap-anywhere">{c}</li>)}</ul> : <div class="muted">None given.</div>}
-          {plan.integration && <><div class="h" style={{ marginTop: '10px' }}>Integration</div><div>{plan.integration.assignedAgent} · <span class="mono">{plan.integration.validation.map(command).join(' ; ')}</span></div></>}</div>
+  const awaiting = task.state === 'awaiting_plan_approval';
+  const agents = [...new Set(plan.items.map(i => i.assignedAgent ?? 'any eligible agent'))];
+  const commands = new Set([...plan.items.flatMap(i => i.validation), ...(plan.integration?.validation ?? [])].map(command)).size;
+  const section = (title: string, body: ComponentChildren, note?: string) => <section class="plan-section"><div class="h">{title}</div>{body}{note && <div class="muted plan-note">{note}</div>}</section>;
+  const list = (rows: string[], size?: string) => <ul class="criteria" style={size ? { fontSize: size } : undefined}>{rows.map((r, i) => <li key={i} class="wrap-anywhere">{r}</li>)}</ul>;
+  return <div class="stack plan">
+    <Card title={<>Plan · {approvalLabel(task)}{task.approval?.timestamp ? ` · ${formatTime(task.approval.timestamp)}` : ''}</>} right={awaiting ? undefined : <Chip tone="neutral">version {task.version}</Chip>}>
+      <div class="plan-summary">
+        <p class="plan-lead wrap-anywhere">{plan.summary}</p>
+        <div class="plan-facts">
+          <Chip tone="neutral">{plan.items.length} work item{plan.items.length === 1 ? '' : 's'}</Chip>
+          <Chip tone="neutral">{agents.join(', ')}</Chip>
+          <Chip tone="neutral">{commands} validation command{commands === 1 ? '' : 's'}</Chip>
+          {task.workspace && <Chip tone="neutral" title="Branch in your repository"><span class="mono">{task.workspace.branch}</span></Chip>}
+        </div>
+      </div>
+      <div class="plan-grid">
+        {section('Risks', plan.risks.length ? list(plan.risks) : <div class="muted">None declared by the planner.</div>)}
+        {plan.manualChecks?.length ? section('Manual checks for you', list(plan.manualChecks), 'These need tools the sandbox does not provide. They are reported with the result and never enforced by repair.') : null}
+        {task.acceptanceCriteria.length ? section('Your acceptance criteria', list(task.acceptanceCriteria)) : null}
+        {plan.integration && section('Integration', <div class="wrap-anywhere">{plan.integration.assignedAgent} · <span class="mono">{plan.integration.validation.map(command).join(' ; ')}</span></div>)}
       </div>
     </Card>
-    <div class="items">{plan.items.map(i => <article key={i.id} class="card item">
-      <b class="wrap-anywhere"><span class="mono">{i.id}</span> · {i.title}</b>
-      <div class="wrap-anywhere" style={{ fontSize: '13.5px' }}>{i.description}</div>
-      <dl class="kv" style={{ gridTemplateColumns: '110px minmax(0, 1fr)', fontSize: '13px' }}>
-        <dt>Agent</dt><dd>{i.assignedAgent ?? 'any eligible'} · needs {i.requiredCapabilities.join(', ')}</dd>
-        <dt>{(task.devagentsRules ?? true) ? 'Scope' : 'Planned scope (advisory)'}</dt><dd class="mono">{i.ownedPaths?.join(', ') ?? 'agent write scope'}</dd>
-        <dt>Depends on</dt><dd class="mono">{i.dependsOn.length ? i.dependsOn.join(', ') : '—'}</dd>
-        <dt>Validation</dt><dd class="mono">{i.validation.map(command).join(' ; ')}</dd>
-        <dt>Branch</dt><dd class="mono">{i.branch}</dd>
-      </dl>
-      <div class="h">Acceptance criteria</div><ul class="criteria" style={{ fontSize: '13px' }}>{i.acceptanceCriteria.map((c, k) => <li key={k} class="wrap-anywhere">{c}</li>)}</ul>
-    </article>)}</div>
+    <div class="h plan-items-head">Work items · {plan.items.length}</div>
+    <ol class="plan-items">{plan.items.map((i, n) => <li key={i.id}><article class="card item plan-item">
+      <header class="plan-item-head">
+        <span class="plan-item-n" aria-hidden="true">{n + 1}</span>
+        <div class="plan-item-title"><b class="wrap-anywhere">{i.title}</b><span class="mono muted">{i.id}</span></div>
+        <Chip tone="neutral">{i.assignedAgent ?? 'any eligible agent'}</Chip>
+      </header>
+      <p class="plan-item-text wrap-anywhere">{i.description}</p>
+      <div class="plan-item-body">
+        {section('Done when', list(i.acceptanceCriteria, '13.5px'))}
+        <dl class="kv plan-item-facts">
+          <dt>Needs</dt><dd>{i.requiredCapabilities.join(', ')}</dd>
+          <dt>{(task.devagentsRules ?? true) ? 'Scope' : 'Planned scope (advisory)'}</dt><dd class="mono wrap-anywhere">{i.ownedPaths?.join(', ') ?? 'agent write scope'}</dd>
+          <dt>Depends on</dt><dd class="mono">{i.dependsOn.length ? i.dependsOn.join(', ') : '—'}</dd>
+          <dt>Validation</dt><dd class="mono wrap-anywhere">{i.validation.map(command).join(' ; ')}</dd>
+          <dt>Branch</dt><dd class="mono wrap-anywhere">{i.branch}</dd>
+        </dl>
+      </div>
+    </article></li>)}</ol>
   </div>;
 }
 function ActivityTab({ task, events, evidence }: { task: Task; events: TaskEvent[]; evidence: Evidence[] }) {

@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { basename, isAbsolute, join, parse, resolve } from 'node:path';
 import { AppError } from '../domain/errors.js';
 import { ProjectInput, type Project } from '../domain/schemas.js';
+import { isOwnedBranch, itemBranch, ownedRefPatterns, taskBranch } from './branches.js';
 
 const exec = promisify(execFile);
 export async function git(cwd: string, args: string[], trim = true, maxBuffer = 2 * 1024 * 1024): Promise<string> {
@@ -35,12 +36,15 @@ export async function inspectProject(input: unknown): Promise<Project> {
 const creating = new Map<string, Promise<unknown>>();
 export class WorkspaceManager {
   constructor(private readonly dataDir: string) {}
-  async create(project: Project, taskId: string): Promise<{ path: string; branch: string; baseSha: string }> {
-    return this.createOwned(project, taskId);
+  /** The task worktree on a branch named after the request, e.g. `devagents/fix-my-orders-12b1ca2d`. */
+  async create(project: Project, taskId: string, request: string): Promise<{ path: string; branch: string; baseSha: string }> {
+    return this.createOwned(project, taskId, taskBranch(taskId, request));
   }
-  async createItem(project: Project, taskId: string, itemId: string, baseSha: string): Promise<{ path: string; branch: string; baseSha: string }> {
+  /** A work-item worktree on `<task branch>-<item id>`, branched from the recorded integration base. */
+  async createItem(project: Project, taskId: string, taskBranchName: string, itemId: string, baseSha: string): Promise<{ path: string; branch: string; baseSha: string }> {
     if (!/^[a-z][a-z0-9-]{0,63}$/.test(itemId) || !/^[a-f0-9]{40}$/.test(baseSha)) throw new AppError('invalid_work_item', 'Invalid work item or base commit');
-    return this.createOwned(project, taskId, itemId, baseSha);
+    if (!isOwnedBranch(taskBranchName, taskId)) throw new AppError('branch_denied', 'Work items branch only from the managed task branch');
+    return this.createOwned(project, taskId, itemBranch(taskBranchName, itemId), itemId, baseSha);
   }
   /**
    * Removes the managed worktrees of one task and deletes their branches, except branches named in
@@ -53,11 +57,11 @@ export class WorkspaceManager {
     if (await realpath(project.path) !== project.path) throw new AppError('path_denied', 'Registered project path changed');
     const parent = await realpath(resolve(this.dataDir, 'worktrees')).catch(() => undefined);
     const registered = new Set((await git(project.path, ['worktree', 'list', '--porcelain'], false)).split('\n').filter(l => l.startsWith('worktree ')).map(l => l.slice('worktree '.length)));
-    const branches = new Set((await git(project.path, ['for-each-ref', '--format=%(refname:short)', `refs/heads/codex/devagents-${taskId}`, `refs/heads/codex/devagents-${taskId}-*`])).split('\n').filter(Boolean));
+    const branches = new Set((await git(project.path, ['for-each-ref', '--format=%(refname:short)', ...ownedRefPatterns(taskId)])).split('\n').filter(b => isOwnedBranch(b, taskId)));
     const result = { removedWorktrees: [] as string[], removedBranches: [] as string[], keptBranches: [] as string[] };
     // Validate every entry before touching anything, so one refused entry leaves the task untouched.
     for (const workspace of workspaces) {
-      const managed = parent !== undefined && isWithin(parent, workspace.path) && workspace.path !== parent && basename(workspace.path).startsWith(taskId) && workspace.branch.startsWith(`codex/devagents-${taskId}`);
+      const managed = parent !== undefined && isWithin(parent, workspace.path) && workspace.path !== parent && basename(workspace.path).startsWith(taskId) && isOwnedBranch(workspace.branch, taskId);
       if (!managed || workspace.path === project.path || isWithin(workspace.path, project.path)) throw new AppError('path_denied', `Refusing to remove ${workspace.path}: not a managed worktree of task ${taskId}`);
     }
     for (const workspace of workspaces) {
@@ -71,14 +75,15 @@ export class WorkspaceManager {
     return result;
   }
   /** Worktree creation is serialized per repository: parallel `git worktree add` calls contend on ref and metadata locks. */
-  private async createOwned(project: Project, taskId: string, itemId?: string, source?: string): Promise<{ path: string; branch: string; baseSha: string }> {
+  private async createOwned(project: Project, taskId: string, branch: string, itemId?: string, source?: string): Promise<{ path: string; branch: string; baseSha: string }> {
     const previous = creating.get(project.path) ?? Promise.resolve();
-    const run = previous.catch(() => undefined).then(() => this.createNow(project, taskId, itemId, source));
+    const run = previous.catch(() => undefined).then(() => this.createNow(project, taskId, branch, itemId, source));
     creating.set(project.path, run);
     try { return await run; } finally { if (creating.get(project.path) === run) creating.delete(project.path); }
   }
-  private async createNow(project: Project, taskId: string, itemId?: string, source?: string): Promise<{ path: string; branch: string; baseSha: string }> {
+  private async createNow(project: Project, taskId: string, branch: string, itemId?: string, source?: string): Promise<{ path: string; branch: string; baseSha: string }> {
     if (!/^[a-f0-9-]{36}$/.test(taskId)) throw new AppError('invalid_task_id', 'Invalid worktree owner ID');
+    if (!isOwnedBranch(branch, taskId)) throw new AppError('branch_denied', 'Worktree branch is not owned by this task');
     // Revalidate registration immediately before accessing the project.
     if (await realpath(project.path) !== project.path) throw new AppError('path_denied', 'Registered project path changed');
     const configuration = await git(project.path, ['config', '--local', '--includes', '--name-only', '--list']);
@@ -87,7 +92,6 @@ export class WorkspaceManager {
     await mkdir(parent, { recursive: true, mode: 0o700 });
     const owner = itemId ? `${taskId}-${itemId}` : taskId;
     const path = join(await realpath(parent), owner);
-    const branch = `codex/devagents-${owner}`;
     const baseSha = source ?? await git(project.path, ['rev-parse', '--verify', 'HEAD']);
     await git(project.path, ['worktree', 'add', '-b', branch, path, baseSha]);
     return { path, branch, baseSha };
