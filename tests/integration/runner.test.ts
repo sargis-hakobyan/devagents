@@ -60,7 +60,7 @@ test('review rejection exhausts the repair limit without a commit', async () => 
     const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'reject'); await runner.idle();
     assert.equal(f.store.task(task.id).state, 'failed'); assert.match(f.store.task(task.id).outcome!.error!, /Repair budget exhausted/);
     assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
-    assert.equal(engine.calls.filter(c => c.phase === 'implementation').length, 2);
+    assert.equal(engine.calls.filter(c => c.phase === 'implementation').length, 1 + f.service.config.maxRepairCycles);
   } finally { await runner.stop(); await f.cleanup(); }
 });
 test('a reviewer mutation invalidates approval before commit', async () => {
@@ -118,7 +118,7 @@ test('approval with outstanding findings cannot bypass repair or create a commit
     await runner.idle();
     const done = f.store.task(task.id);
     assert.equal(done.state, 'failed'); assert.match(done.outcome!.error!, /Repair budget exhausted/);
-    assert.equal(done.outcome!.repairCycles, 1);
+    assert.equal(done.outcome!.repairCycles, f.service.config.maxRepairCycles);
     assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
   } finally { await runner.stop(); await f.cleanup(); }
 });

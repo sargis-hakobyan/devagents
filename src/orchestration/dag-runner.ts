@@ -1,3 +1,4 @@
+import { validationEvidence } from './validation-evidence.js';
 import { taskRules } from '../domain/execution-policy.js';
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
@@ -105,7 +106,7 @@ export async function runDag(h: Hooks): Promise<void> {
       ? 'FINAL COMBINED GATE: assess the complete request, all user acceptance criteria, the full diff and combined validation. Approval permits the final task commit. Missing combined validation or any actionable defect must block approval.'
       : 'ITEM INTEGRATION GATE: assess only this item\'s deliverable, owned changes and declared item validation. Approval permits integration of this item, not task completion. Task-wide tests and acceptance checks run at the mandatory final combined gate after all items are integrated. Do not demand combined validation at this item gate or ask the implementer to access the original checkout. Report defects in this item; defer checks explicitly reserved for the combined gate.';
     return await invoke('review', readOnlyReviewer,
-      `Independently review this ${combined ? 'combined change' : 'work item'} against its acceptance criteria. ${stage} Do not modify files.${rules ? ' Do not execute commands.' : ' Read-only inspection commands are available.'} Findings must contain only actionable defects requiring repair. Positive observations belong in summary. Approve only with approved=true and findings=[].\nOrchestrator workspace evidence: ${JSON.stringify(workspaceEvidence)}. Git-status comparisons do not attest ignored files or the contents of already-dirty/untracked files.\nUser request: ${task.request}\nUser acceptance criteria (task-wide context): ${JSON.stringify(task.acceptanceCriteria)}\nScope and acceptance criteria: ${JSON.stringify(criteria)}\nDiff:\n${current.diff}\nActual validation:\n${JSON.stringify(evidence).slice(0, 50000)}`,
+      `Independently review this ${combined ? 'combined change' : 'work item'} against its acceptance criteria. ${stage} Do not modify files.${rules ? ' Do not execute commands.' : ' Read-only inspection commands are available.'} Findings must contain only actionable defects requiring repair. Positive observations belong in summary. Approve only with approved=true and findings=[].\nOrchestrator workspace evidence: ${JSON.stringify(workspaceEvidence)}. Git-status comparisons do not attest ignored files or the contents of already-dirty/untracked files.\nUser request: ${task.request}\nUser acceptance criteria (task-wide context): ${JSON.stringify(task.acceptanceCriteria)}\nScope and acceptance criteria: ${JSON.stringify(criteria)}\nDiff:\n${current.diff}\nActual validation:\n${validationEvidence(evidence)}`,
       ReviewOutput, workerSignal, { cwd, workItemId: itemId }) as z.infer<typeof ReviewOutput>;
   };
   const executeItem = async (item: Item, baseSha: string, workerSignal: AbortSignal) => {
@@ -127,7 +128,7 @@ export async function runDag(h: Hooks): Promise<void> {
         check(); state(item.id, 'validating');
         const evidence = await validate(ownedWorker, item.validation, workerSignal, item.id);
         const after = await changes(ownedWorker, developer);
-        if (validationFailed(evidence)) feedback = `${describeValidationFailure(evidence)}. Repair failed validation:\n${JSON.stringify(evidence).slice(0, 50000)}`;
+        if (validationFailed(evidence)) feedback = `${describeValidationFailure(evidence)}. Repair failed validation:\n${validationEvidence(evidence)}`;
         else {
           check(); state(item.id, 'reviewing');
           const assessment = await review(after, evidence, ownedWorker.path, item.id, item, workerSignal);
@@ -224,7 +225,7 @@ export async function runDag(h: Hooks): Promise<void> {
       const evidence = await validate(workspace, commands, signal, '@integration');
       const after = await changes(workspace, integrator);
       let feedback = '';
-      if (validationFailed(evidence)) feedback = `${describeValidationFailure(evidence)}. Combined validation failed:\n${JSON.stringify(evidence).slice(0, 50000)}`;
+      if (validationFailed(evidence)) feedback = `${describeValidationFailure(evidence)}. Combined validation failed:\n${validationEvidence(evidence)}`;
       else {
         h.active(); h.move('reviewing', 'Independent combined review');
         const assessment = await review(after, evidence, workspace.path, '@integration', plan, signal);

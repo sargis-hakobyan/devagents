@@ -35,7 +35,7 @@ async function dagFixture(options: Options = {}) {
   const preparedCwds = new Set<string>();
   const engine: CodingEngine = {
     id: 'codex', async preflight() {},
-    async execute(r): Promise<EngineResult> {
+    async execute(r, progress): Promise<EngineResult> {
       if (options.synchronizeWorkers && r.phase === 'implementation') assert.ok(preparedCwds.has(r.cwd), 'every worker must prepare before implementation');
       calls.push(r);
       if (r.phase === 'planning') {
@@ -46,6 +46,10 @@ async function dagFixture(options: Options = {}) {
       }
       if (r.phase === 'setup') { preparedCwds.add(r.cwd); return { output: { ready: true, summary: 'Worker prerequisites ready' } }; }
       if (r.phase === 'review') {
+        if (r.workItemId !== '@integration') {
+          assert.match(r.prompt, new RegExp(`observed-command-for-${r.workItemId}`));
+          for (const other of ['a', 'b', 'c'].filter(id => id !== r.workItemId)) assert.doesNotMatch(r.prompt, new RegExp(`observed-command-for-${other}`));
+        }
         reviewActive++; maxReviewActive = Math.max(maxReviewActive, reviewActive);
         try {
           await delay(25, undefined, { signal: r.signal });
@@ -57,6 +61,7 @@ async function dagFixture(options: Options = {}) {
           return { output: { approved: true, summary: 'Tests and requirements satisfied', findings: [] } };
         } finally { reviewActive--; }
       }
+      progress({ kind: 'command', data: { command: `observed-command-for-${r.workItemId}`, aggregated_output: 'Supplementary fixture check passed', exit_code: 0 } });
       if (r.workItemId === '@integration') {
         if (options.conflict) await writeFile(join(r.cwd, 'shared', 'shared.cjs'), "module.exports=()=> 'ab';\n");
         if (options.markdown) await writeFile(join(r.cwd, 'shared', 'NOTES.md'), options.unresolved === 'markers' ? 'Notes\n=======\n<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n' : options.unresolved === 'separator' ? 'Notes\n=======\na\n=======\nb\n' : 'Notes\n=======\nab\n');

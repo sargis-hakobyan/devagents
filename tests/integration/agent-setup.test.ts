@@ -123,3 +123,55 @@ test('setup receives executable-preflight diagnostics once before implementation
     assert.match(setup[1]!.prompt, /Missing validation executable: fixture-tool/);
   } finally { await runner.stop(); await f.cleanup(); }
 });
+
+test('setup gets one recovery and passes baseline failures to implementation and independent review', async () => {
+  const f = await fixture(false); const fake = new FakeEngine(); let setups = 0;
+  const note = 'Existing UI test runner cannot parse import type; repair its configuration without removing assertions.';
+  const seen: EngineRequest[] = [];
+  const engine: CodingEngine = { id: 'codex', preflight: async () => {}, async execute(r) {
+    seen.push(r);
+    if (r.phase === 'setup') {
+      setups++;
+      if (setups === 1) return { output: { ready: false, summary: note } };
+      assert.match(r.prompt, /Existing UI test runner/);
+      return { output: { ready: true, summary: note } };
+    }
+    return fake.execute(r);
+  } };
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'baseline-recovery');
+    await runner.idle(); const done = f.store.task(task.id);
+    assert.equal(done.state, 'completed', JSON.stringify(done.outcome)); assert.equal(setups, 2);
+    assert.equal(done.outcome?.repairCycles, 0);
+    for (const phase of ['implementation', 'review']) assert.ok(seen.find(r => r.phase === phase)?.prompt.includes(note));
+  } finally { await runner.stop(); await f.cleanup(); }
+});
+
+test('review receives actual supplementary repair commands without replacing mandatory validation', async () => {
+  const f = await fixture(false); const fake = new FakeEngine(); let implementations = 0; let reviews = 0; let validations = 0;
+  const engine: CodingEngine = { id: 'codex', preflight: async () => {}, async execute(r, progress) {
+    if (r.phase === 'implementation') {
+      implementations++;
+      progress({ kind: 'command', data: { command: `database-check-${implementations}`, aggregated_output: implementations === 1 ? 'Database tests skipped' : '3 database tests passed; none skipped', exit_code: implementations === 1 ? 1 : 0 } });
+    }
+    if (r.phase === 'review') {
+      reviews++;
+      assert.match(r.prompt, new RegExp(`database-check-${reviews}`));
+      assert.match(r.prompt, /Actual validation evidence:/);
+      if (reviews === 1) return { output: { approved: false, summary: 'Missing database proof', findings: ['Run database tests'] } };
+      assert.doesNotMatch(r.prompt, /database-check-1/);
+      assert.match(r.prompt, /3 database tests passed; none skipped/);
+    }
+    return fake.execute(r);
+  } };
+  const baseValidator = new FixtureValidator();
+  const runner = new TaskRunner(f.service, engine, { execute(cwd, command, signal, timeout) { validations++; return baseValidator.execute(cwd, command, signal, timeout); } });
+  f.service.attachRunner(runner);
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'repair-evidence');
+    await runner.idle(); const done = f.store.task(task.id);
+    assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
+    assert.equal(done.outcome?.repairCycles, 1); assert.equal(validations, 2); assert.equal(reviews, 2);
+  } finally { await runner.stop(); await f.cleanup(); }
+});

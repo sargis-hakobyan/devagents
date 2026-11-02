@@ -1,3 +1,5 @@
+import { validationEvidence } from './validation-evidence.js';
+import { ImplementationEvidence } from './implementation-evidence.js';
 import { executionAgent, taskRules, validationInstructions } from '../domain/execution-policy.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -32,6 +34,8 @@ export class TaskRunner {
   private repairs = 0;
   private readonly setupWorktrees = new Set<string>();
   private readonly setupRecoveries = new Set<string>();
+  private readonly setupSummaries = new Map<string, string>();
+  private readonly implementationEvidence = new Map<string, string>();
   private prepared: { task: Task; rules: boolean; agents: AgentDefinition[]; lead: AgentDefinition } | undefined;
   readonly workflows: TaskWorkflows;
   constructor(private readonly service: TaskService, private readonly engine: CodingEngine, private readonly validator: Validator,
@@ -126,9 +130,17 @@ export class TaskRunner {
     const task = this.ensureActive(id, signal); const runId = randomUUID();
     this.service.store.record(id, 'run-started', { runId, phase, agentId: agent.id, engine: this.engine.id, devagentsRules: taskRules(task), ...context });
     try {
-      const result = await this.engine.execute({ devagentsRules: taskRules(task), runId, phase, cwd: context?.cwd ?? task.workspace!.path, ...(context ? { workItemId: context.workItemId } : {}), prompt: `${agent.instructions}\n\n${prompt}`, agent, provider: this.provider(task, agent), schema: outputJsonSchema(schema), signal, timeoutMs: this.service.config.executionTimeoutMs }, event => this.service.store.record(id, 'progress', { runId, ...context, ...event }));
+      const cwd = context?.cwd ?? task.workspace!.path;
+      const setup = phase === 'setup' ? undefined : this.setupSummaries.get(cwd);
+      const handoff = phase === 'review' ? this.implementationEvidence.get(cwd) : undefined;
+      const observed = phase === 'implementation' ? new ImplementationEvidence(this.service.store.secrets) : undefined;
+      const result = await this.engine.execute({ devagentsRules: taskRules(task), runId, phase, cwd, ...(context ? { workItemId: context.workItemId } : {}), prompt: `${agent.instructions}\n\n${setup ? `Environment preparation notes (including any baseline failures to address):\n${setup}\n\n` : ''}${handoff ? `${handoff}\n\n` : ''}${prompt}`, agent, provider: this.provider(task, agent), schema: outputJsonSchema(schema), signal, timeoutMs: this.service.config.executionTimeoutMs }, event => {
+        observed?.observe(event);
+        this.service.store.record(id, 'progress', { runId, ...context, ...event });
+      });
       this.ensureActive(id, signal);
       const output = schema.parse(result.output);
+      if (observed) this.implementationEvidence.set(cwd, observed.render(output));
       this.service.store.record(id, 'run-completed', { runId, phase, ...context, output, usage: result.usage });
       return output;
     } catch (error) {
@@ -215,12 +227,12 @@ export class TaskRunner {
         recover: feedback => this.prepareEnvironment(id, task.workspace!.path, item.validation, signal, undefined, feedback),
       });
       const after = await changes(task.workspace!, developer);
-      if (validationFailed(evidence)) feedback = `${describeValidationFailure(evidence)}. Repair these failures:\n${JSON.stringify(evidence).slice(0, 50000)}`;
+      if (validationFailed(evidence)) feedback = `${describeValidationFailure(evidence)}. Repair these failures:\n${validationEvidence(evidence)}`;
       else {
         this.ensureActive(id, signal); this.move(id, 'reviewing', 'Independent review of the diff and validation evidence');
         for (const file of after.files) await new PolicyEngine().file(reviewer, task.workspace!.path, file, 'read');
         const readOnlyReviewer = { ...reviewer, permissions: { ...reviewer.permissions, writePaths: [], allowCommands: !rules } };
-        const review = await this.invoke(id, 'review', readOnlyReviewer, `Independently assess this change against the request and acceptance criteria. Do not modify files.${rules ? ' Do not execute commands.' : ' Read-only inspection commands are available.'} Approve only if requirements and tests are satisfied. The findings array contains only actionable defects requiring repair. Put positive observations and passed checks in summary. For approval return approved=true and findings=[]. For rejection return approved=false and explain the required repairs in findings.\nRequest: ${task.request}\nUser acceptance criteria: ${JSON.stringify(task.acceptanceCriteria)}\nPlan: ${JSON.stringify(task.plan)}\nDiff and new files:\n${after.diff}\nActual validation evidence:\n${JSON.stringify(evidence).slice(0, 50000)}`, ReviewOutput, signal) as z.infer<typeof ReviewOutput>;
+        const review = await this.invoke(id, 'review', readOnlyReviewer, `Independently assess this change against the request and acceptance criteria. Do not modify files.${rules ? ' Do not execute commands.' : ' Read-only inspection commands are available.'} Approve only if requirements and tests are satisfied. The findings array contains only actionable defects requiring repair. Put positive observations and passed checks in summary. For approval return approved=true and findings=[]. For rejection return approved=false and explain the required repairs in findings.\nRequest: ${task.request}\nUser acceptance criteria: ${JSON.stringify(task.acceptanceCriteria)}\nPlan: ${JSON.stringify(task.plan)}\nDiff and new files:\n${after.diff}\nActual validation evidence:\n${validationEvidence(evidence)}`, ReviewOutput, signal) as z.infer<typeof ReviewOutput>;
         if (review.approved && review.findings.length === 0) {
           this.ensureActive(id, signal);
           const reviewed = await changes(task.workspace!, developer);
@@ -259,15 +271,21 @@ export class TaskRunner {
           : selectImplementer(agents, item);
         if (!agent) throw new AppError('missing_agent', 'No implementer available for environment setup');
         record({ state: 'installing', message: feedback ? 'Agent repairing the environment after validation; no code-repair budget used' : 'Agent preparing project tools, dependencies and setup scripts' });
-        const output = await this.invoke(id, 'setup', agent, `Prepare this worktree for the approved task's implementation and validation. Inspect the actual project instructions, manifests, lockfiles and setup scripts; use the project's tooling, including non-Node projects. Install missing dependencies and local tools, run necessary lifecycle scripts, hooks, code generation and builds. Network access is available inside the sandbox. Respect the package manager's own policies; do not disable checks or replace tests to claim success. Prefer existing locked versions. Source or configuration fixes needed for setup stay visible for independent review. Do not implement the feature yet, commit, push or modify Git metadata. The original checkout and saved credentials are unavailable. Avoid Git-hook installation in this worktree (for Husky, use HUSKY=0). HOME is dedicated to this worktree and persists across setup, implementation and validation; put tools in $HOME/bin or $HOME/.local/bin, which are on PATH. Shell exports and daemons do not persist between calls. Return ready=true only after preparing the prerequisites for the listed commands; otherwise describe the concrete blocker.\nValidation commands: ${JSON.stringify(commands)}\n${feedback ? `Previous validation could not load required tooling/dependencies. Diagnose and fix the environment before these commands are retried:\n${feedback}` : ''}`, SetupOutput, signal, workItemId ? { cwd, workItemId } : undefined) as z.infer<typeof SetupOutput>;
-        if (!output.ready) throw new AppError('environment_blocked', `Environment setup could not complete: ${output.summary}`);
+        const output = await this.invoke(id, 'setup', agent, `Prepare this worktree for the approved task's implementation and validation. Inspect the actual project instructions, manifests, lockfiles and setup scripts; use the project's tooling, including non-Node projects. Install missing dependencies and local tools, run necessary lifecycle scripts, hooks, code generation and builds. Network access is available inside the sandbox. Respect the package manager's own policies; do not disable checks or replace tests to claim success. Prefer existing locked versions. Use lightweight prerequisite probes to establish readiness; do not run all full validation suites during setup. The orchestrator runs the declared checks after implementation. Source or configuration fixes needed for setup stay visible for independent review. Do not implement the feature yet, commit, push or modify Git metadata. The original checkout and saved credentials are unavailable. Avoid Git-hook installation in this worktree (for Husky, use HUSKY=0). HOME is dedicated to this worktree and persists across setup, implementation and validation; put tools in $HOME/bin or $HOME/.local/bin, which are on PATH. Shell exports and daemons do not persist between calls. Readiness means tools and dependencies are usable, not that all existing tests already pass. Existing source/test syntax errors, failing assertions and project test-runner configuration defects are implementation work: return ready=true with those baseline failures described for the implementer. You may fix setup configuration without weakening checks. Return ready=false only for an environment blocker you cannot resolve, such as unavailable credentials, services or required system privileges.\nValidation commands: ${JSON.stringify(commands)}\n${feedback ? `Previous preparation or validation reported a blocker. Diagnose and repair tooling/setup within your permissions. Distinguish an environment blocker from an existing source/test defect that implementation can repair:\n${feedback}` : ''}`, SetupOutput, signal, workItemId ? { cwd, workItemId } : undefined) as z.infer<typeof SetupOutput>;
+        if (!output.ready) {
+          if (!feedback) {
+            record({ state: 'checking', message: `Setup requested recovery: ${output.summary}` });
+            return this.prepareEnvironment(id, cwd, commands, signal, workItemId, output.summary);
+          }
+          throw new AppError('environment_blocked', `Environment setup could not complete after recovery: ${output.summary}`);
+        }
         try { await this.validator.preflight?.(cwd, commands, signal, false); }
         catch (error) {
           if (signal.aborted || feedback || !(error instanceof AppError) || error.code !== 'environment_blocked') throw error;
           record({ state: 'checking', message: error.message });
           return this.prepareEnvironment(id, cwd, commands, signal, workItemId, error.message);
         }
-        this.ensureActive(id, signal); this.setupWorktrees.add(cwd);
+        this.ensureActive(id, signal); this.setupWorktrees.add(cwd); this.setupSummaries.set(cwd, output.summary);
         record({ state: 'ready', message: output.summary });
         return;
       }
@@ -280,7 +298,7 @@ export class TaskRunner {
     this.ensureActive(id, signal);
   }
   private async run(id: string, signal: AbortSignal): Promise<void> {
-    this.repairs = 0; this.prepared = undefined; this.setupWorktrees.clear(); this.setupRecoveries.clear();
+    this.repairs = 0; this.prepared = undefined; this.setupWorktrees.clear(); this.setupRecoveries.clear(); this.setupSummaries.clear(); this.implementationEvidence.clear();
     try {
       await this.workflows.run(id);
     } catch (error) {

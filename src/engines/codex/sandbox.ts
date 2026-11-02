@@ -1,4 +1,4 @@
-import { mkdir, realpath, readdir, lstat } from 'node:fs/promises';
+import { mkdir, realpath, opendir, lstat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import type { AgentDefinition } from '../../domain/schemas.js';
 import { AppError } from '../../domain/errors.js';
@@ -18,7 +18,7 @@ export function toml(value: unknown): string {
 }
 const flags = (config: Record<string, unknown>) => Object.entries(config).flatMap(([key, value]) => ['-c', `${key}=${toml(value)}`]);
 export const DEFAULT_SCAN_LIMIT = 200000;
-export async function sandboxFlags(cwd: string, permissions: AgentDefinition['permissions'], temp: string, scanLimit = DEFAULT_SCAN_LIMIT, devagentsRules = true, preparationNetwork = false, runtime?: string): Promise<string[]> {
+export async function sandboxFlags(cwd: string, permissions: AgentDefinition['permissions'], temp: string, scanLimit = DEFAULT_SCAN_LIMIT, devagentsRules = true, preparationNetwork = false, runtime?: string, signal?: AbortSignal): Promise<string[]> {
   const root = await realpath(cwd);
   const filesystem: Record<string, string> = { ':minimal': 'read' };
   const config: Record<string, unknown> = {
@@ -44,10 +44,14 @@ export async function sandboxFlags(cwd: string, permissions: AgentDefinition['pe
   const denied = new Set(deniedSegments.map(segment => join(root, segment)));
   let count = 0;
   const scan = async (dir: string): Promise<string[]> => {
-    const entries = await readdir(dir, { withFileTypes: true });
-    const denies: string[] = []; let everyEntryDenied = entries.length > 0;
-    for (const entry of entries) {
-      if (++count > scanLimit) throw new AppError('workspace_limit', `Workspace exceeds the safety scan limit of ${scanLimit} entries; remove unneeded files from the worktree or raise workspaceScanLimit in the DevAgents configuration`);
+    // Stream directories rather than retaining their whole listings. Default-mode projects
+    // may contain arbitrarily many dependencies; inspect all entries without the optional
+    // strict-mode count gate, still enforcing link/secret isolation throughout the tree.
+    const denies: string[] = []; let everyEntryDenied = true; let nonempty = false;
+    for await (const entry of await opendir(dir)) {
+      if (signal?.aborted) throw new AppError('cancelled', 'Workspace scan cancelled');
+      nonempty = true;
+      if (++count > scanLimit && devagentsRules) throw new AppError('workspace_limit', `Workspace exceeds the safety scan limit of ${scanLimit} entries; remove unneeded files from the worktree or raise workspaceScanLimit in the DevAgents configuration`);
       const path = join(dir, entry.name);
       if (!devagentsRules && entry.name === '.npmrc' && await publicPackageConfig(path)) {
         denied.delete(path); filesystem[path] = 'read'; everyEntryDenied = false; continue;
@@ -63,7 +67,7 @@ export async function sandboxFlags(cwd: string, permissions: AgentDefinition['pe
       }
       everyEntryDenied = false;
     }
-    return everyEntryDenied && dir !== root ? [dir] : denies;
+    return nonempty && everyEntryDenied && dir !== root ? [dir] : denies;
   };
   for (const path of await scan(root)) denied.add(path);
   for (const path of denied) {

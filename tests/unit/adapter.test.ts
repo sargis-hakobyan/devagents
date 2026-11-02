@@ -82,7 +82,7 @@ process.stdin.resume(); process.stdin.on('end', () => {
     const argv = JSON.parse(await readFile(capture, 'utf8')) as string[];
     const permissions = argv.find(a => a.startsWith('permissions='))!;
     const writes = [...permissions.matchAll(/"((?:[^"\\]|\\.)*)"="write"/g)].map(m => JSON.parse(`"${m[1]}"`) as string);
-    return { writes, permissions, shell: argv.find(a => a.startsWith('features.shell_tool='))!, ignoresRules: argv.includes('--ignore-rules') };
+    return { writes, permissions, shell: argv.find(a => a.startsWith('features.shell_tool='))!, ignoresRules: argv.includes('--ignore-rules'), docs: argv.find(a => a.startsWith('project_doc_max_bytes=')) };
   };
   try {
     const implementation = await grants('implementation', developer);
@@ -98,6 +98,8 @@ process.stdin.resume(); process.stdin.on('end', () => {
     assert.equal((await grants('review', { ...reviewer, permissions: { ...reviewer.permissions, allowCommands: false } })).shell, 'features.shell_tool=false');
     const enginePolicy = await grants('implementation', { ...developer, permissions: { ...developer.permissions, writePaths: ['project:/owned/**'], allowCommands: false } }, false);
     assert.equal(enginePolicy.shell, 'features.shell_tool=true');
+    assert.equal(enginePolicy.docs, 'project_doc_max_bytes=32768');
+    assert.equal(implementation.docs, 'project_doc_max_bytes=0');
     assert.match(enginePolicy.permissions, /"network"=\{"enabled"=true\}/);
     assert.match(implementation.permissions, /"network"=\{"enabled"=false\}/);
     const setup = await grants('setup', developer, false);
@@ -107,5 +109,26 @@ process.stdin.resume(); process.stdin.on('end', () => {
     assert.equal(enginePolicy.ignoresRules, false, 'engine execution rules are not disabled');
     assert.equal(implementation.ignoresRules, false, 'extra restrictions are layered on top of engine rules');
     assert.equal((await grants('review', developer, false)).writes.some(w => w.endsWith('/project')), false, 'engine policy still enforces read-only review');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('long engine streams retain the final structured result and all progress callbacks', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'adapter-long-stream-'));
+  const binary = join(root, 'codex'); const cwd = join(root, 'project'); await mkdir(cwd);
+  const agent = (await loadRegistry([builtinDirectory], Config.parse({ schemaVersion: 1 })))[0]!;
+  await writeFile(binary, `#!${process.execPath}
+if(process.argv.includes('--version')){console.log('codex-cli 0.160.1');process.exit(0);}
+if(process.argv.includes('login'))process.exit(0);
+process.stdin.resume(); process.stdin.on('end', () => {
+  const fs = require('node:fs');
+  for(let i=0;i<700;i++) fs.writeSync(1,JSON.stringify({type:'item.completed',item:{type:'command_execution',command:'fixture',aggregated_output:'x'.repeat(4096),exit_code:0}})+'\\n');
+  fs.writeSync(1,JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'{"summary":"finished"}'}})+'\\n');
+  fs.writeSync(1,JSON.stringify({type:'turn.completed'})+'\\n');
+});
+`, { mode: 0o700 });
+  try {
+    let commands = 0;
+    const result = await new CodexAdapter(join(root, 'data'), binary).execute({ runId: 'long-output', phase: 'implementation', cwd, prompt: 'fixture', agent, provider: { id: 'openai', kind: 'openai', auth: 'login' }, schema: {}, signal: new AbortController().signal, timeoutMs: 15000 }, e => { if (e.kind === 'command') commands++; });
+    assert.deepEqual(result.output, { summary: 'finished' }); assert.equal(commands, 700);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

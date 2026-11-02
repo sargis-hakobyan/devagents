@@ -1,3 +1,4 @@
+import { validationEvidence } from './validation-evidence.js';
 import type { ValidationResult } from '../domain/engine.js';
 import { AppError } from '../domain/errors.js';
 import { assertValidationEnvironment, type ValidationCommand } from '../domain/validation.js';
@@ -26,6 +27,6 @@ export async function validateWithSetup(options: {
     if (before !== await options.digest()) throw new AppError('validation_mutated_files', 'Validation changed reviewed project files');
     if (!environmentError) return evidence;
     if (options.rules || attempt > 0) throw environmentError;
-    await options.recover(JSON.stringify(evidence).slice(0, 50000));
+    await options.recover(validationEvidence(evidence));
   }
 }

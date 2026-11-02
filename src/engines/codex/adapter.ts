@@ -44,9 +44,9 @@ export class CodexAdapter implements CodingEngine {
     const args = [
       'exec',
       '-c', `cli_auth_credentials_store="${credentialStore()}"`,
-      ...await sandboxFlags(request.cwd, permissions, temp, this.options.scanLimit, rules, false, runtime),
+      ...await sandboxFlags(request.cwd, permissions, temp, this.options.scanLimit, rules, false, runtime, request.signal),
       '-c', 'agents.enabled=false', '-c', 'agents.max_depth=0',
-      '-c', 'web_search="disabled"', '-c', 'project_doc_max_bytes=0',
+      '-c', 'web_search="disabled"', '-c', `project_doc_max_bytes=${rules ? 0 : 32768}`,
       '-c', 'shell_environment_policy.inherit="none"',
       '-c', `shell_environment_policy.set={PATH=${JSON.stringify(toolPath)},HOME=${JSON.stringify(runtime ?? temp)},TMPDIR=${JSON.stringify(temp)},OPENSSL_CONF="/dev/null",npm_config_update_notifier="false",npm_config_script_shell="/bin/sh"}`,
       '-c', 'allow_login_shell=false', '-c', 'features.skip_host_skill_discovery=true',
@@ -65,7 +65,7 @@ export class CodexAdapter implements CodingEngine {
     try {
       const result = await runProcess(this.binary, args, {
         // Model input gets value-only redaction so code such as `token: string` survives intact.
-        cwd: request.cwd, env, input: String(redactValues(request.prompt, secrets)), signal: request.signal, timeoutMs: request.timeoutMs,
+        cwd: request.cwd, env, input: String(redactValues(request.prompt, secrets)), signal: request.signal, timeoutMs: request.timeoutMs, overflow: 'truncate',
         onLine(line) {
           let event: Record<string, unknown>;
           try { event = JSON.parse(line) as Record<string, unknown>; }

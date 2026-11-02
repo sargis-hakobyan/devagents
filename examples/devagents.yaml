@@ -4,10 +4,10 @@ defaultEngine: codex
 defaultProvider: openai
 # M2 runs serially; higher concurrency is reserved for M3.
 concurrency: 1
-maxRepairCycles: 1
-executionTimeoutMs: 600000
-validationTimeoutMs: 120000
-# Upper bound on directory entries scanned per sandbox launch (symlink/hardlink/secret denial). Fail-closed when exceeded.
+maxRepairCycles: 3
+executionTimeoutMs: 1800000
+validationTimeoutMs: 600000
+# Optional strict-mode entry limit. Rules-off scans still check links/secrets without this count gate.
 workspaceScanLimit: 200000
 providers:
   - id: openai

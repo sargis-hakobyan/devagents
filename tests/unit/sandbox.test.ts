@@ -44,6 +44,13 @@ test('sandbox profile denies links and secrets, collapses fully-denied directori
     assert.equal(access.has(join(canonical, 'keep.txt')), false);
     // The scan limit is configurable, fails closed and tells the operator what to change.
     await assert.rejects(profile(root, 1000).then(() => profile(root, 5)), /scan limit of 5 entries.*workspaceScanLimit/);
+    const unrestricted = await profile(root, 5, false);
+    assert.equal(unrestricted.get(join(canonical, '.env')), 'deny');
+    assert.equal(unrestricted.get(join(canonical, 'links')), 'deny');
+    assert.equal(unrestricted.get(join(canonical, 'hard')), 'deny');
+    assert.equal(unrestricted.has(join(canonical, 'keep.txt')), false, 'large default-mode trees are inspected without a count rejection');
+    const controller = new AbortController(); controller.abort();
+    await assert.rejects(sandboxFlags(root, { readPaths: ['project:/**'], writePaths: [], allowCommands: true, allowPush: false }, join(base, 'temp'), 5, false, false, undefined, controller.signal), /scan cancelled/);
   } finally { await rm(base, { recursive: true, force: true }); }
 });
 

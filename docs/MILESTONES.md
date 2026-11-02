@@ -245,3 +245,23 @@ This supersedes the earlier default-mode preparation restrictions above. Private
 Verification: `npm run check` passed 175 tests plus backend/UI typechecks and the production build. All 35 browser workflows passed on the final run; the task/result screenshot was inspected. Native environment preparation, real-runtime protocol, deterministic M2/M3 and the complete Docker suite passed, including two concurrent protocol workers. Only synthetic local/loopback fixtures were used; no authenticated model calls, real failed-task rerun or push.
 
 An initial browser diff assertion timed out during a host load spike; the isolated test and full browser rerun passed. Docker smoke exposed two fixture assumptions: async child-test output under the offline sandbox, and a runtime shim that recursively invoked the relative `process.execPath` returned inside Linux. The fixtures now use an awaited in-process network test and the service's absolute Node path. The final Docker run passed with those corrections.
+
+## Large-project compatibility — 2026-11-02
+
+- [x] Removed the changed-file 512 KiB gate; regression covers a large lockfile, full fingerprinting and isolated commit.
+- [x] Default-mode sandbox scans handle dependency trees beyond 200,000 entries while retaining protected-path/link checks and cancellation; verified on a 316,879-entry real workspace.
+- [x] Configurable Docker RAM/CPU/PID limits with larger defaults; longer agent/validation budgets and three bounded code repairs by default.
+- [x] Cumulative engine output is streamed without failing at the retained-output budget. Validation prompt previews retain all commands/statuses and redact values before shortening.
+- [x] Setup uses prerequisite probes, preserves baseline failure notes for implementation/review and offers bounded setup recovery.
+- [x] Reviews receive bounded supplementary implementation command evidence from the same worktree, including repair checks, separately labelled from claims and mandatory validation.
+- [x] Authenticated three-item DAG fixture: independent parallel specialists, dependent work, item and combined reviews, real validation and one final commit; fixture checkout unchanged.
+- [x] Authorized large-monorepo mailbox ticket completed as task `e108a85b-5f36-4c19-97b1-cc5a9f3884f7`, commit `bc2eb6f112f395d9bd27e8c1ce5cd4c02192350b`: four declared validation commands passed, independent reviewer approved, zero code repairs. Original checkout HEAD/status unchanged. Completed task branch retained after managed worktree cleanup.
+- [x] Authorized “Meine Aufträge” ticket completed as task `d5619d45-5844-4b44-9d2f-86e6264b9510`, commit `f5d7b50bbd5803d7e9c1c0c8963a8114ff610b90`: four declared validation commands passed, independent reviewer approved, one repair cycle. The developer provisioned temporary PostgreSQL 17 and ran all three targeted database tests without skips, then stopped it. Original checkout HEAD/status unchanged; final branch retained after managed cleanup.
+
+The first live attempt stopped on an existing UI test-loader defect during setup. The setup/implementation handoff was corrected before the successful rerun. Reclaiming generated dependencies from finished attempts was necessary because the local Docker disk was nearly full; source and final commits were preserved. This is real local ticket verification, not deployment or browser acceptance against staging. M4 remains separate.
+
+The second ticket's final reviewer did not receive the supplementary PostgreSQL command results and incorrectly retained a “database tests skipped” qualification, despite their successful execution. That evidence gap prompted the final handoff correction; the original task evidence and reviewer output remain unchanged.
+
+Regression verification before the final handoff correction: `npm run check` passed 180 tests, backend/UI typechecks and build; all 35 browser workflows passed and the completed-task screenshot was inspected. Native deterministic M2/M3 and the full rebuilt Docker suite passed, including real-runtime protocol/containment and concurrent-worker checks. The authenticated M3 fixture also passed. The handoff correction adds two regression tests and assertions for isolated DAG worker evidence; `npm run check` passes 182 tests.
+
+Final handoff-corrected build: all 35 browser workflows, native deterministic M2/M3, the full Docker suite and the authenticated three-item M3 fixture passed again. The running service was rebuilt and restarted with these changes. Both completed real-ticket diffs remain available after worktree cleanup. Nothing was merged or pushed, and no staging deployment/browser acceptance was performed.

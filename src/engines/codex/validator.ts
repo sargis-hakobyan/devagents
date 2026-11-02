@@ -27,7 +27,7 @@ export class CodexValidator implements Validator {
     const toolPath = await nodeToolPath(temp, devagentsRules, runtime);
     await verifyCodex(this.binary, home);
     const args = [
-      ...await sandboxFlags(cwd, { readPaths: ['project:/**'], writePaths: devagentsRules ? [] : ['project:/**'], allowCommands: true, allowPush: false }, temp, this.options.scanLimit, devagentsRules, false, runtime),
+      ...await sandboxFlags(cwd, { readPaths: ['project:/**'], writePaths: devagentsRules ? [] : ['project:/**'], allowCommands: true, allowPush: false }, temp, this.options.scanLimit, devagentsRules, false, runtime, signal),
       // Node 24.22 async output to socket-backed stdio was lost in the offline Linux
       // sandbox. A kernel pipe to cat preserves output without enabling networking;
       // pipefail preserves the command's status.

@@ -26,9 +26,9 @@ export const Config = z.strictObject({
   defaultProvider: Id.default('openai'),
   providers: z.array(Provider).default([{ id: 'openai', kind: 'openai', auth: 'login' }]),
   concurrency: z.number().int().min(1).max(8).default(2),
-  maxRepairCycles: z.number().int().min(0).max(3).default(1),
-  executionTimeoutMs: z.number().int().min(1000).max(3600000).default(600000),
-  validationTimeoutMs: z.number().int().min(1000).max(600000).default(120000),
+  maxRepairCycles: z.number().int().min(0).max(3).default(3),
+  executionTimeoutMs: z.number().int().min(1000).max(3600000).default(1800000),
+  validationTimeoutMs: z.number().int().min(1000).max(600000).default(600000),
   workspaceScanLimit: z.number().int().min(1000).max(2000000).default(200000),
   /** An explicit model ID pins team snapshots; without it `model: default` means the runtime chooses at execution. */
   defaultModel: z.string().min(1).max(200).optional(),
