@@ -18,7 +18,7 @@ export async function changes(workspace: NonNullable<Task['workspace']>, agent: 
     if (protectedPath(file) || file === '.gitattributes' || file.endsWith('/.gitattributes')) throw new AppError('path_denied', `Changes to protected file ${file} are not permitted`);
     const path = await policy.file(agent, workspace.path, file, 'write');
     const info = await lstat(path).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
-    if (info && (!info.isFile() || info.nlink > 1 || info.size > 512 * 1024)) throw new AppError('unsupported_change', `Only regular text files up to 512KB can be committed: ${file}`);
+    if (info && (!info.isFile() || info.nlink > 1)) throw new AppError('unsupported_change', `Only regular files without hard links can be committed: ${file}`);
     const content = info ? await readFile(path) : Buffer.from('[deleted]');
     if (content.includes(0)) throw new AppError('unsupported_change', 'Binary changes are not supported in this version');
     digest.update(file).update('\0').update(String(info?.mode)).update('\0').update(content);

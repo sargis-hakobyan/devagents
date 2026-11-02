@@ -5,7 +5,36 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { WorkspaceManager, git, inspectProject } from '../../src/workspace/git.js';
 import { scopedPath } from '../../src/workspace/paths.js';
+import { changes, commitChanges } from '../../src/workspace/changes.js';
 import { fixture } from '../helpers.js';
+
+test('large tracked lockfiles can be reviewed, fully fingerprinted and committed', async () => {
+  const f = await fixture(false);
+  try {
+    const original = 'lockfileVersion: 9\npackages:\n' + Array.from({ length: 24000 }, (_, i) => `  package-${i}: {version: 1.0.0}\n`).join('');
+    assert.ok(Buffer.byteLength(original) > 512 * 1024);
+    await writeFile(join(f.project, 'pnpm-lock.yaml'), original);
+    await git(f.project, ['add', 'pnpm-lock.yaml']);
+    await git(f.project, ['commit', '-m', 'Add large fixture lockfile']);
+    await f.service.registerProject({ id: 'fixture', path: f.project });
+    const project = f.store.project('fixture');
+    const workspace = await new WorkspaceManager(f.dataDir).create(project, randomUUID());
+    const agent = (await f.service.agents('fixture')).find(a => a.id === 'general-developer')!;
+    const updated = original.replace('package-23999: {version: 1.0.0}', 'package-23999: {version: 1.0.1}');
+    await writeFile(join(workspace.path, 'pnpm-lock.yaml'), updated);
+    const first = await changes(workspace, agent);
+    assert.deepEqual(first.files, ['pnpm-lock.yaml']);
+    assert.match(first.diff, /\+  package-23999: \{version: 1\.0\.1\}/);
+    // Changes beyond the former size limit must participate in the review digest.
+    const final = updated.replace('package-23999: {version: 1.0.1}', 'package-23999: {version: 1.0.2}');
+    await writeFile(join(workspace.path, 'pnpm-lock.yaml'), final);
+    const checked = await changes(workspace, agent);
+    assert.notEqual(checked.digest, first.digest);
+    const commit = await commitChanges(project, workspace, checked.files);
+    assert.equal(await git(workspace.path, ['show', `${commit}:pnpm-lock.yaml`], false), final);
+    assert.equal(await readFile(join(f.project, 'pnpm-lock.yaml'), 'utf8'), original);
+  } finally { await f.cleanup(); }
+});
 
 test('isolated worktrees preserve dirty checkout and do not invoke repository hooks', async () => {
   const f = await fixture();
