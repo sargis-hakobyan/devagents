@@ -4,6 +4,8 @@ DevAgents uses Mastra workflows to run AI development teams on your local Git pr
 
 Work happens in isolated Git worktrees. Results are local commits; DevAgents does not automatically merge or push them.
 
+Checks that cannot run inside the sandbox (a browser, a GUI, network services, manual QA) are reported with the result as "not run in this environment" instead of being retried; repair cycles are spent only on failing tests and code defects. See [the decision record](docs/DECISIONS.md#environment-limitations-are-reported-not-repaired--2026-11-02).
+
 By default, the coding agent prepares project tools, dependencies and setup scripts before coding. Optional extra rules enable restricted preparation. See [environment preparation and limits](docs/SETUP.md#project-environment-preparation).
 
 ## Get started

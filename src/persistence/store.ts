@@ -173,6 +173,7 @@ export class Store {
       ...(t.mode ? { mode: t.mode } : {}), ...(t.workspace ? { branch: t.workspace.branch } : {}), ...(t.plan ? { items: t.plan.items.length } : {}),
       ...(t.outcome?.commit ? { commit: t.outcome.commit } : {}), ...(t.outcome?.error ? { error: t.outcome.error } : {}),
       ...(t.team ? { team: { id: t.team.id, revision: t.team.revision, name: t.team.name } } : {}),
+      ...(t.outcome?.limitations?.length ? { limitations: t.outcome.limitations.length } : {}),
     };
   }
   /** The list view: no agent snapshots, plans or instructions, which grow to hundreds of kilobytes per task. Newest first, cursor by row id. */

@@ -62,7 +62,9 @@ export const WorkItem = z.strictObject({
   validation: z.array(Command), assignedAgent: Id.optional(), ownedPaths: z.array(ScopedPath).min(1).optional(),
 });
 export const Integration = z.strictObject({ assignedAgent: Id, validation: z.array(Command).min(1) });
-export const Plan = z.strictObject({ summary: z.string().min(1), risks: z.array(z.string()), items: z.array(WorkItem).min(1).max(30), integration: Integration.nullable().optional() });
+/** Checks the planner knows need tools the sandbox lacks; shown to the user, never enforced. */
+export const ManualChecks = z.array(z.string().min(1).max(1000)).max(10);
+export const Plan = z.strictObject({ summary: z.string().min(1), risks: z.array(z.string()), items: z.array(WorkItem).min(1).max(30), integration: Integration.nullable().optional(), manualChecks: ManualChecks.optional() });
 export type TaskPlan = z.infer<typeof Plan>;
 export const ProjectInput = z.strictObject({ id: Id, path: z.string().min(1), defaultMode: Mode.optional() });
 /** `version` guards default-team changes against lost updates; legacy rows read as version 0. */
@@ -103,7 +105,8 @@ export type Task = z.infer<typeof TaskInput> & {
   workspace?: { path: string; branch: string; baseSha: string };
   agents?: AgentDefinition[];
   team?: TaskTeam;
-  outcome?: { commit?: string; files?: string[]; summary?: string; error?: string; repairCycles: number };
+  /** `limitations`: checks that could not run in this environment, reported rather than retried. */
+  outcome?: { commit?: string; files?: string[]; summary?: string; error?: string; repairCycles: number; limitations?: string[] };
 };
-export type TaskSummary = Pick<Task, 'id' | 'projectId' | 'state' | 'version' | 'createdAt' | 'updatedAt'> & { sequence: number; request: string; mode?: Task['mode']; branch?: string; items?: number; commit?: string; error?: string; team?: { id: string; revision: number; name: string } };
+export type TaskSummary = Pick<Task, 'id' | 'projectId' | 'state' | 'version' | 'createdAt' | 'updatedAt'> & { sequence: number; request: string; mode?: Task['mode']; branch?: string; items?: number; commit?: string; error?: string; team?: { id: string; revision: number; name: string }; limitations?: number };
 export type TaskEvent = { sequence: number; taskId: string; runId: string; actor: string; reason: string; state: TaskState; timestamp: string };

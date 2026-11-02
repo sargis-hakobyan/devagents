@@ -301,3 +301,29 @@ test('validation output beyond the evidence limit is truncated, recorded, and re
     assert.match(engine.calls.filter(c => c.phase === 'implementation')[1]!.prompt, /more output than the evidence limit allows/);
   } finally { await runner.stop(); await f.cleanup(); }
 });
+
+test('a check that cannot run in this environment is reported with the result and does not trigger repair', async () => {
+  const f = await fixture();
+  const engine = new FakeEngine({ limitations: ['Visual check could not run: no browser in this sandbox'], manualChecks: ['Confirm the greeting renders at 390 px'] });
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting with a visual check', mode: 'autonomous' }, 'limitations');
+    await runner.idle();
+    const done = f.store.task(task.id);
+    assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
+    assert.equal(done.outcome!.repairCycles, 0, 'an environment limitation is not a repair reason');
+    assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'review']);
+    assert.deepEqual(done.outcome!.limitations, ['Confirm the greeting renders at 390 px', 'Visual check could not run: no browser in this sandbox']);
+    assert.deepEqual(done.plan!.manualChecks, ['Confirm the greeting renders at 390 px']);
+    assert.match(engine.calls[1]!.prompt, /try once at most, then report it in limitations/);
+    assert.match(engine.calls[2]!.prompt, /are not findings/); assert.match(engine.calls[2]!.prompt, /Implementation reported limitations: \["Visual check could not run/);
+    assert.match(f.store.events(task.id).at(-1)!.reason, /2 checks not run in this environment/);
+    assert.equal(f.store.summaries({ limit: 5 }).tasks[0]!.limitations, 2);
+    // A real validation failure still repairs, exactly as before.
+    const failing = new FakeEngine({ failFirstTest: true, limitations: ['No browser'] }); const second = new TaskRunner(f.service, failing, new FixtureValidator()); f.service.attachRunner(second);
+    const repaired = f.service.submit({ projectId: 'fixture', request: 'Greeting with a failing first test', mode: 'autonomous' }, 'limitations-repair');
+    await second.idle(); const result = f.store.task(repaired.id);
+    assert.equal(result.state, 'completed', JSON.stringify(result.outcome)); assert.equal(result.outcome!.repairCycles, 1); assert.deepEqual(result.outcome!.limitations, ['No browser']);
+    await second.stop();
+  } finally { await runner.stop(); await f.cleanup(); }
+});

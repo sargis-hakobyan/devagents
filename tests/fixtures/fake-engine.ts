@@ -8,12 +8,12 @@ import { AppError } from '../../src/domain/errors.js';
 export class FakeEngine implements CodingEngine {
   readonly id = 'codex';
   calls: EngineRequest[] = [];
-  constructor(readonly options: { failFirstTest?: boolean; noisyFirstTest?: boolean; rejectReviews?: boolean; emptyRejection?: boolean; contradictoryReview?: boolean; mutateReview?: boolean; waitForCancel?: boolean } = {}) {}
+  constructor(readonly options: { failFirstTest?: boolean; noisyFirstTest?: boolean; rejectReviews?: boolean; emptyRejection?: boolean; contradictoryReview?: boolean; mutateReview?: boolean; waitForCancel?: boolean; limitations?: string[]; manualChecks?: string[] } = {}) {}
   async preflight(): Promise<void> {}
   async execute(request: EngineRequest): Promise<EngineResult> {
     this.calls.push(request);
     if (request.phase === 'planning') return { output: {
-      summary: 'Implement greeting', risks: [], integration: null, items: [{ id: 'greeting', ownedPaths: ['project:/**'], title: 'Greeting', description: 'Implement greeting', acceptanceCriteria: ['Returns hello'], dependsOn: [], requiredCapabilities: ['implementation'], assignedAgent: 'general-developer', projectId: 'fixture', branch: await git(request.cwd, ['branch', '--show-current']), validation: [{ executable: 'node', args: ['--test', 'greeting.test.cjs'] }] }],
+      summary: 'Implement greeting', risks: [], integration: null, ...(this.options.manualChecks ? { manualChecks: this.options.manualChecks } : {}), items: [{ id: 'greeting', ownedPaths: ['project:/**'], title: 'Greeting', description: 'Implement greeting', acceptanceCriteria: ['Returns hello'], dependsOn: [], requiredCapabilities: ['implementation'], assignedAgent: 'general-developer', projectId: 'fixture', branch: await git(request.cwd, ['branch', '--show-current']), validation: [{ executable: 'node', args: ['--test', 'greeting.test.cjs'] }] }],
     } };
     if (request.phase === 'setup') return { output: { ready: true, summary: 'Fixture environment ready' } };
     if (request.phase === 'implementation') {
@@ -25,11 +25,12 @@ export class FakeEngine implements CodingEngine {
       await writeFile(join(request.cwd, 'greeting.cjs'), `module.exports = () => '${broken ? 'broken' : 'hello'}';\n`);
       const noisy = this.options.noisyFirstTest && this.calls.filter(c => c.phase === 'implementation').length === 1;
       await writeFile(join(request.cwd, 'greeting.test.cjs'), `${noisy ? "console.log('BEGIN-NOISE'); console.log('n'.repeat(1536 * 1024)); console.log('END-NOISE');\n" : ''}const test = require('node:test'); const assert = require('node:assert/strict'); const greet = require('./greeting.cjs'); test('greeting', () => assert.equal(greet(), 'hello'));\n`);
-      return { output: { summary: 'Implemented greeting and tests' } };
+      return { output: { summary: 'Implemented greeting and tests', ...(this.options.limitations ? { limitations: this.options.limitations } : {}) } };
     }
     if (this.options.mutateReview) await writeFile(join(request.cwd, 'greeting.cjs'), "module.exports = () => 'tampered';\n");
     if (this.options.emptyRejection) return { output: { approved: false, summary: 'Rejected without saying why', findings: [] } };
-    return { output: { approved: !this.options.rejectReviews, summary: 'Independent fixture review', findings: this.options.rejectReviews || this.options.contradictoryReview ? ['Greeting needs work'] : [] } };
+    // The reviewer carries reported limitations forward; they are never findings.
+    return { output: { approved: !this.options.rejectReviews, summary: 'Independent fixture review', findings: this.options.rejectReviews || this.options.contradictoryReview ? ['Greeting needs work'] : [], ...(this.options.limitations ? { limitations: this.options.limitations } : {}) } };
   }
 }
 // Only used with the hardcoded fixture above, never exposed to user/model commands.

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ScopedPath } from '../domain/schemas.js';
+import { Limitation } from '../domain/limitations.js';
 
 /** Generation hints are separate from the authoritative local Zod/policy checks. */
 export function outputJsonSchema(schema: z.ZodType): Record<string, unknown> {
@@ -18,12 +19,16 @@ export function outputJsonSchema(schema: z.ZodType): Record<string, unknown> {
   return result;
 }
 
-export const ImplementationOutput = z.strictObject({ summary: z.string().min(1) });
+export const ImplementationOutput = z.strictObject({
+  summary: z.string().min(1),
+  limitations: z.array(Limitation).max(10).default([]).describe('Checks that could not run in this environment (missing browser, library, network, tool), each with its reason. Tried once at most; not failures.'),
+});
 export const SetupOutput = z.strictObject({ ready: z.boolean(), summary: z.string().min(1) });
 export const ReviewOutput = z.strictObject({
   approved: z.boolean().describe('True only when requirements and validation pass and findings is empty.'),
   summary: z.string().min(1).describe('Review rationale, including positive observations and test evidence.'),
   findings: z.array(z.string().min(1)).describe('Actionable defects requiring repair only. Empty when approved. Do not include positive observations or passed checks.'),
+  limitations: z.array(Limitation).max(10).default([]).describe('Checks that could not run in this environment, carried over from the implementation report and the plan. Never findings.'),
 }).superRefine((review, ctx) => {
   // A rejection with nothing to repair is malformed output, not a repair request worth a cycle.
   if (!review.approved && review.findings.length === 0) ctx.addIssue({ code: 'custom', path: ['findings'], message: 'A rejection must list at least one actionable finding' });

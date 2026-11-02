@@ -1,4 +1,5 @@
 import { validationEvidence } from './validation-evidence.js';
+import { describeLimitations, implementationLimitationInstructions, mergeLimitations, reviewLimitationInstructions } from '../domain/limitations.js';
 import { taskRules } from '../domain/execution-policy.js';
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
@@ -71,11 +72,15 @@ export async function runDag(h: Hooks): Promise<void> {
     return slots.run(agent.id, agent.concurrency, workerSignal, () => h.prepareEnvironment(cwd, commands, workerSignal, itemId, feedback));
   };
   /** With extra rules enabled, hidden (ignored) files must stay untouched. */
+  // Checks that could not run in this environment, reported by any worker; recorded with the result, never retried.
+  const limitations: string[] = [];
   const implement = async (agent: AgentDefinition, prompt: string, workerSignal: AbortSignal, context: Context) => {
     await prepare(context.cwd, context.workItemId === '@integration' ? plan.integration!.validation : plan.items.find(i => i.id === context.workItemId)!.validation, workerSignal, context.workItemId);
     const before = rules ? await hiddenFiles(context.cwd) : undefined;
-    await invoke('implementation', agent, prompt, ImplementationOutput, workerSignal, context);
+    const output = await invoke('implementation', agent, `${prompt}\n${implementationLimitationInstructions}`, ImplementationOutput, workerSignal, context) as z.infer<typeof ImplementationOutput>;
     h.active(); if (before) assertHiddenUnchanged(before, await hiddenFiles(context.cwd), context.workItemId === '@integration' ? 'Integration repair' : `Work item ${context.workItemId}`);
+    if (output.limitations.length) { limitations.splice(0, limitations.length, ...mergeLimitations(limitations, output.limitations)); record('limitations', { workItemId: context.workItemId, limitations: output.limitations }); }
+    return output;
   };
   const validate = async (currentWorkspace: Workspace, commands: Item['validation'], workerSignal: AbortSignal, itemId: string): Promise<ValidationResult[]> => {
     const cwd = currentWorkspace.path;
@@ -106,7 +111,7 @@ export async function runDag(h: Hooks): Promise<void> {
       ? 'FINAL COMBINED GATE: assess the complete request, all user acceptance criteria, the full diff and combined validation. Approval permits the final task commit. Missing combined validation or any actionable defect must block approval.'
       : 'ITEM INTEGRATION GATE: assess only this item\'s deliverable, owned changes and declared item validation. Approval permits integration of this item, not task completion. Task-wide tests and acceptance checks run at the mandatory final combined gate after all items are integrated. Do not demand combined validation at this item gate or ask the implementer to access the original checkout. Report defects in this item; defer checks explicitly reserved for the combined gate.';
     return await invoke('review', readOnlyReviewer,
-      `Independently review this ${combined ? 'combined change' : 'work item'} against its acceptance criteria. ${stage} Do not modify files.${rules ? ' Do not execute commands.' : ' Read-only inspection commands are available.'} Findings must contain only actionable defects requiring repair. Positive observations belong in summary. Approve only with approved=true and findings=[].\nOrchestrator workspace evidence: ${JSON.stringify(workspaceEvidence)}. Git-status comparisons do not attest ignored files or the contents of already-dirty/untracked files.\nUser request: ${task.request}\nUser acceptance criteria (task-wide context): ${JSON.stringify(task.acceptanceCriteria)}\nScope and acceptance criteria: ${JSON.stringify(criteria)}\nDiff:\n${current.diff}\nActual validation:\n${validationEvidence(evidence)}`,
+      `Independently review this ${combined ? 'combined change' : 'work item'} against its acceptance criteria. ${stage} Do not modify files.${rules ? ' Do not execute commands.' : ' Read-only inspection commands are available.'} Findings must contain only actionable defects requiring repair. Positive observations belong in summary. Approve only with approved=true and findings=[]. ${reviewLimitationInstructions}\nImplementation reported limitations so far: ${JSON.stringify(limitations)}\nOrchestrator workspace evidence: ${JSON.stringify(workspaceEvidence)}. Git-status comparisons do not attest ignored files or the contents of already-dirty/untracked files.\nUser request: ${task.request}\nUser acceptance criteria (task-wide context): ${JSON.stringify(task.acceptanceCriteria)}\nScope and acceptance criteria: ${JSON.stringify(criteria)}\nDiff:\n${current.diff}\nActual validation:\n${validationEvidence(evidence)}`,
       ReviewOutput, workerSignal, { cwd, workItemId: itemId }) as z.infer<typeof ReviewOutput>;
   };
   const executeItem = async (item: Item, baseSha: string, workerSignal: AbortSignal) => {
@@ -236,7 +241,8 @@ export async function runDag(h: Hooks): Promise<void> {
           record('commit-intent', { branch: workspace.branch, digest: checked.digest, files: checked.files });
           const commit = await commitChanges(project, workspace, checked.files);
           record('commit-created', { commit, branch: workspace.branch });
-          h.move('completed', 'DAG execution, combined validation and review passed; local commit created', { outcome: { commit, files: checked.files, summary: plan.summary, repairCycles } });
+          const reported = mergeLimitations(plan.manualChecks, limitations, assessment.limitations);
+          h.move('completed', `DAG execution, combined validation and review passed; local commit created${describeLimitations(reported)}`, { outcome: { commit, files: checked.files, summary: plan.summary, repairCycles, ...(reported.length ? { limitations: reported } : {}) } });
           return true;
         }
         feedback = `Combined review requested repairs:\n${JSON.stringify(assessment)}`;

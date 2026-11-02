@@ -9,7 +9,7 @@ import { TaskRunner } from '../../src/orchestration/runner.js';
 import { git } from '../../src/workspace/git.js';
 import type { CodingEngine, EngineRequest, EngineResult } from '../../src/domain/engine.js';
 
-type Options = { environmentRecovery?: boolean; synchronizeWorkers?: boolean; devagentsRules?: boolean; projectCommands?: boolean; hidden?: boolean; markdown?: boolean; unresolved?: 'markers' | 'separator'; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
+type Options = { limitations?: boolean; environmentRecovery?: boolean; synchronizeWorkers?: boolean; devagentsRules?: boolean; projectCommands?: boolean; hidden?: boolean; markdown?: boolean; unresolved?: 'markers' | 'separator'; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
 async function dagFixture(options: Options = {}) {
   const f = await fixture(options.devagentsRules ?? true);
   // Modules live in per-item directories so ownership uses subtree grants, the only write-grant form the Linux runtime accepts.
@@ -58,7 +58,7 @@ async function dagFixture(options: Options = {}) {
             if (options.diverge) { await writeFile(join(f.project, 'new.txt'), 'External change'); await git(f.project, ['add', '.']); await git(f.project, ['commit', '-m', 'User change']); }
             if (options.rejectCombined && combinedReviews === 1) return { output: { approved: false, summary: 'Repair requested', findings: ['Clarify implementation'] } };
           }
-          return { output: { approved: true, summary: 'Tests and requirements satisfied', findings: [] } };
+          return { output: { approved: true, summary: 'Tests and requirements satisfied', findings: [], ...(options.limitations && r.workItemId === '@integration' ? { limitations: ['Combined visual check skipped: no browser in this sandbox'] } : {}) } };
         } finally { reviewActive--; }
       }
       progress({ kind: 'command', data: { command: `observed-command-for-${r.workItemId}`, aggregated_output: 'Supplementary fixture check passed', exit_code: 0 } });
@@ -93,7 +93,7 @@ async function dagFixture(options: Options = {}) {
         const module = options.conflict && id !== 'c' ? 'shared' : id;
         await writeFile(join(r.cwd, module, `${module}.cjs`), `module.exports=()=> '${id === 'c' ? 'ab' : id}';\n`);
         if (options.markdown && id !== 'c') await writeFile(join(r.cwd, 'shared', 'NOTES.md'), `Notes\n=======\n${id}\n`);
-        return { output: { summary: `Implemented ${id}` } };
+        return { output: { summary: `Implemented ${id}`, ...(options.limitations && id === 'a' ? { limitations: ['Screenshot of module a could not be taken: Chromium is not available in this sandbox'] } : {}) } };
       } finally { active--; }
     },
   };
@@ -318,5 +318,19 @@ test('DAG engine policy permits project commands for items and integration, gene
     assert.equal(done.outcome?.repairCycles, 0);
     assert.equal(f.calls.filter(c => c.phase === 'implementation').length, 3);
     assert.equal(await readFile(join(f.project, 'README.md'), 'utf8'), '# Fixture\n');
+  } finally { await f.runner.stop(); await f.cleanup(); }
+});
+
+test('DAG records worker and combined-review limitations with the result instead of repairing them', async () => {
+  const f = await dagFixture({ limitations: true });
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Three modules with a visual check', mode: 'autonomous' }, 'dag-limitations');
+    await f.runner.idle(); const done = f.store.task(task.id);
+    assert.equal(done.state, 'completed', JSON.stringify(done.outcome)); assert.equal(done.outcome!.repairCycles, 0);
+    assert.deepEqual(done.outcome!.limitations, ['Screenshot of module a could not be taken: Chromium is not available in this sandbox', 'Combined visual check skipped: no browser in this sandbox']);
+    assert.ok(f.store.evidence(task.id).some(e => e.kind === 'limitations' && (e.data as { workItemId: string }).workItemId === 'a'));
+    assert.match(f.store.events(task.id).at(-1)!.reason, /2 checks not run in this environment/);
+    const combinedReview = f.calls.find(c => c.phase === 'review' && c.workItemId === '@integration')!;
+    assert.match(combinedReview.prompt, /Implementation reported limitations so far: \["Screenshot of module a/);
   } finally { await f.runner.stop(); await f.cleanup(); }
 });

@@ -27,8 +27,10 @@ test('model schema omits the incompatible path regex without weakening local pat
 
 test('review output schema still generates for the model and rejects a rejection without findings locally', () => {
   const schema = outputJsonSchema(ReviewOutput) as z.core.JSONSchema.ObjectSchema;
-  assert.deepEqual(schema.required, ['approved', 'summary', 'findings']);
+  // `limitations` is generated for the model (reported checks that could not run) but a response without it still parses locally.
+  assert.deepEqual(schema.required, ['approved', 'summary', 'findings', 'limitations']);
   assert.equal(ReviewOutput.safeParse({ approved: true, summary: 'ok', findings: [] }).success, true);
+  assert.deepEqual(ReviewOutput.parse({ approved: true, summary: 'ok', findings: [] }).limitations, []);
   assert.equal(ReviewOutput.safeParse({ approved: false, summary: 'needs work', findings: ['Fix x'] }).success, true);
   assert.equal(ReviewOutput.safeParse({ approved: false, summary: 'needs work', findings: [] }).success, false);
 });

@@ -64,6 +64,8 @@ const engine = {
   async execute(request) {
     const projectId = /Project ID: ([a-z0-9-]+)/.exec(request.prompt)?.[1] ?? 'fixture';
     const multi = request.prompt.includes('[multi]'); const failReview = request.prompt.includes('[fail-review]'); const hold = request.prompt.includes('[hold]');
+    // [blocked-check]: a check that cannot run in this environment is reported once and the task moves on.
+    const limitations = request.prompt.includes('[blocked-check]') ? ['Visual check of the greeting at desktop and narrow widths could not run: no browser is available in this sandbox'] : [];
     const branch = await git(request.cwd, ['branch', '--show-current']);
     if (request.phase === 'planning') {
       if (multi) return { output: { summary: 'Implement independent A/B modules and combine them', risks: ['Fixture risk: module c depends on both a and b'], integration: { assignedAgent: 'general-developer', validation: [{ executable: 'node', args: ['--test', 'a.test.cjs', 'b.test.cjs', 'c.test.cjs'] }] }, items: ['a', 'b', 'c'].map(id => ({ id, title: `Module ${id}`, description: `Implement module ${id} so its test passes`, acceptanceCriteria: [`${id}.test.cjs passes`], dependsOn: id === 'c' ? ['a', 'b'] : [], requiredCapabilities: ['implementation'], assignedAgent: id === 'a' ? 'backend-developer' : id === 'b' ? 'frontend-developer' : 'general-developer', projectId, branch: `${branch}-${id}`, ownedPaths: [`project:/${id}/**`], validation: [{ executable: 'node', args: ['--test', `${id}.test.cjs`] }] })) } };
@@ -75,9 +77,9 @@ const engine = {
       const id = request.workItemId;
       if (multi && id && id !== '@integration') await writeFile(join(request.cwd, id, `${id}.cjs`), id === 'c' ? "module.exports=()=>require('../a/a.cjs')()+require('../b/b.cjs')();\n" : `module.exports=()=> '${id.toUpperCase()}';\n`);
       else if (!multi) await writeFile(join(request.cwd, 'greeting.cjs'), "module.exports = () => 'hello';\n");
-      return { output: { summary: `Implemented ${id ?? 'the fix'}` } };
+      return { output: { summary: `Implemented ${id ?? 'the fix'}`, limitations } };
     }
-    return { output: failReview ? { approved: false, summary: 'Fixture review rejects this change on purpose', findings: ['Fixture finding: the greeting must be configurable'] } : { approved: true, summary: 'Fixture review: tests pass and the change matches the request', findings: [] } };
+    return { output: failReview ? { approved: false, summary: 'Fixture review rejects this change on purpose', findings: ['Fixture finding: the greeting must be configurable'] } : { approved: true, summary: 'Fixture review: tests pass and the change matches the request', findings: [], limitations } };
   },
 };
 const validator = { async execute(cwd, command, signal, timeoutMs) { const r = await runProcess(process.execPath, command.args, { cwd, env: { PATH: process.env.PATH }, signal, timeoutMs, maxBytes: 1024 * 1024, overflow: 'truncate' }); return { ...command, exitCode: r.exitCode, output: r.stdout + r.stderr, truncated: r.truncated }; } };
