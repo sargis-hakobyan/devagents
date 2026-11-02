@@ -145,6 +145,14 @@
       "h": 1500,
       "title": "U5 · Answer-only work mode and cost rollups",
       "expand": "fill"
+    },
+    "U6-Work-Team.dc.html": {
+      "x": 0,
+      "y": 8300,
+      "w": 1360,
+      "h": 3250,
+      "title": "U6 · Work tab: the team on this task",
+      "expand": "fill"
     }
   },
   "order": [
@@ -164,7 +172,8 @@
     "U4-Cleanup-Task.dc.html",
     "U4-Cleanup-Lists.dc.html",
     "U5-Attention.dc.html",
-    "U5-Modes-Cost.dc.html"
+    "U5-Modes-Cost.dc.html",
+    "U6-Work-Team.dc.html"
   ],
   "notes": {
     "rowA": {
@@ -228,6 +237,20 @@
       "y": 6300,
       "w": 440,
       "text": "Liveness rule: every unfinished task has a live path (engine activity), an explicit waiting path (a decision of yours) or a recovery path (a choice offered to you); anything else is shown as needing attention. Automatic retries are bounded (quota/capacity once, lost dispatch once) and tool calls are never replayed. Costs are provider-reported tokens summed per task and project; prices are optional configuration, never estimates. See docs/IMPROVEMENT_PLAN.md.",
+      "fill": "blue"
+    },
+    "rowU6": {
+      "x": 0,
+      "y": 8000,
+      "text": "U6 — Work tab as a team board: who is finished, who is working, who is left (design only, to be refined together)",
+      "kind": "title1",
+      "maxW": 10000
+    },
+    "legendU6": {
+      "x": 1440,
+      "y": 8300,
+      "w": 440,
+      "text": "Two treatments on one page: the pipeline (plan → build → review → integrate → commit, with the members who do each stage) and the roster (Finished / Working now / Up next columns). \"You\" appears as a member whenever a decision is yours. Every value is a recorded run, event or checkpoint; durations are timestamp differences; nothing is estimated. Members the plan does not need are shown as not needed. No new backend field is required.",
       "fill": "blue"
     }
   },

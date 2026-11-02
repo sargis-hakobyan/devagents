@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents Work tab — team board (U6)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:0 16px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}
+.tab{min-height:44px;padding:0 4px;border:0;background:transparent;font:inherit;font-weight:700;font-size:14px;color:#5A5F78;border-bottom:3px solid transparent;cursor:pointer}
+.tab.on{color:#231F4A;border-bottom-color:#FFB703}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#5A5F78}
+.stage{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:3px 8px;border-radius:6px;white-space:nowrap}
+.ok{background:#E1F5EA;color:#135E38}.run{background:#E3ECFF;color:#1C3F99}.wait{background:#EAECF5;color:#5A5F78}.bad{background:#FDE8E6;color:#8A1C14}.warn{background:#FFF1DB;color:#7A4A00}
+/* Team avatars: a role glyph in a circle, a status ring and a small badge. Status is always ring + badge + text. */
+.avatar{position:relative;width:56px;height:56px;border-radius:50%;background:#231F4A;color:#FFFFFF;display:grid;place-items:center;flex:0 0 auto;box-shadow:0 0 0 3px #FFFFFF,0 0 0 6px #B9BCD0}
+.avatar.sm{width:40px;height:40px;box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #B9BCD0}
+.avatar.done{box-shadow:0 0 0 3px #FFFFFF,0 0 0 6px #1E9A5B}
+.avatar.busy{box-shadow:0 0 0 3px #FFFFFF,0 0 0 6px #2457C5}
+.avatar.next{box-shadow:0 0 0 3px #FFFFFF,0 0 0 6px #B9BCD0;background:#8E92AD}
+.avatar.fail{box-shadow:0 0 0 3px #FFFFFF,0 0 0 6px #C2362B}
+.avatar.you{box-shadow:0 0 0 3px #FFFFFF,0 0 0 6px #B45309;background:#B45309}
+.avatar.off{box-shadow:0 0 0 3px #FFFFFF,0 0 0 6px #E0E2EE;background:#C9CCDD}
+.avatar.sm.done{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #1E9A5B}.avatar.sm.busy{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2457C5}.avatar.sm.next{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #B9BCD0}.avatar.sm.fail{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #C2362B}.avatar.sm.you{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #B45309}.avatar.sm.off{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #E0E2EE}
+.badge{position:absolute;right:-6px;bottom:-6px;width:22px;height:22px;border-radius:50%;border:2px solid #FFFFFF;display:grid;place-items:center;font-size:12px;font-weight:800;line-height:1}
+.sm .badge{width:18px;height:18px;font-size:10px;right:-5px;bottom:-5px}
+.badge.done{background:#1E9A5B;color:#FFFFFF}.badge.busy{background:#2457C5;color:#FFFFFF}.badge.next{background:#B9BCD0;color:#FFFFFF}.badge.fail{background:#C2362B;color:#FFFFFF}.badge.you{background:#FFB703;color:#231F4A}.badge.off{background:#E0E2EE;color:#5A5F78}
+/* Pipeline: stages left to right; each stage holds the member(s) who do it. */
+.pipe{display:grid;grid-template-columns:minmax(0,1fr) 18px minmax(0,1.5fr) 18px minmax(0,1fr) 18px minmax(0,1fr) 18px minmax(0,1fr);align-items:stretch;gap:0}
+.stagecol{display:flex;flex-direction:column;gap:12px;padding:14px 12px;border-radius:12px;background:#F8F8FD;border:1px solid #EAECF5;min-width:0}
+.stagecol.now{background:#F3F6FF;border-color:#C5D3F7}
+.stagecol .title{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.link{align-self:center;height:2px;background:#C9CCDD;position:relative;width:100%}
+.link::after{content:"";position:absolute;right:-1px;top:-5px;border:6px solid transparent;border-left:8px solid #C9CCDD;border-right:0}
+.link.done{background:#1E9A5B}.link.done::after{border-left-color:#1E9A5B}
+.member{display:flex;gap:12px;align-items:flex-start;min-width:0}
+.member .name{font-weight:800;line-height:1.25}.member .what{font-size:13px;color:#5A5F78}
+.roster{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.col{display:flex;flex-direction:column;gap:10px;min-width:0}
+.col .colhead{display:flex;justify-content:space-between;align-items:center;padding:0 2px}
+.mcard{padding:14px;display:flex;flex-direction:column;gap:10px}
+.mcard.now{border-color:#2457C5;box-shadow:0 0 0 3px #E3ECFF}
+.mcard.need{border-color:#F1D18A;background:#FFFBF2}
+.mcard.failed{border-color:#F3C1BD}
+.kv{display:grid;grid-template-columns:92px minmax(0,1fr);gap:4px 10px;font-size:13px;margin:0}.kv dt{color:#5A5F78}.kv dd{margin:0}
+.note{background:#DCEBFF;border:1px solid #A9C7F5;color:#1C3F99;border-radius:12px;padding:12px 14px;font-size:14px}
+.callout{position:relative;background:#FFF8E1;border:1px solid #F1D18A;border-radius:10px;padding:10px 12px;font-size:13px;color:#5A4A00;max-width:360px}
+.callout b{color:#7A4A00}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column; gap: 28px; padding-bottom: 60px">
+  <!-- ============================================================ -->
+  <!-- Context: the whole task page, Work tab selected (fixture "Three modules", running) -->
+  <!-- ============================================================ -->
+  <div style="display: flex; flex-direction: column">
+    <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px">
+      <div style="display: flex; align-items: center; gap: 18px">
+        <div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div>
+        <div style="width: 1px; height: 36px; background: rgba(255,255,255,0.18)"></div>
+        <div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #B9B6D9">Local workspace</span><span style="font-weight: 700; font-size: 16px">127.0.0.1:4310 · darwin</span></div>
+      </div>
+      <span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6EE7A8" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Connected · updated 2 s ago</span>
+    </header>
+    <div style="display: flex; flex: 1">
+      <nav aria-label="Main" style="flex: 0 0 220px; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD; font-weight: 600; font-size: 14px; color: #3B3F5E">
+        <span style="padding: 9px 12px">Overview</span><span style="padding: 9px 12px; background: #231F4A; color: #FFFFFF; border-radius: 10px">Tasks</span><span style="padding: 9px 12px">Teams</span><span style="padding: 9px 12px">Projects</span><span style="padding: 9px 12px">Settings</span>
+      </nav>
+      <main style="flex: 1; min-width: 0; padding: 22px 28px 32px; display: flex; flex-direction: column; gap: 18px">
+        <a href="A-Tasks.dc.html" style="font-weight: 700; font-size: 14px; text-decoration: none">← All tasks</a>
+        <section class="card" aria-label="Task header" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip run">▶ Running</span><span class="muted" style="font-size: 13px">autonomous · v7 · started 09:41:03 · elapsed 7 min</span></div>
+          <h1 style="margin: 0; font-size: 26px; letter-spacing: -0.03em; line-height: 1.15">Implement three modules and combine them</h1>
+          <div class="muted" style="font-size: 13.5px">Project <span class="mono">fixture</span> · Team: <b>Legacy agent configuration</b> (6 agents snapshotted at worktree creation) · Branch <span class="mono">devagents/implement-three-modules-and-combine-them-1c96a266</span></div>
+          <div><button class="btn" type="button">Cancel task…</button></div>
+          <div style="display: flex; gap: 12px; align-items: flex-start; background: #EEF3FF; border: 1px solid #C5D3F7; border-radius: 12px; padding: 12px 14px">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2457C5" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            <div><div style="font-weight: 700">Now: Developer is validating work item c in its own worktree</div><div class="muted" style="font-size: 14px">a and b are integrated. When c passes its tests and review, the combined result is validated and reviewed once more before one local commit on the task branch. No merge, push or deployment happens.</div></div>
+          </div>
+        </section>
+        <div role="tablist" aria-label="Task sections" style="display: flex; gap: 22px; border-bottom: 1px solid #E0E2EE">
+          <button class="tab on" role="tab" aria-selected="true" type="button">Work · 3</button><button class="tab" role="tab" aria-selected="false" type="button">Plan</button><button class="tab" role="tab" aria-selected="false" type="button">Activity · 41</button><button class="tab" role="tab" aria-selected="false" type="button">Result</button>
+        </div>
+
+        <!-- Treatment 1: the pipeline. Who does what, in the order the task moves. -->
+        <section class="card" aria-label="Team pipeline" style="padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap">
+            <div><div style="font-weight: 800; font-size: 16px">Your team on this task</div><div class="muted" style="font-size: 13px">4 of 6 members involved · 2 finished · 1 working · 1 up next · measured from recorded runs, no estimates</div></div>
+            <div style="display: flex; gap: 14px; font-size: 12.5px; color: #5A5F78; flex-wrap: wrap"><span><span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #1E9A5B; vertical-align: -1px"></span> Finished</span><span><span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #2457C5; vertical-align: -1px"></span> Working now</span><span><span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #B9BCD0; vertical-align: -1px"></span> Up next</span><span><span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #B45309; vertical-align: -1px"></span> Needs you</span></div>
+          </div>
+          <div class="pipe">
+            <!-- Plan -->
+            <div class="stagecol">
+              <div class="title"><span class="h">1 · Plan</span><span class="stage ok">✓ Done</span></div>
+              <div class="member">
+                <div class="avatar done" title="Tech Lead · finished"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 6h14M5 12h9M5 18h6"/><circle cx="18" cy="17" r="3"/></svg><span class="badge done">✓</span></div>
+                <div><div class="name">Tech Lead</div><div class="what">Plan v7 · 3 items · 41 s</div><div class="what">Finished 09:41:44</div></div>
+              </div>
+            </div>
+            <div class="link done"></div>
+            <!-- Build -->
+            <div class="stagecol now">
+              <div class="title"><span class="h">2 · Build</span><span class="stage run">▶ 2 of 3 done</span></div>
+              <div class="member">
+                <div class="avatar sm done" title="Backend Developer · finished"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge done">✓</span></div>
+                <div><div class="name">Backend Developer</div><div class="what"><span class="mono">a</span> Module a · tests ✓ · review ✓ · 9c2e1f0</div></div>
+              </div>
+              <div class="member">
+                <div class="avatar sm done" title="Frontend Developer · finished"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge done">✓</span></div>
+                <div><div class="name">Frontend Developer</div><div class="what"><span class="mono">b</span> Module b · tests ✕ then ✓ · 1 repair · 41ab9d3</div></div>
+              </div>
+              <div class="member">
+                <div class="avatar sm busy" title="Developer · working"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge busy">▶</span></div>
+                <div><div class="name">Developer</div><div class="what"><span class="mono">c</span> Combine a + b · <b style="color:#1C3F99">validating</b> · 2 min 10 s</div></div>
+              </div>
+            </div>
+            <div class="link"></div>
+            <!-- Review -->
+            <div class="stagecol">
+              <div class="title"><span class="h">3 · Review</span><span class="stage wait">2 of 3</span></div>
+              <div class="member">
+                <div class="avatar next" title="Code Reviewer · up next"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8M8 10.5l1.8 1.8 3.2-3.4"/></svg><span class="badge next">…</span></div>
+                <div><div class="name">Code Reviewer</div><div class="what">a ✓ · b ✓ · 0 findings</div><div class="what">Next: item c, once its tests pass</div></div>
+              </div>
+            </div>
+            <div class="link"></div>
+            <!-- Integrate -->
+            <div class="stagecol">
+              <div class="title"><span class="h">4 · Integrate</span><span class="stage wait">Up next</span></div>
+              <div class="member">
+                <div class="avatar next" title="Developer · up next"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge next">…</span></div>
+                <div><div class="name">Developer</div><div class="what">Combined validation · 3 commands</div><div class="what">Then a final review by Code Reviewer</div></div>
+              </div>
+            </div>
+            <div class="link"></div>
+            <!-- Commit -->
+            <div class="stagecol">
+              <div class="title"><span class="h">5 · Commit</span><span class="stage wait">Up next</span></div>
+              <div class="member">
+                <div class="avatar next" title="DevAgents · up next"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg><span class="badge next">…</span></div>
+                <div><div class="name">DevAgents</div><div class="what">One local commit on the task branch</div><div class="what">Nothing is merged or pushed</div></div>
+              </div>
+            </div>
+          </div>
+          <div class="muted" style="font-size: 12.5px">Not needed for this task: <b>QA Engineer</b> (no item asks for testing) · Members with nothing to do stay out of the pipeline and are listed below.</div>
+        </section>
+
+        <!-- Treatment 2: the roster board. Three columns answer the question directly. -->
+        <section aria-label="Team roster" style="display: flex; flex-direction: column; gap: 12px">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap"><div style="font-weight: 800; font-size: 16px">Who is finished, who is working, who is left</div><span class="muted" style="font-size: 13px">Measured: 2 of 3 items integrated · repairs 1 used (bounded per item) · 0 of 1 integration repair</span></div>
+          <div class="roster">
+            <div class="col">
+              <div class="colhead"><span class="h" style="color: #135E38">Finished · 3</span><span class="muted" style="font-size: 12.5px">in order of completion</span></div>
+              <article class="card mcard">
+                <div class="member"><div class="avatar sm done"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 6h14M5 12h9M5 18h6"/><circle cx="18" cy="17" r="3"/></svg><span class="badge done">✓</span></div><div style="min-width: 0"><div class="name">Tech Lead <span class="mono muted" style="font-weight: 500">tech-lead</span></div><div class="what">Planned the task · 09:41:03 → 09:41:44</div></div></div>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="stage ok">Plan v7 ✓</span><span class="stage ok">3 items · 1 integration step</span><span class="stage wait">Approved automatically</span></div>
+              </article>
+              <article class="card mcard">
+                <div class="member"><div class="avatar sm done"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge done">✓</span></div><div style="min-width: 0"><div class="name">Backend Developer <span class="mono muted" style="font-weight: 500">backend-developer</span></div><div class="what"><span class="mono">a</span> · Module a · owns <span class="mono">a/**</span> · 09:41:50 → 09:44:12</div></div></div>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="stage ok">Implemented</span><span class="stage ok">Tests ✓</span><span class="stage ok">Review ✓ 0 findings</span><span class="stage ok">Checkpoint 9c2e1f0</span><span class="stage ok">Integrated</span></div>
+              </article>
+              <article class="card mcard">
+                <div class="member"><div class="avatar sm done"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge done">✓</span></div><div style="min-width: 0"><div class="name">Frontend Developer <span class="mono muted" style="font-weight: 500">frontend-developer</span></div><div class="what"><span class="mono">b</span> · Module b · owns <span class="mono">b/**</span> · 09:41:50 → 09:45:48</div></div></div>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="stage ok">Implemented ×2</span><span class="stage warn">Tests ✕ then ✓</span><span class="stage ok">Review ✓ 0 findings</span><span class="stage ok">Checkpoint 41ab9d3</span><span class="stage ok">Integrated</span></div>
+                <div class="muted" style="font-size: 12.5px">1 repair used of the per-item budget · first validation failed with exit 1</div>
+              </article>
+            </div>
+            <div class="col">
+              <div class="colhead"><span class="h" style="color: #1C3F99">Working now · 1</span><span class="muted" style="font-size: 12.5px">live · updated 2 s ago</span></div>
+              <article class="card mcard now">
+                <div class="member"><div class="avatar sm busy"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge busy">▶</span></div><div style="min-width: 0"><div class="name">Developer <span class="mono muted" style="font-weight: 500">general-developer</span></div><div class="what"><span class="mono">c</span> · Combine a + b · owns <span class="mono">c/**</span> · depends on a, b</div></div></div>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="stage ok">Implemented</span><span class="stage run">Tests running · 2 min 10 s</span><span class="stage wait">Review</span><span class="stage wait">Checkpoint</span></div>
+                <dl class="kv"><dt>Started</dt><dd>09:46:02, after a and b were checkpointed</dd><dt>Validation</dt><dd class="mono">node --test c.test.cjs</dd><dt>Repairs</dt><dd>0 used · 1 available</dd><dt>Last event</dt><dd>validation started · 2 s ago</dd></dl>
+                <div style="display: flex; gap: 8px"><button class="btn" type="button" style="min-height: 34px; font-size: 13px">Show activity for c</button></div>
+              </article>
+              <div class="callout"><b>Silent-worker rule (U5):</b> if no event arrives for 10 minutes this card gets the amber "no event for N min" chip and moves to Needs your attention on the Overview. Nothing is restarted on its own.</div>
+            </div>
+            <div class="col">
+              <div class="colhead"><span class="h">Up next · 3</span><span class="muted" style="font-size: 12.5px">in order</span></div>
+              <article class="card mcard">
+                <div class="member"><div class="avatar sm next"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8M8 10.5l1.8 1.8 3.2-3.4"/></svg><span class="badge next">…</span></div><div style="min-width: 0"><div class="name">Code Reviewer <span class="mono muted" style="font-weight: 500">code-reviewer</span></div><div class="what">Reviews item c when its tests pass, then the combined diff</div></div></div>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="stage ok">a ✓</span><span class="stage ok">b ✓</span><span class="stage wait">c</span><span class="stage wait">Final review</span></div>
+              </article>
+              <article class="card mcard">
+                <div class="member"><div class="avatar sm next"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge next">…</span></div><div style="min-width: 0"><div class="name">Developer <span class="mono muted" style="font-weight: 500">general-developer · integration</span></div><div class="what">Combines the three checkpoints and runs the full validation</div></div></div>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="stage wait">Combined validation · 3 commands</span><span class="stage wait">Repairs 0 of 1</span></div>
+              </article>
+              <article class="card mcard">
+                <div class="member"><div class="avatar sm next"><svg width="20" height="20" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg><span class="badge next">…</span></div><div style="min-width: 0"><div class="name">DevAgents</div><div class="what">Final local commit on <span class="mono">devagents/implement-three-modules-…-1c96a266</span></div></div></div>
+              </article>
+              <article class="card mcard" style="opacity: .7; border-style: dashed">
+                <div class="member"><div class="avatar sm off"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/></svg><span class="badge off">–</span></div><div style="min-width: 0"><div class="name">QA Engineer <span class="mono muted" style="font-weight: 500">qa-engineer</span></div><div class="what">Not needed: no item asks for the <span class="mono">testing</span> capability</div></div></div>
+              </article>
+            </div>
+          </div>
+        </section>
+        <div class="note">Design note · two treatments on one page so we can choose: the <b>pipeline</b> answers "where is the task" and the <b>roster</b> answers "who is finished, who is working, who is left". Either can stand alone; the work-item stage chips live inside the member cards, so nothing from today's Work tab is lost. Every value is a recorded run, event or checkpoint; there are no estimates.</div>
+      </main>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- States of the roster, side by side: needs you · completed · failed -->
+  <!-- ============================================================ -->
+  <section style="padding: 0 32px; display: flex; flex-direction: column; gap: 14px">
+    <div><div style="font-weight: 800; font-size: 18px">Roster states</div><div class="muted" style="font-size: 13.5px">The same cards in the other task states. "You" is a team member whenever a decision is yours; nobody moves until you act.</div></div>
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: start">
+
+      <!-- Needs you -->
+      <div class="card" style="padding: 16px; display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; justify-content: space-between; align-items: center"><span style="font-weight: 800">Awaiting your approval</span><span class="chip warn">● Needs you</span></div>
+        <div class="muted" style="font-size: 12.5px">plan-approval · v2 · "Add input validation to the API"</div>
+        <div class="colhead"><span class="h" style="color: #135E38">Finished · 1</span></div>
+        <article class="card mcard">
+          <div class="member"><div class="avatar sm done"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 6h14M5 12h9M5 18h6"/><circle cx="18" cy="17" r="3"/></svg><span class="badge done">✓</span></div><div style="min-width: 0"><div class="name">Tech Lead</div><div class="what">Plan v2 · 1 item · 36 s</div></div></div>
+        </article>
+        <div class="colhead"><span class="h" style="color: #7A4A00">Needs you · 1</span></div>
+        <article class="card mcard need">
+          <div class="member"><div class="avatar sm you"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span class="badge you">!</span></div><div style="min-width: 0"><div class="name">You</div><div class="what">Approve plan version 2, or reject it. Nothing runs until you decide.</div></div></div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn primary" type="button" style="min-height: 36px; font-size: 13px">Approve version 2</button><button class="btn" type="button" style="min-height: 36px; font-size: 13px">Review plan</button></div>
+        </article>
+        <div class="colhead"><span class="h">Waiting for you · 3</span></div>
+        <article class="card mcard" style="gap: 8px">
+          <div class="member"><div class="avatar sm next"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge next">…</span></div><div style="min-width: 0"><div class="name">Developer</div><div class="what"><span class="mono">fix</span> · Validate request bodies · will start after approval</div></div></div>
+          <div class="member"><div class="avatar sm next"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8M8 10.5l1.8 1.8 3.2-3.4"/></svg><span class="badge next">…</span></div><div style="min-width: 0"><div class="name">Code Reviewer</div><div class="what">Reviews the diff after validation</div></div></div>
+          <div class="member"><div class="avatar sm next"><svg width="20" height="20" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg><span class="badge next">…</span></div><div style="min-width: 0"><div class="name">DevAgents</div><div class="what">Final local commit</div></div></div>
+        </article>
+      </div>
+
+      <!-- Completed -->
+      <div class="card" style="padding: 16px; display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; justify-content: space-between; align-items: center"><span style="font-weight: 800">Completed</span><span class="chip ok">✓ Completed</span></div>
+        <div class="muted" style="font-size: 12.5px">autonomous · v7 · took 5 min 12 s · commit <span class="mono">d2a676a</span></div>
+        <div class="colhead"><span class="h" style="color: #135E38">Finished · 6</span><span class="muted" style="font-size: 12.5px">everyone involved</span></div>
+        <article class="card mcard" style="gap: 10px">
+          <div class="member"><div class="avatar sm done"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 6h14M5 12h9M5 18h6"/><circle cx="18" cy="17" r="3"/></svg><span class="badge done">✓</span></div><div style="min-width: 0"><div class="name">Tech Lead</div><div class="what">Plan v7 · 41 s</div></div></div>
+          <div class="member"><div class="avatar sm done"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge done">✓</span></div><div style="min-width: 0"><div class="name">Backend Developer</div><div class="what"><span class="mono">a</span> · 2 min 22 s · 0 repairs</div></div></div>
+          <div class="member"><div class="avatar sm done"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge done">✓</span></div><div style="min-width: 0"><div class="name">Frontend Developer</div><div class="what"><span class="mono">b</span> · 3 min 58 s · 1 repair</div></div></div>
+          <div class="member"><div class="avatar sm done"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge done">✓</span></div><div style="min-width: 0"><div class="name">Developer</div><div class="what"><span class="mono">c</span> · 2 min 40 s · integration ✓ 3 commands</div></div></div>
+          <div class="member"><div class="avatar sm done"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8M8 10.5l1.8 1.8 3.2-3.4"/></svg><span class="badge done">✓</span></div><div style="min-width: 0"><div class="name">Code Reviewer</div><div class="what">4 reviews · 0 findings · final review approved</div></div></div>
+          <div class="member"><div class="avatar sm done"><svg width="20" height="20" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg><span class="badge done">✓</span></div><div style="min-width: 0"><div class="name">DevAgents</div><div class="what">Committed <span class="mono">d2a676a</span> · 09:46:15 · you integrate it yourself</div></div></div>
+        </article>
+        <div class="muted" style="font-size: 12.5px">Not needed: QA Engineer. Durations are the sum of recorded runs per member, including repairs.</div>
+      </div>
+
+      <!-- Failed -->
+      <div class="card" style="padding: 16px; display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; justify-content: space-between; align-items: center"><span style="font-weight: 800">Failed</span><span class="chip bad">✕ Failed</span></div>
+        <div class="muted" style="font-size: 12.5px">Repair budget exhausted on item b · nothing was committed</div>
+        <div class="colhead"><span class="h" style="color: #8A1C14">Stopped · 1</span></div>
+        <article class="card mcard failed">
+          <div class="member"><div class="avatar sm fail"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge fail">✕</span></div><div style="min-width: 0"><div class="name">Frontend Developer</div><div class="what"><span class="mono">b</span> · Module b · review requested repairs twice</div></div></div>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="stage ok">Implemented ×3</span><span class="stage ok">Tests ✓</span><span class="stage bad">Review ✕ 1 finding</span><span class="stage bad">Repairs 2 of 2</span></div>
+          <div class="muted" style="font-size: 12.5px">Finding: "the greeting must come from greeting.cjs" · the worktree is kept for you to look at</div>
+        </article>
+        <div class="colhead"><span class="h" style="color: #135E38">Finished · 2</span></div>
+        <article class="card mcard" style="gap: 8px">
+          <div class="member"><div class="avatar sm done"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 6h14M5 12h9M5 18h6"/><circle cx="18" cy="17" r="3"/></svg><span class="badge done">✓</span></div><div style="min-width: 0"><div class="name">Tech Lead</div><div class="what">Plan v7</div></div></div>
+          <div class="member"><div class="avatar sm done"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge done">✓</span></div><div style="min-width: 0"><div class="name">Backend Developer</div><div class="what"><span class="mono">a</span> · checkpoint 9c2e1f0 kept on its item branch</div></div></div>
+        </article>
+        <div class="colhead"><span class="h" style="color: #7A4A00">Did not get a turn · 3</span></div>
+        <article class="card mcard" style="gap: 8px">
+          <div class="member"><div class="avatar sm off"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge off">⚠</span></div><div style="min-width: 0"><div class="name">Developer</div><div class="what"><span class="mono">c</span> · aborted: depends on b</div></div></div>
+          <div class="member"><div class="avatar sm off"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8M8 10.5l1.8 1.8 3.2-3.4"/></svg><span class="badge off">–</span></div><div style="min-width: 0"><div class="name">Code Reviewer</div><div class="what">a ✓ · b ✕ ×2 · final review not reached</div></div></div>
+          <div class="member"><div class="avatar sm off"><svg width="20" height="20" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg><span class="badge off">–</span></div><div style="min-width: 0"><div class="name">DevAgents</div><div class="what">No commit</div></div></div>
+        </article>
+        <div style="display: flex; gap: 8px"><button class="btn" type="button" style="min-height: 36px; font-size: 13px">Submit a new task from this request</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- Narrow screen + pipeline in the single-item case -->
+  <!-- ============================================================ -->
+  <section style="padding: 0 32px; display: grid; grid-template-columns: 390px minmax(0, 1fr); gap: 28px; align-items: start">
+    <div>
+      <div style="font-weight: 800; font-size: 18px; margin-bottom: 10px">390 px · roster stacks, pipeline becomes a vertical list</div>
+      <div class="card" style="width: 390px; padding: 14px; display: flex; flex-direction: column; gap: 10px; background: #F2F3FA; border-radius: 22px">
+        <div style="display: flex; gap: 6px; border-bottom: 1px solid #E0E2EE; padding-bottom: 6px"><span class="tab on" style="min-height: 36px; display: inline-flex; align-items: center">Work · 3</span><span class="tab" style="min-height: 36px; display: inline-flex; align-items: center">Plan</span><span class="tab" style="min-height: 36px; display: inline-flex; align-items: center">Activity</span><span class="tab" style="min-height: 36px; display: inline-flex; align-items: center">Result</span></div>
+        <div class="muted" style="font-size: 12.5px">4 of 6 involved · 2 finished · 1 working · 1 up next</div>
+        <div class="card" style="padding: 12px; display: flex; flex-direction: column; gap: 12px">
+          <div class="member"><div class="avatar sm done"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 6h14M5 12h9M5 18h6"/><circle cx="18" cy="17" r="3"/></svg><span class="badge done">✓</span></div><div style="min-width: 0"><div class="name">Tech Lead</div><div class="what">Plan v7 · finished</div></div></div>
+          <div class="member"><div class="avatar sm done"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge done">✓</span></div><div style="min-width: 0"><div class="name">Backend Developer</div><div class="what"><span class="mono">a</span> · integrated</div></div></div>
+          <div class="member"><div class="avatar sm done"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge done">✓</span></div><div style="min-width: 0"><div class="name">Frontend Developer</div><div class="what"><span class="mono">b</span> · integrated · 1 repair</div></div></div>
+          <div class="member" style="background: #F3F6FF; margin: 0 -12px; padding: 8px 12px; border-top: 1px solid #C5D3F7; border-bottom: 1px solid #C5D3F7"><div class="avatar sm busy"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge busy">▶</span></div><div style="min-width: 0"><div class="name">Developer</div><div class="what"><span class="mono">c</span> · validating · 2 min 10 s</div></div></div>
+          <div class="member"><div class="avatar sm next"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8M8 10.5l1.8 1.8 3.2-3.4"/></svg><span class="badge next">…</span></div><div style="min-width: 0"><div class="name">Code Reviewer</div><div class="what">a ✓ b ✓ · next: c, then final</div></div></div>
+          <div class="member"><div class="avatar sm next"><svg width="20" height="20" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg><span class="badge next">…</span></div><div style="min-width: 0"><div class="name">DevAgents</div><div class="what">integration · final commit</div></div></div>
+          <div class="member" style="opacity: .6"><div class="avatar sm off"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/></svg><span class="badge off">–</span></div><div style="min-width: 0"><div class="name">QA Engineer</div><div class="what">not needed</div></div></div>
+        </div>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 14px">
+      <div><div style="font-weight: 800; font-size: 18px">Single work item · the common case</div><div class="muted" style="font-size: 13.5px">Most tickets plan one item. The pipeline has four stages and no integration step; the reviewer is working.</div></div>
+      <section class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 14px">
+        <div><div style="font-weight: 800; font-size: 16px">Your team on this task</div><div class="muted" style="font-size: 13px">3 of 4 members involved · 2 finished · 1 working · "Fix my orders" · plan-approval, approved by you 15:41:51</div></div>
+        <div class="pipe" style="grid-template-columns: minmax(0,1fr) 28px minmax(0,1fr) 28px minmax(0,1fr) 28px minmax(0,1fr)">
+          <div class="stagecol"><div class="title"><span class="h">1 · Plan</span><span class="stage ok">✓ Done</span></div><div class="member"><div class="avatar done"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 6h14M5 12h9M5 18h6"/><circle cx="18" cy="17" r="3"/></svg><span class="badge done">✓</span></div><div><div class="name">Tech Lead</div><div class="what">Plan v7 · 1 item · 1 min 4 s</div><div class="what">You approved 15:41:51</div></div></div></div>
+          <div class="link done"></div>
+          <div class="stagecol"><div class="title"><span class="h">2 · Build</span><span class="stage ok">✓ Done</span></div><div class="member"><div class="avatar done"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg><span class="badge done">✓</span></div><div><div class="name">Developer</div><div class="what"><span class="mono">fix-my-orders</span> · tests ✓ 4 commands</div><div class="what">1 check not run here: visual verification</div></div></div></div>
+          <div class="link done"></div>
+          <div class="stagecol now"><div class="title"><span class="h">3 · Review</span><span class="stage run">▶ Working</span></div><div class="member"><div class="avatar busy"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8M8 10.5l1.8 1.8 3.2-3.4"/></svg><span class="badge busy">▶</span></div><div><div class="name">Code Reviewer</div><div class="what">Reading the diff · 7 files · 48 s</div><div class="what">Started 15:52:10</div></div></div></div>
+          <div class="link"></div>
+          <div class="stagecol"><div class="title"><span class="h">4 · Commit</span><span class="stage wait">Up next</span></div><div class="member"><div class="avatar next"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg><span class="badge next">…</span></div><div><div class="name">DevAgents</div><div class="what">One local commit on <span class="mono">devagents/fix-my-orders-12b1ca2d</span></div></div></div></div>
+        </div>
+        <div class="muted" style="font-size: 12.5px">If the reviewer asks for repairs, the Build stage lights up again with "Repair 1 of 2" and the Developer avatar returns to Working; the pipeline never shows a stage as finished while a repair is open.</div>
+      </section>
+      <div class="callout" style="max-width: none"><b>What the backend already records for every card:</b> run-started / run-completed per agent and phase (planning, setup, implementation, review, integration) with timestamps, per-item state and repair cycles, validation exit codes, review approval and finding counts, item checkpoints, the final commit, and the snapshotted roster. Durations are differences of recorded timestamps. Nothing on this board needs a new backend field; "Needs you" is the existing awaiting_mode / awaiting_plan_approval state.</div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":3250}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
