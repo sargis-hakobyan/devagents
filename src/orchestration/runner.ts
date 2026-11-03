@@ -1,3 +1,4 @@
+import { priceFor } from '../domain/usage.js';
 import { validationEvidence } from './validation-evidence.js';
 import { ImplementationEvidence } from './implementation-evidence.js';
 import { describeLimitations, implementationLimitationInstructions, LimitationLedger, planningLimitationInstructions, redactReportProse, reportDataInstructions, reviewLimitationInstructions } from '../domain/limitations.js';
@@ -158,14 +159,15 @@ export class TaskRunner {
     const task = this.ensureActive(id, signal); const runId = randomUUID();
     const attemptKey = `${context?.workItemId ?? '@task'}:${phase}`;
     const attempt = this.attempts.get(attemptKey) ?? 0; this.attempts.set(attemptKey, attempt + 1);
-    this.service.store.record(id, 'run-started', { runId, phase, agentId: agent.id, engine: this.engine.id, devagentsRules: taskRules(task), ...context });
+    const provider = this.provider(task, agent);
+    this.service.store.record(id, 'run-started', { runId, phase, agentId: agent.id, engine: this.engine.id, model: agent.model, auth: provider.auth, providerKind: provider.kind, usagePrice: provider.kind === 'openai' ? priceFor(agent.model, this.service.config) : null, devagentsRules: taskRules(task), ...context });
     try {
       const cwd = context?.cwd ?? task.workspace!.path;
       const setup = phase === 'setup' ? undefined : this.setupSummaries.get(cwd);
       const handoff = ['qa', 'review'].includes(phase) ? this.implementationEvidence.get(cwd) : undefined;
       const quality = phase === 'review' ? this.qualityEvidence.get(cwd) : undefined;
       const observed = phase === 'implementation' ? new ImplementationEvidence(this.service.store.secrets) : undefined;
-      const result = await this.engine.execute({ devagentsRules: taskRules(task), runId, phase, cwd, ...(context ? { workItemId: context.workItemId } : {}), prompt: `${agent.instructions}\n\n${reportDataInstructions}\n\n${setup ? `Environment preparation notes (including any baseline failures to address):\n${setup}\n\n` : ''}${handoff ? `${handoff}\n\n` : ''}${quality ? `QA report for this diff:\n${quality}\n\n` : ''}${prompt}`, agent, provider: this.provider(task, agent), schema: outputJsonSchema(schema), signal, timeoutMs: this.service.config.executionTimeoutMs }, event => {
+      const result = await this.engine.execute({ devagentsRules: taskRules(task), runId, phase, cwd, ...(context ? { workItemId: context.workItemId } : {}), prompt: `${agent.instructions}\n\n${reportDataInstructions}\n\n${setup ? `Environment preparation notes (including any baseline failures to address):\n${setup}\n\n` : ''}${handoff ? `${handoff}\n\n` : ''}${quality ? `QA report for this diff:\n${quality}\n\n` : ''}${prompt}`, agent, provider, schema: outputJsonSchema(schema), signal, timeoutMs: this.service.config.executionTimeoutMs }, event => {
         observed?.observe(event);
         this.service.store.record(id, 'progress', { runId, ...context, ...event });
       });

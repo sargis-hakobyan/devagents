@@ -40,6 +40,8 @@ What changes:
 
 ## 4. Cost rollups and an optional project budget
 
+Implemented subset (2026-11-03): the task Usage tab and authenticated usage endpoint derive per-step/attempt tokens from evidence, include cache counts, snapshot new-run pricing and distinguish estimated API cost from API-equivalent estimates. USD and dated EUR conversion are available. Missing measurements/models are explicit. No separate usage table, project/monthly rollups or budgets have been implemented. The bullets below retain the broader planned scope.
+
 Learned from: Paperclip's cost events attached to every run and rolled up per company, agent, project and model, with monthly budgets that pause at 100 %.
 
 What changes:

@@ -2,7 +2,11 @@
 
 DevAgents uses Mastra workflows to run AI development teams on your local Git projects. Agents plan changes, write code, run tests and independently review the result. Follow progress and approve work in your browser.
 
+Each task’s **Usage** tab shows reported input, cached input and output tokens by step and attempt. Costs are labelled estimates; subscription and unknown billing runs use a separate API-equivalent estimate. Unknown models or missing usage remain unavailable. USD is the default; EUR uses an explicitly dated exchange rate. See [usage and cost estimates](docs/REFERENCE.md#usage-and-cost-estimates).
+
 Completed tasks include a read-only diff with GitHub-style green additions, red deletions, blue hunk headers and coloured file counts.
+
+Original-checkout safety scans allow two minutes per attempt and retry a timeout once; failures report the timeout explicitly.
 
 Each new task starts from the current local `main` commit in a clean, isolated Git worktree on its own `devagents/<request>-<id>` branch. Other branches and uncommitted files are not copied. Results are local commits; DevAgents does not automatically merge or push them.
 
@@ -23,6 +27,8 @@ Install and start **Docker with Compose**, clone this repository, then run from 
 Choose **Browser** (recommended), **Terminal**, or **Later**. Connect Codex with your ChatGPT account or an OpenAI API key, and add a project. A ready-made starter team is selected automatically; customize it anytime in Teams. Saved connections are reused on later starts.
 
 New starter teams contain a **Tech Lead**, **Frontend Developer**, **Backend Developer** and **Code Reviewer**. The lead defines contracts and assigns independent frontend/backend items to run in parallel (the default worker limit is two); backend also handles tooling and integration. On a task's **Work** tab, the team board shows both developers working, their assigned items and separate activity links. Genuine dependencies still wait. Existing saved teams keep their revisions; add the specialists in Teams to update an older roster. Already submitted tasks retain their original team snapshot.
+
+The **Execution workflow** on each task's Work tab shows actual agent runs in start order, including repeated reviews and developer repairs. It displays reviewer findings, links the next repair to earlier feedback for the same work item, marks parallel runs, and refreshes every three seconds. Only agent runs receive numbered cards. Consecutive automated checks collapse into one expandable pass/fail summary; the final commit is a compact confirmation. A completed repair is separate from passing validation and review. Planned responsibilities remain available in a separate expandable section.
 
 The first run builds the local image. Later starts reuse it unless the source changed. macOS uses Keychain; Linux requires `openssl`, `secret-tool` and an unlocked desktop keyring.
 

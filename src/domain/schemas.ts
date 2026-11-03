@@ -18,6 +18,10 @@ export const Provider = z.strictObject({
   if (p.baseUrl && (new URL(p.baseUrl).username || new URL(p.baseUrl).password || !['http:', 'https:'].includes(new URL(p.baseUrl).protocol))) ctx.addIssue({ code: 'custom', message: 'baseUrl must be HTTP(S) without embedded credentials' });
 });
 // Providers and engines are different registries. Models remain opaque configurable IDs.
+const UsagePrice = z.strictObject({
+  inputPerMillion: z.number().min(0).max(1_000_000), cachedInputPerMillion: z.number().min(0).max(1_000_000),
+  outputPerMillion: z.number().min(0).max(1_000_000), asOf: z.iso.date(),
+});
 export const Config = z.strictObject({
   schemaVersion: z.literal(1),
   defaultMode: Mode.optional(),
@@ -36,6 +40,10 @@ export const Config = z.strictObject({
   workspaceScanLimit: z.number().int().min(1000).max(2000000).default(200000),
   /** An explicit model ID pins team snapshots; without it `model: default` means the runtime chooses at execution. */
   defaultModel: z.string().min(1).max(200).optional(),
+  usagePricing: z.strictObject({
+    models: z.record(z.string().min(1).max(200), UsagePrice).optional(),
+    eur: z.strictObject({ usdToEur: z.number().positive().max(1000), asOf: z.iso.date() }).optional(),
+  }).optional(),
 }).superRefine((c, ctx) => {
   if (new Set(c.providers.map(p => p.id)).size !== c.providers.length) ctx.addIssue({ code: 'custom', message: 'Duplicate provider IDs' });
   if (!c.providers.some(p => p.id === c.defaultProvider)) ctx.addIssue({ code: 'custom', message: 'defaultProvider must exist' });

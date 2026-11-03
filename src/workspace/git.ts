@@ -10,15 +10,21 @@ import { isOwnedBranch, itemBranch, ownedRefPatterns, taskBranch } from './branc
 
 const exec = promisify(execFile);
 type Workspace = NonNullable<Task['workspace']>;
-export async function git(cwd: string, args: string[], trim = true, maxBuffer = 2 * 1024 * 1024): Promise<string> {
+type GitOptions = { timeoutMs?: number; signal?: AbortSignal; optionalLocks?: boolean };
+export async function git(cwd: string, args: string[], trim = true, maxBuffer = 2 * 1024 * 1024, options: GitOptions = {}): Promise<string> {
+  const timeoutMs = options.timeoutMs ?? 30000;
+  if (options.signal?.aborted) throw new AppError('cancelled', 'Git operation cancelled');
   let stdout: string;
   try {
     ({ stdout } = await exec('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'core.attributesFile=/dev/null', '-c', 'submodule.recurse=false', '-c', `safe.directory=${cwd}`, '-c', 'protocol.file.allow=never', ...args], {
-      cwd, timeout: 30000, maxBuffer,
-      env: { PATH: process.env.PATH, HOME: homedir(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_ATTR_NOSYSTEM: '1', GIT_LITERAL_PATHSPECS: '1', GIT_TERMINAL_PROMPT: '0' },
+      cwd, timeout: timeoutMs, maxBuffer, ...(options.signal ? { signal: options.signal } : {}),
+      env: { PATH: process.env.PATH, HOME: homedir(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_ATTR_NOSYSTEM: '1', GIT_LITERAL_PATHSPECS: '1', GIT_TERMINAL_PROMPT: '0', ...(options.optionalLocks === false ? { GIT_OPTIONAL_LOCKS: '0' } : {}) },
     }));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') throw new AppError('git_output_limit', `git ${args.find(a => !a.startsWith('-') && a !== 'core.hooksPath=/dev/null') ?? ''} output exceeded ${maxBuffer} bytes; the change or repository listing is too large for this version`);
+    if (options.signal?.aborted) throw new AppError('cancelled', 'Git operation cancelled');
+    const failure = error as { killed?: boolean; signal?: string };
+    if (failure.killed && failure.signal === 'SIGTERM') throw new AppError('git_timeout', `Git ${args[0] ?? 'command'} timed out after ${timeoutMs / 1000} seconds in ${cwd}. Check repository or filesystem responsiveness.`);
     throw error;
   }
   return trim ? stdout.trim() : stdout;

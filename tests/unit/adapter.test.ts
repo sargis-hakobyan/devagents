@@ -132,3 +132,27 @@ process.stdin.resume(); process.stdin.on('end', () => {
     assert.deepEqual(result.output, { summary: 'finished' }); assert.equal(commands, 700);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('saved profile billing distinguishes API keys and subscriptions without persisting login output', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'adapter-billing-'));
+  const binary = join(root, 'codex'); const cwd = join(root, 'project'); await mkdir(cwd);
+  const agent = (await loadRegistry([builtinDirectory], Config.parse({ schemaVersion: 1 })))[0]!;
+  const adapter = new CodexAdapter(join(root, 'data'), binary);
+  try {
+    for (const [status, billing] of [['Logged in using an API key - fixture-private-key', 'api'], ['Logged in using ChatGPT', 'subscription'], ['Signed in (unrecognized format)', 'unknown']]) {
+      await writeFile(binary, `#!${process.execPath}
+if(process.argv.includes('--version')){console.log('codex-cli 0.160.1');process.exit(0);}
+if(process.argv.includes('login')){console.error(${JSON.stringify(status)});process.exit(0);}
+process.stdin.resume();process.stdin.on('end',()=>{
+ console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:10,cached_input_tokens:4,output_tokens:2}}));
+ console.log(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'{"ok":true}'}}));
+});
+`, { mode: 0o700 });
+      const events: unknown[] = [];
+      await adapter.execute({ runId: 'billing', phase: 'review', cwd, prompt: 'Fixture', agent, provider: { id: 'openai', kind: 'openai', auth: 'login' }, schema: {}, signal: new AbortController().signal, timeoutMs: 5000 }, event => events.push(event));
+      assert.deepEqual(events[0], { kind: 'started', data: { billing } });
+      assert.doesNotMatch(JSON.stringify(events), /fixture-private-key|Logged in|Signed in/);
+      assert.ok(events.some(e => (e as { kind: string }).kind === 'usage'));
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

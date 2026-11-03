@@ -299,3 +299,9 @@ Completed tasks now compact regenerable dependencies, private worktree tool cach
 New task worktrees resolve the current local main commit and create a fresh task branch, regardless of the registered checkout branch or local changes. Missing main fails explicitly; existing branches are never reset or reused. Original-checkout divergence checks and review evidence use a separately recorded HEAD, with backward compatibility for existing tasks. Worker dependency snapshots are preserved.
 
 `npm run check` passed: 251 tests passed, 3 skipped, backend/UI typechecks and production build succeeded. Regression coverage includes dirty feature checkouts, exclusion of previous task results, a main update after registration, branch collisions, missing main without HEAD/origin fallback, and both single-item and DAG completion. No authenticated model calls were made. Deployed successfully after the launcher lock was released. The service is healthy; a disposable fixture inside the running container verified two distinct clean branches from local main while the source checkout stayed on a different dirty branch. All task counts were preserved, automatic cleanup remains enabled, and no model calls were made.
+
+## Task usage visibility — 2026-11-03
+
+- [x] Reported tokens per step/work item and attempt, with cached-input subsets and missing-usage counts.
+- [x] Separate estimated API and API-equivalent costs, recorded pricing snapshots, unknown-model handling and explicit EUR conversion.
+- [ ] Project/monthly usage rollups and budget enforcement (separate planned scope).

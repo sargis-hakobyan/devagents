@@ -114,8 +114,8 @@ export function MemberList({ board, taskId, now, rulesOn, terminal, onActivity }
     {m.items.length > 0 && m.lines.length > m.items.length && <div class="what wrap-anywhere">{m.lines.slice(m.items.length === 1 ? 1 : 2).join(' · ')}</div>}
     {m.durationMs !== undefined && m.durationMs > 0 && m.items.length > 0 && <div class="muted" style={{ fontSize: '12.5px' }}>Recorded run time: {duration(m.durationMs)}{m.repairing ? ' · including repairs' : ''}</div>}
   </article>;
-  return <section class="memberlist" aria-label="Execution workflow">
-    <header class="workflow-heading"><h2>Execution workflow</h2><p>Follow the numbered stages from planning to commit.</p></header>
+  return <section class="memberlist" aria-label="Planned responsibilities">
+    <header class="workflow-heading"><h2>Planned responsibilities</h2><p>Assignments by stage. The execution timeline above shows the order work actually happened.</p></header>
     <ol class="workflow-steps">
       {board.stages.map(s => <li key={s.key} class={`workflow-step ${s.status}`} data-workflow-stage={s.key}>
         <span class="workflow-number" aria-hidden="true">{s.number}</span>

@@ -36,6 +36,15 @@ test('autonomous task starts from main and completes without touching a dirty fe
     assert.equal(await git(done.workspace!.path, ['status', '--porcelain']), '');
     assert.ok(f.store.evidence(task.id).some(e => e.kind === 'validation' && (e.data as { exitCode: number }).exitCode === 0));
     assert.equal(f.store.evidence(task.id).filter(e => e.kind === 'commit-created').length, 1);
+    const starts = f.store.usageEvidence(task.id).filter(e => e.kind === 'run-started');
+    assert.equal(starts.length, engine.calls.length);
+    for (const [index, entry] of starts.entries()) {
+      const facts = entry.data as Record<string, unknown>;
+      assert.equal(facts.model, engine.calls[index]!.agent.model);
+      assert.equal(facts.auth, engine.calls[index]!.provider.auth);
+      assert.equal(facts.providerKind, 'openai');
+      assert.ok(Object.hasOwn(facts, 'usagePrice'));
+    }
   } finally { await runner.stop(); await f.cleanup(); }
 });
 test('mode and plan approval stop all dependent execution until explicitly resolved', async () => {

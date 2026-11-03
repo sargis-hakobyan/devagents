@@ -13,6 +13,7 @@ import { ImplementationOutput, ReviewOutput } from './outputs.js';
 import type { TaskWorkflows } from './workflows.js';
 import { readyWave, AgentSlots } from './dag-scheduler.js';
 import { WorkspaceManager, git } from '../workspace/git.js';
+import { originalCheckoutStatus } from '../workspace/status.js';
 import { commitSubject } from '../workspace/branches.js';
 import { changes, commitOwned, commitChanges } from '../workspace/changes.js';
 import { integrationSnapshot, integrateItem, assertIntegrationConfig } from '../workspace/integration.js';
@@ -43,9 +44,13 @@ export async function runDag(h: Hooks): Promise<void> {
   const { service, task, agents, signal } = h;
   const rules = taskRules(task);
   const plan = task.plan!; const workspace = task.workspace!; const project = service.store.project(task.projectId);
-  const originalStatus = await git(project.path, ['status', '--porcelain=v1', '--untracked-files=all']);
   if (!plan.integration) throw new AppError('invalid_plan', 'Multi-item execution requires integration instructions');
   const record = (kind: string, data: unknown) => service.store.record(task.id, kind, data);
+  const sourceStatus = (scanSignal: AbortSignal, workItemId?: string) => originalCheckoutStatus(project.path, {
+    signal: scanSignal,
+    onRetry: reason => record('repository-scan', { state: 'retrying', attempt: 2, reason, ...(workItemId ? { workItemId } : {}) }),
+  });
+  const originalStatus = await sourceStatus(signal);
   const state = (itemId: string, state: string, data: Record<string, unknown> = {}) => record('work-item', { itemId, state, ...data });
   const developers = new Map(plan.items.map(item => {
     const agent = item.assignedAgent ? selectImplementer(agents, item) : undefined;
@@ -101,12 +106,12 @@ export async function runDag(h: Hooks): Promise<void> {
   const review = async (current: Awaited<ReturnType<typeof changes>>, evidence: ValidationResult[], cwd: string, itemId: string, criteria: unknown, workerSignal: AbortSignal) => {
     for (const file of current.files) await new PolicyEngine().file(reviewer, cwd, file, 'read');
     const combined = itemId === '@integration';
-    const sourceStatus = await git(project.path, ['status', '--porcelain=v1', '--untracked-files=all']);
+    const currentSourceStatus = await sourceStatus(workerSignal, itemId);
     const workspaceEvidence = {
       isolatedWorktree: cwd !== project.path,
       originalHeadUnchanged: await git(project.path, ['rev-parse', 'HEAD']) === (workspace.originalHead ?? workspace.baseSha),
-      originalGitStatusUnchanged: sourceStatus === originalStatus,
-      originalGitStatusCleanBeforeAndNow: originalStatus === '' && sourceStatus === '',
+      originalGitStatusUnchanged: currentSourceStatus === originalStatus,
+      originalGitStatusCleanBeforeAndNow: originalStatus === '' && currentSourceStatus === '',
     };
     record('review-context', { workItemId: itemId, stage: combined ? 'combined' : 'item', workspaceEvidence });
     const stage = combined

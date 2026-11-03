@@ -325,3 +325,23 @@ After a successful `./devagents` rebuild, remove only the image just superseded 
 ## New task branches start from local main — 2026-11-03
 
 The owner requires a clean main-based branch for every task. Resolve local `refs/heads/main` when creating each task worktree instead of using the registered checkout HEAD. Fail clearly if main is absent; do not guess another branch or fetch implicitly. Keep `git worktree add -b` so existing branches cannot be silently reused or reset. Preserve dependency checkpoints for child workers. Record the original checkout HEAD separately from the task base so commit guards and reviewer evidence remain correct when the user is on another branch. Existing task records keep their original base and legacy divergence behavior.
+
+## Reported usage and estimated costs — 2026-11-03
+
+The owner approved token usage per step and attempt with clearly labelled cost estimates. Derive compact per-task totals from append-only evidence rather than introduce a second billing ledger or count both usage-progress and run-completed events. Keep input, its cached subset and output separate. Include reported failed-run usage and count missing measurements explicitly.
+
+Snapshot the requested model and reference/custom rates for new runs. Do not guess the Codex runtime default or infer historical authentication from current settings. Resolve saved-profile billing category from the existing login-status check and persist only the category. Separate API estimates from subscription/unknown API-equivalent estimates; do not call either a bill. USD is the basis and EUR requires a dated, explicit conversion rate. Rates use standard short-context assumptions with exclusions disclosed. Budget enforcement and project/monthly rollups remain planned.
+
+## Bounded source-checkout scans — 2026-11-03
+
+A task failed immediately after planning while scanning the original checkout across a macOS Docker bind mount. Its failure interval matched the generic 30-second Git timeout; the old error omitted timeout metadata. Live read-only probes then completed in about 4.4 seconds in Docker and 0.07 seconds on the host, supporting transient filesystem latency without proving its exact cause.
+
+Allow 120 seconds for the DAG's original-checkout status scans, retry once on timeout, disable optional index writes and propagate cancellation. Keep full untracked coverage and all checkout invariants. Persist a visible retry event; after two timeouts fail with the operation, location and timeout budget. Do not retry mutating Git commands or reinterpret real exit codes used by callers. Preserve the 30-second default elsewhere, with explicit timeout diagnostics. Do not replay the failed task automatically.
+
+## Actual execution sequence and repair handoffs — 2026-11-03
+
+Replace the Work tab's fixed-stage Execution workflow with separate chronological rows for each real agent run, repeated review and repair. Keep the team overview and planned responsibilities distinct. Derive order, actors, overlapping runs and outcomes from stored evidence, including historical tasks. Link implementations to unresolved feedback in their own work-item scope, never across unrelated parallel items. Report a finished repair separately from validation and reviewer approval.
+
+Use a compact authenticated execution projection over all run boundaries so Activity pagination and large outputs cannot hide later attempts. Keep raw tool output out of the timeline response. Reuse the existing three-second poller and reconnect behavior; no new event transport, orchestration routing, or automatic task replay is needed.
+
+Execution detail refinement: number only real agent runs. Group adjacent validation results into a compact disclosure and show commit as a confirmation, so internal command execution does not masquerade as repeated DevAgents handoffs. Preserve failed-check counts, chronology, raw evidence and repair links.

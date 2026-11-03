@@ -286,6 +286,40 @@ export class Store {
     this.task(id);
     return this.db.prepare('SELECT sequence,kind,data FROM evidence WHERE task_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(id, after, limit).map(r => ({ sequence: Number(r.sequence), kind: String(r.kind), ...JSON.parse(String(r.data)) }));
   }
+  /** Read every execution boundary without loading paginated tool logs or large agent outputs. */
+  executionEvidence(id: string): import('../domain/execution.js').ExecutionEvent[] {
+    this.task(id);
+    return this.db.prepare(`SELECT sequence, kind, json_extract(data, '$.at') AS at,
+      json_object('runId', json_extract(data, '$.data.runId'), 'phase', json_extract(data, '$.data.phase'),
+        'agentId', json_extract(data, '$.data.agentId'), 'workItemId', json_extract(data, '$.data.workItemId'),
+        'summary', substr(json_extract(data, '$.data.output.summary'), 1, 4000),
+        'approved', json_extract(data, '$.data.output.approved'),
+        'findings', json_extract(data, '$.data.output.findings'),
+        'error', substr(json_extract(data, '$.data.error'), 1, 4000),
+        'feedback', substr(json_extract(data, '$.data.feedback'), 1, 4000),
+        'state', json_extract(data, '$.data.state'), 'executable', json_extract(data, '$.data.executable'),
+        'args', json_extract(data, '$.data.args'), 'exitCode', json_extract(data, '$.data.exitCode'),
+        'truncated', json_extract(data, '$.data.truncated'),
+        'commit', json_extract(data, '$.data.commit')) AS facts
+      FROM evidence WHERE task_id=? AND kind IN ('run-started','run-completed','run-failed','validation','qa-result','commit-created')
+      ORDER BY sequence`).all(id).map(r => ({ sequence: Number(r.sequence), kind: String(r.kind), at: String(r.at), data: JSON.parse(String(r.facts)) }));
+  }
+  /** Select only usage facts; large model output and command logs never enter the rollup. */
+  usageEvidence(id: string): import('../domain/usage-types.js').UsageEvent[] {
+    this.task(id);
+    return this.db.prepare(`SELECT sequence, kind, json_extract(data, '$.at') AS at,
+      json_object('runId', json_extract(data, '$.data.runId'), 'phase', json_extract(data, '$.data.phase'),
+        'agentId', json_extract(data, '$.data.agentId'), 'workItemId', json_extract(data, '$.data.workItemId'),
+        'model', json_extract(data, '$.data.model'), 'auth', json_extract(data, '$.data.auth'),
+        'providerKind', json_extract(data, '$.data.providerKind'), 'kind', json_extract(data, '$.data.kind'),
+        'usage', json_extract(data, '$.data.usage'), 'data', json_extract(data, '$.data.data')) AS facts,
+      json_type(data, '$.data.usagePrice') AS price_type, json_extract(data, '$.data.usagePrice') AS price
+      FROM evidence WHERE task_id=? AND (kind IN ('run-started','run-completed','run-failed')
+        OR (kind='progress' AND json_extract(data, '$.data.kind') IN ('usage','started'))) ORDER BY sequence`).all(id).map(r => ({
+          sequence: Number(r.sequence), kind: String(r.kind), at: String(r.at),
+          data: { ...JSON.parse(String(r.facts)), ...(r.price_type ? { usagePrice: r.price ? JSON.parse(String(r.price)) : null } : {}) },
+        }));
+  }
   evidenceEntry(id: string, sequence: number): { sequence: number; kind: string; at: string; data: unknown } {
     this.task(id);
     const row = this.db.prepare('SELECT sequence,kind,data FROM evidence WHERE task_id=? AND sequence=?').get(id, sequence);

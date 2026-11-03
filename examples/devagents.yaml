@@ -24,3 +24,16 @@ providers:
     kind: ollama
     auth: none
     baseUrl: http://127.0.0.1:11434
+
+# Optional cost estimates: USD per million tokens, for an exact pinned model ID.
+# Illustrative values only; replace with your provider's published rates and date.
+# usagePricing:
+#   models:
+#     your-pinned-model:
+#       inputPerMillion: 2
+#       cachedInputPerMillion: 0.5
+#       outputPerMillion: 8
+#       asOf: '2026-11-03'
+#   eur:
+#     usdToEur: 0.9 # illustrative conversion, not a live exchange rate
+#     asOf: '2026-11-03'

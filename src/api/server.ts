@@ -1,3 +1,5 @@
+import { taskExecution } from '../domain/execution.js';
+import { taskUsage } from '../domain/usage.js';
 import type { SetupAuth } from '../setup/auth.js';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -200,9 +202,11 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
         const input = await body(req); assertExecutionReady();
         return send(res, 201, service.submit(input, key));
       }
-      const match = /^\/tasks\/([a-f0-9-]{36})(?:\/(events|evidence|items|diff|run|mode|plan|approve|cancel|cleanup|compaction-preview|compact)(?:\/(\d{1,12}))?)?$/.exec(path);
+      const match = /^\/tasks\/([a-f0-9-]{36})(?:\/(events|evidence|items|diff|usage|execution|run|mode|plan|approve|cancel|cleanup|compaction-preview|compact)(?:\/(\d{1,12}))?)?$/.exec(path);
       if (match) {
         const id = match[1]!; const action = match[2]; const sub = match[3];
+        if (req.method === 'GET' && action === 'execution' && !sub) return send(res, 200, taskExecution(service.store.task(id), service.store.executionEvidence(id)));
+        if (req.method === 'GET' && action === 'usage' && !sub) return send(res, 200, taskUsage(service.store.task(id), service.store.usageEvidence(id), service.config));
         if (req.method === 'GET' && action === 'diff' && !sub) {
           if (url.search) throw new AppError('invalid_diff_request', 'Diff requests accept a task ID only; no paths, refs or options');
           return send(res, 200, await service.diff(id));

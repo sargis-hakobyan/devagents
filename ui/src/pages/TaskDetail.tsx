@@ -1,3 +1,5 @@
+import { ExecutionWorkflow } from '../components/ExecutionWorkflow';
+import { TaskUsage } from '../components/TaskUsage';
 import { TaskCompaction } from '../components/TaskCompaction';
 import { TaskDiff } from '../components/TaskDiff';
 import { useTaskActions } from '../components/TaskActions';
@@ -10,7 +12,7 @@ import { teamBoard, type TeamBoard } from '../team-board';
 import { limitationCount, command, elapsed, formatTime, taskState } from '../format';
 import { forget, useNow, usePoll } from '../state';
 
-type Tab = 'work' | 'plan' | 'activity' | 'result';
+type Tab = 'work' | 'plan' | 'activity' | 'usage' | 'result';
 type Detail = { task: Task; items: ItemProgress[] };
 
 /** Events and evidence are appended by sequence cursor, so polling and reconnects never duplicate or drop rows. */
@@ -66,11 +68,12 @@ export function TaskDetailPage({ id }: { id: string }) {
       </div>
     </Card>
     <div class="tabs" role="tablist" aria-label="Task sections">
-      {([['work', `Work · ${items.length}`], ['plan', 'Plan'], ['activity', `Activity · ${events.rows.length + evidence.rows.length}`], ['result', 'Result']] as [Tab, string][]).map(([t, label]) => <button key={t} type="button" role="tab" class="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{label}</button>)}
+      {([['work', `Work · ${items.length}`], ['plan', 'Plan'], ['activity', `Activity · ${events.rows.length + evidence.rows.length}`], ['usage', 'Usage'], ['result', 'Result']] as [Tab, string][]).map(([t, label]) => <button key={t} type="button" role="tab" class="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{label}</button>)}
     </div>
     {tab === 'work' && board && <WorkTab task={task} board={board} now={now} onActivity={item => { setActivityItem(item); setTab('activity'); }} />}
     {tab === 'plan' && <><PlanTab task={task} />{task.state === 'awaiting_plan_approval' && <div class="decision-bar">{renderActions()}</div>}</>}
     {tab === 'activity' && <ActivityTab task={task} events={events.rows} evidence={evidence.rows} filter={activityItem} onClear={() => setActivityItem(undefined)} />}
+    {tab === 'usage' && <TaskUsage key={id} id={id} />}
     {tab === 'result' && <ResultTab task={task} evidence={evidence.rows} />}
   </>;
 }
@@ -93,11 +96,12 @@ function summarize(task: Task, items: ItemProgress[]): { title: string; detail: 
 }
 const itemVerb = (s: string) => ({ running: 'implementing', validating: 'validating', reviewing: 'reviewing', repairing: 'repairing', creating: 'preparing a worktree for', checkpointing: 'checkpointing', integrating: 'integrating' } as Record<string, string>)[s] ?? s;
 
-/** Pipeline overview followed by stage-ordered execution details, derived from recorded runs. */
-function WorkTab({ task, board, now, onActivity }: { task: Task; board: TeamBoard; now: number; onActivity: (item: string) => void }) {
+/** Team overview, chronological execution, and separate planned responsibilities. */
+function WorkTab({ task, board, now, onActivity }: { task: Task; board: TeamBoard; now: number; onActivity: (item?: string) => void }) {
   return <div class="stack">
     <Pipeline board={board} taskId={task.id} now={now} />
-    {task.plan ? <MemberList board={board} taskId={task.id} now={now} rulesOn={task.devagentsRules ?? true} terminal={['completed', 'failed', 'cancelled'].includes(task.state)} onActivity={onActivity} /> : <Card><div class="empty"><b>No work items yet</b><span>Members get their work once the Tech Lead's plan is stored{task.state === 'awaiting_mode' ? ', after a mode is chosen' : ''}.</span></div></Card>}
+    <ExecutionWorkflow key={task.id} taskId={task.id} now={now} onActivity={onActivity} />
+    {task.plan ? <details class="planned-responsibilities"><summary>Planned responsibilities and work items</summary><MemberList board={board} taskId={task.id} now={now} rulesOn={task.devagentsRules ?? true} terminal={['completed', 'failed', 'cancelled'].includes(task.state)} onActivity={onActivity} /></details> : <Card><div class="empty"><b>No work items yet</b><span>Members get their work once the Tech Lead's plan is stored{task.state === 'awaiting_mode' ? ', after a mode is chosen' : ''}.</span></div></Card>}
   </div>;
 }
 function PlanTab({ task }: { task: Task }) {
@@ -190,6 +194,7 @@ function evidenceTitle(e: Evidence): string {
     case 'run-started': return `${d.phase} run started${item}`;
     case 'run-completed': return `${d.phase} run completed${item}${d.phase === 'review' ? ` · ${reviewPassed(d.output as ReviewFacts | undefined) ? 'approved' : 'changes requested'}` : ''}`;
     case 'run-failed': return `${d.phase} run failed${item}`;
+    case 'repository-scan': return `${d.reason}${item}`;
     case 'qa-assignment': return d.state === 'assigned' ? `QA assigned to ${d.agentId}` : `QA skipped · ${d.reason}`;
     case 'qa-result': return `QA ${d.state} · ${d.summary}`;
     case 'validation': return `validation ${typeof d.exitCode !== 'number' ? 'result unavailable' : d.truncated ? 'failed (output truncated)' : d.exitCode === 0 ? 'passed' : `failed (exit ${d.exitCode})`}${d.truncated ? ' · output truncated' : ''}${item} · ${[d.executable, ...((d.args as string[] | undefined) ?? [])].join(' ')}`;

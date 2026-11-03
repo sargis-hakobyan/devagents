@@ -260,3 +260,44 @@ pre.diff-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:650px;overf
 .avatar.blocked{background:var(--warn-icon);box-shadow:0 0 0 2px #fff,0 0 0 4px var(--warn-icon)}
 .abadge.blocked{background:var(--accent);color:var(--ink)}
 .workflow-step.blocked>.workflow-number{background:var(--warn-bg);border-color:var(--warn-border);color:var(--warn-text)}
+
+/* Usage keeps unknown measurements explicit and repair attempts inspectable. */
+.usage-note{margin:0}.usage-totals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.usage-totals>div{display:flex;flex-direction:column;gap:6px;padding:14px;border:1px solid var(--border);border-radius:8px;overflow-wrap:anywhere}
+.usage-totals strong{font-size:22px}.usage-totals small,.usage-table small{display:block;color:var(--muted);font-size:12px}
+.usage-step{border:1px solid var(--border);border-radius:8px;min-width:0}.usage-step summary{padding:12px;cursor:pointer;overflow-wrap:anywhere}
+.usage-table-scroll{overflow:auto}.usage-table{width:100%;min-width:720px;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.usage-table th,.usage-table td{padding:10px;text-align:left;border-top:1px solid var(--border);vertical-align:top;overflow-wrap:anywhere;max-width:240px}
+.usage-table th{background:var(--bg);font-size:12px}.usage-table td{font-size:13px}
+@media(max-width:800px){.usage-totals{grid-template-columns:minmax(0,1fr)}}
+
+.form-stack .usage-conversion{padding:12px}.usage-conversion .field{flex:1;min-width:140px;max-width:240px}.usage-conversion input{max-width:100%;min-width:0}
+
+.usage-step-cost{display:block;font-weight:400;color:var(--muted);font-size:12px;margin-top:4px}
+
+/* Actual execution remains chronological; planned stage assignments are a separate disclosure. */
+.execution-title{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.execution-identity{flex:1;min-width:160px}.execution-identity h3{margin:0;font-size:15px}
+.execution-card{min-width:0;display:flex;flex-direction:column;gap:10px}
+.execution-summary,.execution-handoff p{margin:0;white-space:pre-wrap;font-size:13px}
+.execution-handoff{display:flex;flex-direction:column;gap:8px}
+.execution-findings{font-size:13px}.execution-findings ul{margin:6px 0 0;padding-left:20px}
+.execution-findings li+li{margin-top:6px}
+.planned-responsibilities>summary{cursor:pointer;font-weight:600;padding:12px 0}
+.planned-responsibilities>.memberlist{margin-top:12px}
+.execution [id]{scroll-margin-top:80px}
+
+.execution-report{font-size:13px}.execution-report summary{cursor:pointer;padding:8px 0;font-weight:600}
+
+/* System checks are supporting evidence, not additional team members. */
+.execution-automation{padding-bottom:14px}
+.execution-check-marker{display:grid;place-items:center;width:32px;height:28px;color:var(--muted);font-size:14px}
+.execution-automation.fail .execution-check-marker{color:var(--bad-text)}
+.execution-checks{min-width:0;border:1px solid var(--border);border-radius:8px;background:var(--bg);font-size:13px}
+.execution-checks summary{cursor:pointer;padding:10px 12px;overflow-wrap:anywhere}
+.execution-checks summary .stage{margin-left:10px}
+.execution-checks ul{list-style:none;margin:0;padding:0 12px 10px}
+.execution-checks li{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;padding:7px 0;border-top:1px solid var(--border)}
+.execution-checks li>.wrap-anywhere{flex:1;min-width:140px}
+.execution-commit{display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;font-size:13px;padding:8px 0}
+@media(max-width:600px){.execution-check-marker{width:26px}.execution-checks summary .stage{margin-left:6px}}

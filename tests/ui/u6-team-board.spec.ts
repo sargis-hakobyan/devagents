@@ -20,8 +20,9 @@ test('a completed multi-item task shows six finished stages including QA and the
   await expect(pipeline.locator('[data-stage="build"] .member')).toHaveCount(3);
   await expect(pipeline.locator('[data-member="devagents"]')).toContainText('Committed ');
   await expect(pipeline.locator('[data-stage="qa"]')).toContainText('✓ Passed');
-  const list = page.getByRole('region', { name: 'Execution workflow' });
-  await expect(list.getByRole('heading', { level: 2 })).toHaveText('Execution workflow');
+  await page.getByText('Planned responsibilities and work items', { exact: true }).click();
+  const list = page.getByRole('region', { name: 'Planned responsibilities', exact: true });
+  await expect(list.getByRole('heading', { level: 2 })).toHaveText('Planned responsibilities');
   await expect(list.locator('.workflow-step-heading h3')).toHaveText(['1. Planning', '2. Implementation', '3. Integration', '4. Quality assurance', '5. Review', '6. Commit']);
   await expect(list.locator('article[data-status="done"]')).toHaveCount(8); // QA and integration each have their own stage
   await expect(list.locator('article[data-member="backend-developer"]')).toContainText('Tests ✓');
@@ -35,6 +36,7 @@ test('a single-item task has five stages including QA and no integration step; t
   await page.goto(`${base}/ui/tasks/${task.id}`);
   await expect(stages(page)).toHaveText(['1 · Plan', '2 · Build', '3 · QA', '4 · Review', '5 · Commit']);
   await expect(page.locator('[data-stage="review"] .member')).toContainText('Code Reviewer');
+  await page.getByText('Planned responsibilities and work items', { exact: true }).click();
   const detail = page.locator('[data-workflow-stage="build"]');
   await expect(detail.locator('.work-item-title')).toHaveText('Fix greeting');
   await expect(detail).toContainText('Prerequisites: approved plan');
@@ -58,6 +60,7 @@ test('while a plan awaits approval, "You" is a member with the decision and ever
   await expect(plan).toContainText('● Needs you');
   await expect(plan.locator('[data-member="you"]')).toContainText(`Approve plan version `);
   await expect(page.locator('[data-stage="build"] .member')).toContainText('Starts after your decision');
+  await page.getByText('Planned responsibilities and work items', { exact: true }).click();
   await expect(page.locator('[data-workflow-stage="plan"] [data-member="you"]')).toBeVisible();
   await expect(page.locator('[data-workflow-stage]').first()).toHaveAttribute('data-workflow-stage', 'plan');
 });

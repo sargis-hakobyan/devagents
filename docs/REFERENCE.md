@@ -115,6 +115,10 @@ CLI: `teams list [--archived|--all]`, `teams templates`, `teams show <id>`, `tea
 
 Overview queries active work and attention items independently of recent history. Attention previews show up to 50 tasks and link to the full filtered list. Task state filters apply before pagination; counts cover the selected project across all pages. Request-text search is explicitly limited to the displayed page. Plan approval labels come from persisted approval events, so rejecting a plan never presents it as approved. Large evidence previews retain validation exit/truncation status and review findings counts separately from their text.
 
+The Work tab's **Execution workflow** is chronological, rather than a fixed sequence of roles. Every recorded agent attempt gets a row with its actual agent, scope, start/end time, outcome and report. Review findings remain visible; a subsequent implementation in the same scope links back to unresolved review/QA or validation feedback. These links describe preceding evidence, not a claim that a fix passed. Parallel runs are marked by overlapping run boundaries. Only agent runs receive numbered cards. Consecutive validation results share one expandable summary with pass/fail counts, retaining each command and scope inside it. A later agent run separates validation groups, and repair links target the relevant group. The final local commit is a compact confirmation. These automated entries stay in their recorded order; historical validation records have no start time, so no duration is invented. Interrupted runs remain interrupted, with no fabricated completion. Planned stage assignments are separately expandable.
+
+`GET /tasks/:id/execution` is an authenticated, read-only projection of all execution boundaries, independent of Activity pagination. It selects summaries/findings and command metadata without loading tool logs, prompts, or full agent output. The browser refreshes it every three seconds and retains the last successful timeline with a retry message if an update fails. Historical tasks use existing evidence; no model runs are replayed.
+
 Progress updates use bounded polling with exponential backoff. When the service is unreachable the UI shows a disconnected banner with the last update time and keeps the last known state; nothing is invented, and on reconnect history is reconciled by sequence cursor so nothing is duplicated or lost.
 
 Security contract: the UI and API share one origin; every response carries a strict Content Security Policy (`script-src 'self'`, no remote fonts, images or connections), `X-Frame-Options: DENY` and `nosniff`. Cookie sessions are accepted only with a loopback `Host` on the listening port and a same-origin `Origin`/`Sec-Fetch-Site`, so another localhost port or a DNS-rebinding page is refused; state-changing requests additionally need the session's CSRF token. Model text, logs, plans and evidence are rendered as text only: no Markdown, no HTML, no generated links or images. The CLI bearer path is unchanged and still refuses any request carrying an `Origin` header.
@@ -122,6 +126,34 @@ Security contract: the UI and API share one origin; every response carries a str
 Development: `npm run dev:ui` starts a Vite dev server on `127.0.0.1:5173` that proxies API calls to a running service; sign in once through the service's link so the cookie exists. `npm run test:ui` runs the Playwright browser tests against `scripts/ui-fixture.mjs`, a clearly labelled development fixture with a deterministic fake engine on a temporary data directory (run `npx playwright install chromium` once). Browser tests generate representative screenshots in ignored `test-results/ui-screenshots/`; set `DEVAGENTS_UI_SCREENSHOT_DIR` to choose another output directory.
 
 Known limits: Claude and non-OpenAI providers can be saved only as drafts until M4; the design's Plus Jakarta Sans is not bundled, so the UI uses the system font stack; evidence text previews are capped at 16 KB with a 1 MiB single-entry fetch, accompanied by separately bounded status metadata; updates use polling rather than streaming. Work-item cards show dependencies; there is no graphical dependency editor.
+
+### Usage and cost estimates
+
+Open a task’s **Usage** tab, or read authenticated `GET /tasks/:id/usage`. It groups planning, setup, development, QA and review by work item, with each attempt expandable. It derives all totals directly from retained evidence, including historical tasks and reported usage from failed calls. The endpoint selects only compact run/usage facts, excluding model output and command logs; it does not rely on the browser’s paginated Activity feed. Progress/completion copies of a run’s usage are counted once. Local validation commands do not themselves consume model tokens.
+
+Input includes cached input: total tokens are input + output, not input + cached + output. Missing or invalid usage is unavailable, not zero; missing cached counts prevent pricing. Totals disclose unreported/unpriced runs and remain partial while calls are running. A stopped task with an unfinished call shows that call as interrupted.
+
+**Estimated API cost** and **API-equivalent estimate** are separate totals, never an invoice or actual subscription charge. Saved Codex profiles can contain API keys or ChatGPT sign-ins: new calls record only the billing category parsed from `codex login status`, never its credential-bearing text. Unrecognized and historical saved-login categories remain unknown, grouped with equivalent estimates. Explicit API-key providers are identified as API billing.
+
+New calls snapshot their requested model and USD rates in `run-started` evidence. Built-in reference prices cover `gpt-5.3-codex`, `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra` and `gpt-6-luna`, checked against [OpenAI API pricing](https://developers.openai.com/api/docs/pricing) on 2026-11-03. The estimate applies standard-speed, short-context input/cached-input/output rates. It excludes cache-write, long-context and speed premiums, tool fees, taxes and discounts. Historical calls can use labelled reference rates only if their saved model and official OpenAI provider are known; current provider defaults never fill gaps in history. `model: default` remains unknown and unpriced: pin a model in the team for future estimates. Unlisted models show tokens only until configured.
+
+Optional `usagePricing` in the YAML selected by `DEVAGENTS_CONFIG` overrides rates by exact model ID, in USD per million tokens. Example (illustrative custom rates, not a price recommendation):
+
+```yaml
+usagePricing:
+  models:
+    your-pinned-model:
+      inputPerMillion: 2
+      cachedInputPerMillion: 0.5
+      outputPerMillion: 8
+      asOf: '2026-11-03'
+  # Optional reference conversion; replace with your chosen rate and its date.
+  eur:
+    usdToEur: 0.9
+    asOf: '2026-11-03'
+```
+
+Recorded new-run prices do not change when configuration changes. A reference estimate for an older run can change with the available reference rates. EUR is a display conversion: use a configured rate or enter a rate and date in the Usage tab. No live exchange-rate request is made; browser-entered rates last only while that view is mounted. Without a rate/date, EUR estimates are unavailable. Project/monthly rollups, invoices and budget enforcement are not implemented.
 
 ### Browser workflows (U3)
 
@@ -336,3 +368,9 @@ Automatic compaction uses the same ownership checks, bounded inventory, maintena
 Engine runs and validation commands remove their per-call temporary directories in `finally`, including failure and cancellation. Structured output, validation results and progress remain in task evidence. Private per-worktree tools survive between calls until task compaction. A process/container crash can leave scratch behind; completed-task recovery handles run directories with recorded ownership. Historical validation directories have no task ownership record and are not swept automatically.
 
 After a successful launcher rebuild, the launcher removes only the superseded DevAgents image if it has no tags and no container references. Other Docker images/build cache and unrelated containers/volumes live outside the task retention policy. Use `docker system df` to inspect them. Reclaim obsolete build images/cache separately; do not delete the task-data volume, credential vault, result branches or workflow databases. The 5 GiB admission guard and 256 MiB runtime guard remain: cleanup limits accumulation but cannot guarantee capacity against a large active task or other Docker workloads.
+
+### Slow Git scans on mounted repositories
+
+Before multi-item execution and at item/combined review, DevAgents checks the original checkout with full tracked/untracked Git status. These read-only scans allow 120 seconds and retry once only after a timeout. Optional Git index writes are disabled for the scans; ignore rules and untracked-file coverage are unchanged. A retry is recorded in Activity. Cancellation stops the active scan and prevents another attempt; real Git errors and output-limit failures are not retried. Both attempts failing stops the task with a concrete timeout message rather than bypassing checkout verification. Other Git operations retain their 30-second default and now also identify timeout failures explicitly.
+
+If this persists, check the Docker bind mount and host filesystem responsiveness. A failed task remains in history; submit a new task after resolving the issue. DevAgents does not automatically replay paid agent work.

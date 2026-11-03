@@ -15,22 +15,28 @@ const disabled = ['apps', 'browser_use', 'browser_use_external', 'computer_use',
 export class CodexAdapter implements CodingEngine {
   readonly id = 'codex';
   constructor(private readonly dataDir: string, private readonly binary = 'codex', private readonly options: { scanLimit?: number } = {}) { this.dataDir = resolve(dataDir); }
-  async preflight(provider: AppConfig['providers'][number]): Promise<void> {
+  async preflight(provider: AppConfig['providers'][number]): Promise<void> { await this.checkProvider(provider); }
+  private async checkProvider(provider: AppConfig['providers'][number]): Promise<'api' | 'subscription' | 'unknown'> {
     await (await configuredVault(this.dataDir))?.assertUnlocked();
     if (provider.kind !== 'openai' || provider.baseUrl) throw new AppError('unsupported_provider', 'Codex supports the official OpenAI provider; other providers follow later');
     const home = runtimeHome(this.dataDir); await verifyCodex(this.binary, home);
     if (provider.auth === 'api-key') {
       if (!provider.apiKeyEnv || !process.env[provider.apiKeyEnv]) throw new AppError('missing_auth', 'Set the configured API key environment variable for the service');
+      return 'api';
     } else {
       const env = safeEnvironment(home, home);
       if (credentialStore() === 'keyring') env.HOME = homedir();
       const status = await runProcess(this.binary, ['-c', `cli_auth_credentials_store="${credentialStore()}"`, 'login', 'status'], { cwd: home, env, timeoutMs: 5000 });
       if (status.exitCode !== 0) throw new AppError('missing_auth', 'Authenticate the dedicated profile with: devagents auth codex');
+      // Keep only the billing category; login status may contain part of an API key.
+      const message = status.stdout + status.stderr;
+      return /logged in using (?:an? )?api key/i.test(message) ? 'api' : /logged in using chatgpt/i.test(message) ? 'subscription' : 'unknown';
     }
   }
   async execute(request: EngineRequest, progress: (event: EngineProgress) => void): Promise<EngineResult> {
     if (!/^[a-zA-Z0-9-]{1,80}$/.test(request.runId)) throw new AppError('invalid_run', 'Invalid execution run identifier');
-    await this.preflight(request.provider);
+    const billing = await this.checkProvider(request.provider);
+    progress({ kind: 'started', data: { billing } });
     const home = runtimeHome(this.dataDir);
     const directory = join(this.dataDir, 'runs', request.runId);
     const temp = join(directory, 'tmp'); await mkdir(temp, { recursive: true, mode: 0o700 });

@@ -18,6 +18,8 @@ Every example value mirrors the deterministic fixtures (project `fixture`, task 
 
 The implemented read-only diff extends the boards with GitHub-style green/red line backgrounds and counts, blue hunk headers and neutral metadata. Patch markers remain visible alongside colour.
 
+The implemented task **Usage** tab adds three compact totals (reported tokens, estimated API cost, API-equivalent estimate), expandable step/attempt tables, missing-data labels and an explicit USD/EUR selector. This extends the cost boards without implementing their project budgets or monthly rollups.
+
 ## Chosen palette (Direction A)
 
 | Token | Value | Use |
@@ -44,3 +46,9 @@ Each `.dc.html` file is a self-contained board: plain HTML with inline styles in
 To reload the whole set on a design canvas, publish `canvas.json` and the `.dc.html` files to a canvas of the Design artifact type with `canvas.json` as the index. Only the selected direction is included in the repository.
 
 When the implementation (U1 onwards) diverges from these boards, update the boards or note the divergence in `docs/DECISIONS.md`; the boards are the reference for the look, the brief is the reference for behaviour.
+
+### Implemented execution timeline — 2026-11-03
+
+The Work tab now separates the team overview, the actual chronological **Execution workflow**, and expandable planned responsibilities. Each agent attempt retains its own card with role icon, real actor name, scope, timing, status text and summary. Amber review findings link to the later developer repair; green means the run finished, while validation and review remain separate evidence. Parallel runs link to their overlapping steps. Updates poll every three seconds, with preserved content and a retry control during failures. The narrow layout wraps names, commands and findings without horizontal scrolling. This supersedes the fixed-stage detailed workflow treatment; the stage overview remains a planning/status summary.
+
+Agent runs alone receive numbered cards. Consecutive automated checks form a compact, initially collapsed disclosure with visible pass/fail counts; individual scopes and commands remain inside. Commit is a compact confirmation. No repeated DevAgents member cards appear for test commands.
