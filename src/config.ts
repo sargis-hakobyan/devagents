@@ -11,6 +11,11 @@ export async function loadConfig(path = process.env.DEVAGENTS_CONFIG): Promise<A
     if (rules !== 'true' && rules !== 'false') throw new AppError('invalid_config', 'DEVAGENTS_RULES must be true or false');
     config.devagentsRules = rules === 'true';
   }
+  const compact = process.env.DEVAGENTS_COMPACT_COMPLETED_TASKS;
+  if (compact !== undefined && compact !== '') {
+    if (compact !== 'true' && compact !== 'false') throw new AppError('invalid_config', 'DEVAGENTS_COMPACT_COMPLETED_TASKS must be true or false');
+    config.compactCompletedTasks = compact === 'true';
+  }
   return config;
 }
 export function dataDirectory(): string { return resolve(process.env.DEVAGENTS_DATA_DIR ?? '.devagents'); }

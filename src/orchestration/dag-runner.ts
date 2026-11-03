@@ -34,6 +34,7 @@ type Hooks = {
   invoke(phase: EnginePhase, agent: AgentDefinition, prompt: string, schema: z.ZodType, signal: AbortSignal, context: Context): Promise<unknown>;
   workflows: TaskWorkflows;
   prepareEnvironment(cwd: string, commands: Item['validation'], signal: AbortSignal, workItemId: string, feedback?: string): Promise<void>;
+  quality(current: Awaited<ReturnType<typeof changes>>, evidence: ValidationResult[], owner: AgentDefinition): Promise<string>;
   onRepair(): number;
   stopping(): boolean;
 };
@@ -103,7 +104,7 @@ export async function runDag(h: Hooks): Promise<void> {
     const sourceStatus = await git(project.path, ['status', '--porcelain=v1', '--untracked-files=all']);
     const workspaceEvidence = {
       isolatedWorktree: cwd !== project.path,
-      originalHeadUnchanged: await git(project.path, ['rev-parse', 'HEAD']) === workspace.baseSha,
+      originalHeadUnchanged: await git(project.path, ['rev-parse', 'HEAD']) === (workspace.originalHead ?? workspace.baseSha),
       originalGitStatusUnchanged: sourceStatus === originalStatus,
       originalGitStatusCleanBeforeAndNow: originalStatus === '' && sourceStatus === '',
     };
@@ -232,7 +233,8 @@ export async function runDag(h: Hooks): Promise<void> {
       const evidence = await validate(workspace, commands, signal, '@integration');
       const after = await changes(workspace, integrator);
       let feedback = '';
-      if (validationFailed(evidence)) feedback = `${describeValidationFailure(evidence)}. Combined validation failed:\n${validationEvidence(evidence)}`;
+      const qualityFeedback = validationFailed(evidence) ? '' : await h.quality(after, evidence, integrator);
+      if (validationFailed(evidence) || qualityFeedback) feedback = qualityFeedback || `${describeValidationFailure(evidence)}. Combined validation failed:\n${validationEvidence(evidence)}`;
       else {
         h.active(); h.move('reviewing', 'Independent combined review');
         const assessment = await review(after, evidence, workspace.path, '@integration', plan, signal);

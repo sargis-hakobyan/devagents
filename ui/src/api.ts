@@ -6,7 +6,7 @@ export class SignedOutError extends ApiError {
   constructor(message: string) { super(401, 'session_expired', message); }
 }
 let csrfToken: string | undefined;
-export async function api<T>(path: string, init: { method?: string; body?: unknown; idempotencyKey?: string } = {}): Promise<T> {
+export async function api<T>(path: string, init: { method?: string; body?: unknown; idempotencyKey?: string; timeoutMs?: number } = {}): Promise<T> {
   const method = init.method ?? 'GET';
   const headers: Record<string, string> = { accept: 'application/json' };
   if (init.idempotencyKey) headers['idempotency-key'] = init.idempotencyKey;
@@ -15,7 +15,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
     if (!csrfToken) await session();
     if (csrfToken) headers['x-csrf-token'] = csrfToken;
   }
-  const res = await fetch(path, { method, headers, credentials: 'same-origin', signal: AbortSignal.timeout(30000), ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}) });
+  const res = await fetch(path, { method, headers, credentials: 'same-origin', signal: AbortSignal.timeout(init.timeoutMs ?? 30000), ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}) });
   const text = await res.text();
   let data: unknown = undefined;
   try { data = text ? JSON.parse(text) : undefined; } catch { data = undefined; }
@@ -42,6 +42,8 @@ export type Task = TaskSummary & { devagentsRules?: boolean; approval?: { status
 export type TaskEvent = { sequence: number; taskId: string; runId: string; actor: string; reason: string; state: TaskState; timestamp: string };
 export type Evidence = { sequence: number; kind: string; at: string; data: unknown; metadata?: Record<string, unknown>; truncated?: boolean };
 export type ItemProgress = { itemId: string; state: string; agentId?: string; branch?: string; dependsOn?: string[]; ownedPaths?: string[]; updatedAt?: string; commit?: string; repairCycles?: number; error?: string; reason?: string; workspace?: { path: string; branch: string } };
+export type StorageStatus = { measured: boolean; availableBytes?: number; minimumStartBytes: number; databaseHeadroomBytes: number; executionFailure?: { taskId: string; message: string } };
+export type CompactionPreview = { taskId: string; digest: string; computedAt: string; expiresAt: string; reclaimableBytes: number; candidates: { worktree: string; path: string; bytes: number; entries: number; kind?: 'dependencies' | 'tool-cache' | 'run-scratch' }[]; kept: string[] };
 export type Overview = { counts: Record<string, number>; attention: TaskSummary[]; active: (TaskSummary & { workItems: ItemProgress[] })[]; recent: TaskSummary[] };
 export type Project = { id: string; path: string; defaultMode?: 'autonomous' | 'plan-approval'; baseSha: string; registeredAt: string; defaultTeamId?: string; version: number };
 export type TeamMember = { id: string; name: string; description: string; enabled: boolean; engine: string; provider: string; model: string; capabilities: string[]; instructions: string; delegation: { canReceiveTasks: boolean; canDelegate: boolean }; permissions: { readPaths: string[]; writePaths: string[]; allowCommands: boolean; allowPush: false }; concurrency: number; origin: 'template' | 'custom'; templateId?: string };
@@ -62,6 +64,7 @@ export type Status = {
 
 /** Shared poller keys and loaders, so the shell and a page showing the same resource make one request. */
 export const resources = {
+  storage: { key: 'storage', load: () => api<StorageStatus>('/storage'), intervalMs: 10000 },
   status: { key: 'status', load: () => api<Status>('/status'), intervalMs: 30000 },
   overview: { key: 'overview', load: () => api<Overview>('/overview'), intervalMs: 5000 },
   projects: { key: 'projects', load: () => api<Project[]>('/projects'), intervalMs: 30000 },

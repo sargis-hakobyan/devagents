@@ -34,35 +34,35 @@ export class CodexAdapter implements CodingEngine {
     const home = runtimeHome(this.dataDir);
     const directory = join(this.dataDir, 'runs', request.runId);
     const temp = join(directory, 'tmp'); await mkdir(temp, { recursive: true, mode: 0o700 });
-    const rules = request.devagentsRules ?? true;
-    const runtime = rules ? undefined : await workspaceRuntime(this.dataDir, request.cwd);
-    const toolPath = await nodeToolPath(temp, rules, runtime);
-    const schema = join(directory, 'output.schema.json');
-    await writeFile(schema, JSON.stringify(request.schema), { mode: 0o600 });
-    const agent = executionAgent(request.agent, rules);
-    const permissions = ['setup', 'implementation'].includes(request.phase) ? agent.permissions : { ...agent.permissions, writePaths: [] };
-    const args = [
-      'exec',
-      '-c', `cli_auth_credentials_store="${credentialStore()}"`,
-      ...await sandboxFlags(request.cwd, permissions, temp, this.options.scanLimit, rules, false, runtime, request.signal),
-      '-c', 'agents.enabled=false', '-c', 'agents.max_depth=0',
-      '-c', 'web_search="disabled"', '-c', `project_doc_max_bytes=${rules ? 0 : 32768}`,
-      '-c', 'shell_environment_policy.inherit="none"',
-      '-c', `shell_environment_policy.set={PATH=${JSON.stringify(toolPath)},HOME=${JSON.stringify(runtime ?? temp)},TMPDIR=${JSON.stringify(temp)},OPENSSL_CONF="/dev/null",npm_config_update_notifier="false",npm_config_script_shell="/bin/sh"}`,
-      '-c', 'allow_login_shell=false', '-c', 'features.skip_host_skill_discovery=true',
-      ...disabled.flatMap(flag => ['-c', `features.${flag}=false`]),
-      '-c', `features.shell_tool=${permissions.allowCommands}`,
-      '--ignore-user-config', '--ephemeral', '--strict-config', '--json', '--color', 'never',
-      '--skip-git-repo-check', '--cd', request.cwd, '--output-schema', schema,
-      ...(request.agent.model === 'default' ? [] : ['--model', request.agent.model]), '-'
-    ];
-    const env = safeEnvironment(home, temp);
-    if (credentialStore() === 'keyring') env.HOME = homedir();
-    const key = request.provider.apiKeyEnv ? process.env[request.provider.apiKeyEnv] : undefined;
-    if (request.provider.auth === 'api-key' && key) env.CODEX_API_KEY = key;
-    const secrets = [...environmentSecrets(), ...(key ? [key] : [])];
-    let final = ''; let completed = false; let failed = false; let failureText = ''; let usage: unknown;
     try {
+      const rules = request.devagentsRules ?? true;
+      const runtime = rules ? undefined : await workspaceRuntime(this.dataDir, request.cwd);
+      const toolPath = await nodeToolPath(temp, rules, runtime);
+      const schema = join(directory, 'output.schema.json');
+      await writeFile(schema, JSON.stringify(request.schema), { mode: 0o600 });
+      const agent = executionAgent(request.agent, rules);
+      const permissions = ['setup', 'implementation'].includes(request.phase) ? agent.permissions : { ...agent.permissions, writePaths: [] };
+      const args = [
+        'exec',
+        '-c', `cli_auth_credentials_store="${credentialStore()}"`,
+        ...await sandboxFlags(request.cwd, permissions, temp, this.options.scanLimit, rules, false, runtime, request.signal),
+        '-c', 'agents.enabled=false', '-c', 'agents.max_depth=0',
+        '-c', 'web_search="disabled"', '-c', `project_doc_max_bytes=${rules ? 0 : 32768}`,
+        '-c', 'shell_environment_policy.inherit="none"',
+        '-c', `shell_environment_policy.set={PATH=${JSON.stringify(toolPath)},HOME=${JSON.stringify(runtime ?? temp)},TMPDIR=${JSON.stringify(temp)},OPENSSL_CONF="/dev/null",npm_config_update_notifier="false",npm_config_script_shell="/bin/sh"}`,
+        '-c', 'allow_login_shell=false', '-c', 'features.skip_host_skill_discovery=true',
+        ...disabled.flatMap(flag => ['-c', `features.${flag}=false`]),
+        '-c', `features.shell_tool=${permissions.allowCommands}`,
+        '--ignore-user-config', '--ephemeral', '--strict-config', '--json', '--color', 'never',
+        '--skip-git-repo-check', '--cd', request.cwd, '--output-schema', schema,
+        ...(request.agent.model === 'default' ? [] : ['--model', request.agent.model]), '-'
+      ];
+      const env = safeEnvironment(home, temp);
+      if (credentialStore() === 'keyring') env.HOME = homedir();
+      const key = request.provider.apiKeyEnv ? process.env[request.provider.apiKeyEnv] : undefined;
+      if (request.provider.auth === 'api-key' && key) env.CODEX_API_KEY = key;
+      const secrets = [...environmentSecrets(), ...(key ? [key] : [])];
+      let final = ''; let completed = false; let failed = false; let failureText = ''; let usage: unknown;
       const result = await runProcess(this.binary, args, {
         // Model input gets value-only redaction so code such as `token: string` survives intact.
         cwd: request.cwd, env, input: String(redactValues(request.prompt, secrets)), signal: request.signal, timeoutMs: request.timeoutMs, overflow: 'truncate',
@@ -83,9 +83,10 @@ export class CodexAdapter implements CodingEngine {
       try { return { output: JSON.parse(final), ...(usage ? { usage } : {}) }; }
       catch { throw new AppError('malformed_output', 'Codex did not return structured final output'); }
     } finally {
-      await rm(schema, { force: true });
-      // Preserve refreshed ChatGPT tokens without persisting the decrypted runtime.
-      await (await configuredVault(this.dataDir))?.seal();
+      // Preserve refreshed credentials even when setup or execution fails, then discard
+      // per-call files. Durable output/progress live in task evidence, not this directory.
+      try { await (await configuredVault(this.dataDir))?.seal(); }
+      finally { await rm(directory, { recursive: true, force: true }); }
     }
   }
 }

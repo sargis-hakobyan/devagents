@@ -280,3 +280,22 @@ Codex review findings F1–F4 fixed with regression tests (reports surviving rep
 Implemented R1–R4 from `CODEX_REVIEW_LIMITATIONS_FIXES.md`: bounded identity deduplication and explicit counts, redaction before handoff and in legacy display projections, setup-report capture, failed/cancelled outcome retention, and run/attempt provenance. Result, Overview and task-list counts no longer include a generated omission notice. R5–R9 are handoff revisions only; shared dependency storage and cleanup remain unimplemented.
 
 Backend and UI compiler checks passed during the follow-up. Added regression tests remain unrun by owner instruction; no runtime/UI, Docker, protocol, M2/M3 or authenticated verification is claimed. Changes are prepared for Claude's independent review.
+
+
+## Task compaction and disk-failure containment — 2026-11-03
+
+Implemented a task-page/CLI compaction preview and confirmation for ignored dependency directories, with bounded expiring inventories, tracked-file protection, managed ownership, a durable audit intent and terminal/drained lifecycle checks. Added preparation disk headroom and runtime low-space checks, Overview storage warnings, preservation of the original SQLite failure and containment of failed final checkpoints. Mastra remains the execution/persistence owner; compaction never rewrites its snapshots.
+
+Backend and UI typechecks passed. Added storage-full, compaction, drain and UI-confirmation regression source remains unrun at the owner's request. Nothing was deployed, rebuilt, restarted or compacted in the live service. Shared dependency storage and the broader removal/retention handoffs remain future work.
+
+## Completed-task resource retention — 2026-11-03
+
+Completed tasks now compact regenerable dependencies, private worktree tool caches and owned legacy run scratch automatically after workflow drain and during recovery. Clean completed worktrees are removed without force; result branches, commits and task/workflow evidence remain. Dirty worktrees and unknown ignored files are retained; failed/cancelled environments require explicit compaction. `compactCompletedTasks` / `DEVAGENTS_COMPACT_COMPLETED_TASKS` can disable the policy. Engine/validation scratch is removed after each call, and successful launcher rebuilds release only the superseded untagged, unreferenced DevAgents image.
+
+`npm run check` passed (248 tests passed, 3 skipped, backend/UI typechecks and build). Focused retention/launcher checks and the browser compaction-confirmation test also passed. The browser fixture route now matches only the API path rather than intercepting the HTML navigation. Live cleanup of nine completed tasks removed seven remaining clean worktrees, retained all nine reviewed result branches, and recovered about 12 GiB. No authenticated model calls were made. The selected policy now also removes clean completed task/item worktrees without force, retaining every branch and refusing local changes, unknown ignored files, hidden index flags or a changed reviewed result branch. The launcher rebuilt and restarted the service successfully. The running service reports automatic cleanup enabled; all nine completed result branches and diffs were verified, and no completed worktrees remain. After startup recovery and the rebuild, about 13.4 GiB is free. Isolated deterministic M2/M3 container smoke checks also passed, including sandbox validation and retained final commits; their temporary filesystem must exceed the unchanged 5 GiB admission threshold.
+
+## Main-based task worktrees — 2026-11-03
+
+New task worktrees resolve the current local main commit and create a fresh task branch, regardless of the registered checkout branch or local changes. Missing main fails explicitly; existing branches are never reset or reused. Original-checkout divergence checks and review evidence use a separately recorded HEAD, with backward compatibility for existing tasks. Worker dependency snapshots are preserved.
+
+`npm run check` passed: 251 tests passed, 3 skipped, backend/UI typechecks and production build succeeded. Regression coverage includes dirty feature checkouts, exclusion of previous task results, a main update after registration, branch collisions, missing main without HEAD/origin fallback, and both single-item and DAG completion. No authenticated model calls were made. Deployment is pending release of the user’s interactive launcher lock.

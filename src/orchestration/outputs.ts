@@ -24,6 +24,15 @@ export const ImplementationOutput = z.strictObject({
   limitations: z.array(Limitation).max(10).default([]).describe('Checks that could not run in this environment (missing browser, library, network, tool), each with its reason. Tried once at most; not failures.'),
 });
 export const SetupOutput = z.strictObject({ ready: z.boolean(), summary: z.string().min(1), limitations: z.array(Limitation).max(10).default([]).describe('Optional checks unavailable here, not failures of declared validation. Report newly noticed limitations only.') });
+export const QualityOutput = z.strictObject({
+  summary: z.string().min(1),
+  checks: z.array(z.strictObject({
+    criterionId: z.string().min(1),
+    status: z.enum(['passed', 'failed', 'blocked']),
+    evidence: z.string().min(1).describe('Concrete command results or inspected code supporting this result; for blocked checks, the missing prerequisite.'),
+  })).min(1),
+  limitations: z.array(Limitation).max(10).default([]).describe('Optional checks that could not run. Required acceptance criteria must be reported as blocked in checks, never waived here.'),
+});
 export const ReviewOutput = z.strictObject({
   approved: z.boolean().describe('True only when requirements and validation pass and findings is empty.'),
   summary: z.string().min(1).describe('Review rationale, including positive observations and test evidence.'),
@@ -44,5 +53,5 @@ export const connectionCheckSchema: Record<string, unknown> = { type: 'object', 
  * model call site must register its schema here.
  */
 export function modelSchemas(): Record<string, Record<string, unknown>> {
-  return { planning: outputJsonSchema(PlanningOutput), setup: outputJsonSchema(SetupOutput), implementation: outputJsonSchema(ImplementationOutput), review: outputJsonSchema(ReviewOutput), connectionCheck: connectionCheckSchema };
+  return { planning: outputJsonSchema(PlanningOutput), setup: outputJsonSchema(SetupOutput), implementation: outputJsonSchema(ImplementationOutput), qa: outputJsonSchema(QualityOutput), review: outputJsonSchema(ReviewOutput), connectionCheck: connectionCheckSchema };
 }

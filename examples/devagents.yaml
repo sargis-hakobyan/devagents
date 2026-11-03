@@ -7,6 +7,8 @@ concurrency: 1
 maxRepairCycles: 3
 executionTimeoutMs: 1800000
 validationTimeoutMs: 600000
+# Release completed-task caches and clean worktrees; retain branches, commits and history.
+compactCompletedTasks: true
 # Optional strict-mode entry limit. Rules-off scans still check links/secrets without this count gate.
 workspaceScanLimit: 200000
 providers:

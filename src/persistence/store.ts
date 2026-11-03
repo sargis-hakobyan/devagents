@@ -53,7 +53,11 @@ export class Store {
   private transaction<T>(fn: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
     try { const value = fn(); this.db.exec('COMMIT'); return value; }
-    catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    catch (error) {
+      // SQLITE_FULL can roll back automatically. A second rollback must not mask that cause.
+      try { this.db.exec('ROLLBACK'); } catch { /* preserve the original transaction failure */ }
+      throw error;
+    }
   }
   /** Redact display prose separately; preserve code-bearing requests, commands and plan descriptions. */
   private safeTask(task: Task): Task {
@@ -292,7 +296,8 @@ export class Store {
     const task = this.task(id);
     const items = new Map<string, Record<string, unknown>>((task.plan?.items ?? []).map(i => [i.id, { itemId: i.id, state: 'pending', agentId: i.assignedAgent, branch: i.branch, dependsOn: i.dependsOn, ownedPaths: i.ownedPaths }]));
     let recorded = false;
-    for (const event of this.evidence(id)) {
+    const evidence = this.evidence(id);
+    for (const event of evidence) {
       if (event.kind !== 'work-item') continue;
       recorded = true;
       const data = event.data as Record<string, unknown>;
@@ -301,6 +306,15 @@ export class Store {
     if (!recorded && task.plan?.items.length === 1) for (const item of items.values()) item.state = task.state;
     if (['failed', 'cancelled'].includes(task.state)) for (const item of items.values()) {
       if (!['completed', 'failed', 'cancelled', 'blocked', 'aborted', 'interrupted'].includes(String(item.state))) item.state = task.state === 'cancelled' ? 'cancelled' : item.state === 'pending' ? 'blocked' : 'interrupted';
+    }
+    // A QA environment blocker is not a failed implementation. Preserve historical task
+    // outcomes, but derive the single item's own result from its recorded handoff.
+    if (!recorded && task.plan?.items.length === 1 && task.state === 'failed' && task.outcome?.error?.startsWith('QA could not verify required acceptance criteria.')) {
+      const implementation = evidence.findLastIndex(e => e.kind === 'run-started' && (e.data as { phase?: string }).phase === 'implementation');
+      const qa = evidence.findLastIndex(e => e.kind === 'qa-result' && (e.data as { state?: string }).state === 'blocked');
+      if (implementation >= 0 && qa > implementation && evidence.slice(implementation, qa).some(e => e.kind === 'run-completed' && (e.data as { phase?: string }).phase === 'implementation')) {
+        for (const item of items.values()) item.state = 'implemented';
+      }
     }
     return [...items.values()];
   }

@@ -21,6 +21,7 @@ const errorMessage = (error: unknown): string => error && typeof error === 'obje
  * Active side effects are deliberately not replayable after a process interruption.
  */
 export class TaskWorkflows {
+  private readonly ownedWork = new Map<string, Set<Promise<unknown>>>();
   private readonly storage: LibSQLStore;
   private readonly workflow;
   private readonly options: WorkflowOptions;
@@ -66,18 +67,33 @@ export class TaskWorkflows {
     new Mastra({ workflows: { task: this.workflow }, storage: this.storage, logger: false });
   }
 
-  private async checked<T>(id: string, step: string, work: () => Promise<T>): Promise<T> {
-    this.service.store.record(id, 'workflow-step', { workflow: TASK_WORKFLOW_ID, step, state: 'running' });
-    try {
-      const result = await work();
-      this.service.store.record(id, 'workflow-step', { workflow: TASK_WORKFLOW_ID, step, state: 'completed' });
-      return result;
-    } catch (error) {
-      // Framework error snapshots must not bypass the normal redaction path.
-      const message = String(redact(errorMessage(error), this.service.store.secrets)).slice(0, 8000);
-      this.service.store.record(id, 'workflow-step', { workflow: TASK_WORKFLOW_ID, step, state: 'failed', error: message });
-      throw new Error(message);
-    }
+  /** Observe the lifetime of our hooks; Mastra still owns graph dispatch, retries and snapshots. */
+  private track<T>(id: string, work: () => Promise<T>): Promise<T> {
+    const pending = this.ownedWork.get(id) ?? new Set<Promise<unknown>>(); this.ownedWork.set(id, pending);
+    const promise = Promise.resolve().then(work); pending.add(promise);
+    const finished = () => { pending.delete(promise); if (!pending.size) this.ownedWork.delete(id); };
+    // Both handlers resolve, so the observation itself cannot create an unhandled rejection.
+    void promise.then(finished, finished);
+    return promise;
+  }
+  isDrained(id: string): boolean { return !this.ownedWork.get(id)?.size; }
+  async drain(id: string): Promise<void> {
+    while (!this.isDrained(id)) await Promise.allSettled([...this.ownedWork.get(id)!]);
+  }
+  private checked<T>(id: string, step: string, work: () => Promise<T>): Promise<T> {
+    return this.track(id, async () => {
+      this.service.store.record(id, 'workflow-step', { workflow: TASK_WORKFLOW_ID, step, state: 'running' });
+      try {
+        const result = await work();
+        this.service.store.record(id, 'workflow-step', { workflow: TASK_WORKFLOW_ID, step, state: 'completed' });
+        return result;
+      } catch (error) {
+        const message = String(redact(errorMessage(error), this.service.store.secrets)).slice(0, 8000);
+        try { this.service.store.record(id, 'workflow-step', { workflow: TASK_WORKFLOW_ID, step, state: 'failed', error: message }); }
+        catch { /* Keep the original failure; runner health reports persistence failures separately. */ }
+        throw new Error(message);
+      }
+    });
   }
 
   async state(id: string) { return this.workflow.getWorkflowRunById(id, { withNestedWorkflows: false }); }
@@ -148,7 +164,7 @@ export class TaskWorkflows {
     const step = createStep({ id: 'worker', inputSchema: shape, outputSchema: shape, retries: 0,
       execute: async ({ inputData }) => {
         // Catch here so a failed foreach branch cannot release the task slot while siblings write.
-        try { results[inputData.index] = await work(inputData.index); } catch (error) { failure ??= error; }
+        try { results[inputData.index] = await this.track(inputData.taskId, () => work(inputData.index)); } catch (error) { failure ??= error; }
         return inputData;
       },
     });

@@ -1,14 +1,15 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, realpath, stat } from 'node:fs/promises';
+import { lstat, mkdir, realpath, stat } from 'node:fs/promises';
 import { isWithin } from './paths.js';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, join, parse, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, parse, resolve } from 'node:path';
 import { AppError } from '../domain/errors.js';
-import { ProjectInput, type Project } from '../domain/schemas.js';
+import { ProjectInput, type Project, type Task } from '../domain/schemas.js';
 import { isOwnedBranch, itemBranch, ownedRefPatterns, taskBranch } from './branches.js';
 
 const exec = promisify(execFile);
+type Workspace = NonNullable<Task['workspace']>;
 export async function git(cwd: string, args: string[], trim = true, maxBuffer = 2 * 1024 * 1024): Promise<string> {
   let stdout: string;
   try {
@@ -22,6 +23,13 @@ export async function git(cwd: string, args: string[], trim = true, maxBuffer = 
   }
   return trim ? stdout.trim() : stdout;
 }
+async function mainCommit(path: string): Promise<string> {
+  try { return await git(path, ['rev-parse', '--verify', 'refs/heads/main^{commit}']); }
+  catch (error) {
+    if ((error as { code?: unknown }).code === 128) throw new AppError('main_branch_missing', 'The project needs a local main branch before starting tasks. Create or update main from the intended upstream, then retry.');
+    throw error;
+  }
+}
 export async function inspectProject(input: unknown): Promise<Project> {
   const project = ProjectInput.parse(input);
   if (!isAbsolute(project.path)) throw new AppError('invalid_path', 'Provide an absolute project path');
@@ -30,14 +38,49 @@ export async function inspectProject(input: unknown): Promise<Project> {
   if (!(await stat(path)).isDirectory()) throw new AppError('invalid_path', 'Project must be a directory');
   const root = await git(path, ['rev-parse', '--show-toplevel']);
   if (await realpath(root) !== path) throw new AppError('invalid_path', 'Register the Git checkout root');
-  const baseSha = await git(path, ['rev-parse', '--verify', 'HEAD']);
+  const baseSha = await mainCommit(path);
   return { ...project, path, baseSha, registeredAt: new Date().toISOString() };
 }
 const creating = new Map<string, Promise<unknown>>();
 export class WorkspaceManager {
   constructor(private readonly dataDir: string) {}
-  /** The task worktree on a branch named after the request, e.g. `devagents/fix-my-orders-12b1ca2d`. */
-  async create(project: Project, taskId: string, request: string): Promise<{ path: string; branch: string; baseSha: string }> {
+  /** Automatic retention never forces removal or deletes a branch. Unknown ignored files also keep a checkout alive. */
+  async removeCleanCompleted(project: Project, taskId: string, workspaces: { path: string; branch: string }[], result: { branch: string; commit: string },
+    beforeRemoval: (workspace: { path: string; branch: string }) => void, record: (workspace: { path: string; branch: string }) => void): Promise<void> {
+    if (!/^[a-f0-9-]{36}$/.test(taskId) || !isOwnedBranch(result.branch, taskId) || !/^[a-f0-9]{40}$/.test(result.commit)) throw new AppError('cleanup_ownership', 'Invalid completed result');
+    if (await realpath(project.path) !== project.path) throw new AppError('cleanup_ownership', 'Registered project path changed');
+    const parent = join(await realpath(this.dataDir), 'worktrees');
+    const common = await realpath(resolve(project.path, await git(project.path, ['rev-parse', '--git-common-dir'])));
+    const verifyResult = async () => {
+      if (await git(project.path, ['rev-parse', '--verify', `refs/heads/${result.branch}`]) !== result.commit) throw new AppError('cleanup_ownership', 'Reviewed result branch changed; keeping worktrees');
+    };
+    await verifyResult();
+    for (const workspace of workspaces) {
+      const { path, branch } = workspace;
+      if (dirname(path) !== parent || !(basename(path) === taskId || basename(path).startsWith(`${taskId}-`)) || !isOwnedBranch(branch, taskId) || path === project.path) throw new AppError('cleanup_ownership', 'Worktree is not owned by the completed task');
+      const entry = await lstat(path).catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
+      if (!entry) continue;
+      const verify = async () => {
+        const current = await lstat(path);
+        if (!current.isDirectory() || current.dev !== entry.dev || current.dev !== (await lstat(parent)).dev || current.ino !== entry.ino || await realpath(path) !== path || await realpath(parent) !== parent) throw new AppError('cleanup_ownership', 'Worktree path changed');
+        const registry = (await git(project.path, ['worktree', 'list', '--porcelain', '-z'], false)).split('\0\0');
+        if (!registry.some(row => row.split('\0').includes(`worktree ${path}`) && row.split('\0').includes(`branch refs/heads/${branch}`))) throw new AppError('cleanup_ownership', 'Worktree registration changed');
+        if (await realpath(await git(path, ['rev-parse', '--show-toplevel'])) !== path || await realpath(resolve(path, await git(path, ['rev-parse', '--git-common-dir']))) !== common || await git(path, ['symbolic-ref', '--quiet', '--short', 'HEAD']) !== branch) throw new AppError('cleanup_ownership', 'Worktree Git metadata changed');
+        await verifyResult();
+        // Sparse/assume-unchanged index flags can hide local edits from ordinary status.
+        const flags = await git(path, ['ls-files', '-v', '-z'], false, 32 * 1024 * 1024);
+        if (flags.split('\0').some(file => file && (file[0] === 'S' || /^[a-z]/.test(file)))) return false;
+        return !(await git(path, ['status', '--porcelain=v1', '--untracked-files=all', '--ignored', '--ignore-submodules=none'], false, 32 * 1024 * 1024));
+      };
+      if (!await verify()) continue;
+      beforeRemoval(workspace);
+      if (!await verify()) continue;
+      await git(project.path, ['worktree', 'remove', path]);
+      record(workspace);
+    }
+  }
+  /** A fresh task branch from local main, independent of the user's checked-out branch and working files. */
+  async create(project: Project, taskId: string, request: string): Promise<Workspace> {
     return this.createOwned(project, taskId, taskBranch(taskId, request));
   }
   /** A work-item worktree on `<task branch>-<item id>`, branched from the recorded integration base. */
@@ -75,25 +118,27 @@ export class WorkspaceManager {
     return result;
   }
   /** Worktree creation is serialized per repository: parallel `git worktree add` calls contend on ref and metadata locks. */
-  private async createOwned(project: Project, taskId: string, branch: string, itemId?: string, source?: string): Promise<{ path: string; branch: string; baseSha: string }> {
+  private async createOwned(project: Project, taskId: string, branch: string, itemId?: string, source?: string): Promise<Workspace> {
     const previous = creating.get(project.path) ?? Promise.resolve();
     const run = previous.catch(() => undefined).then(() => this.createNow(project, taskId, branch, itemId, source));
     creating.set(project.path, run);
     try { return await run; } finally { if (creating.get(project.path) === run) creating.delete(project.path); }
   }
-  private async createNow(project: Project, taskId: string, branch: string, itemId?: string, source?: string): Promise<{ path: string; branch: string; baseSha: string }> {
+  private async createNow(project: Project, taskId: string, branch: string, itemId?: string, source?: string): Promise<Workspace> {
     if (!/^[a-f0-9-]{36}$/.test(taskId)) throw new AppError('invalid_task_id', 'Invalid worktree owner ID');
     if (!isOwnedBranch(branch, taskId)) throw new AppError('branch_denied', 'Worktree branch is not owned by this task');
     // Revalidate registration immediately before accessing the project.
     if (await realpath(project.path) !== project.path) throw new AppError('path_denied', 'Registered project path changed');
     const configuration = await git(project.path, ['config', '--local', '--includes', '--name-only', '--list']);
     if (configuration.split('\n').some(key => key.startsWith('filter.'))) throw new AppError('unsafe_git_config', 'Worktree checkout with repository-defined filters requires sandbox support');
+    // Resolve main at creation time, not registration time. Never fall back to HEAD or a previous task.
+    const baseSha = source ?? await mainCommit(project.path);
+    const originalHead = source === undefined ? await git(project.path, ['rev-parse', '--verify', 'HEAD']) : undefined;
     const parent = resolve(this.dataDir, 'worktrees');
     await mkdir(parent, { recursive: true, mode: 0o700 });
     const owner = itemId ? `${taskId}-${itemId}` : taskId;
     const path = join(await realpath(parent), owner);
-    const baseSha = source ?? await git(project.path, ['rev-parse', '--verify', 'HEAD']);
     await git(project.path, ['worktree', 'add', '-b', branch, path, baseSha]);
-    return { path, branch, baseSha };
+    return { path, branch, baseSha, ...(originalHead ? { originalHead } : {}) };
   }
 }

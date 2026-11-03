@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ui-fixture",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/ui-fixture.mjs", "--port", "4398", "--hold", "1800000"],
+      "port": 4398
+    }
+  ]
+}

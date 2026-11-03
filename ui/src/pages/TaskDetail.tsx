@@ -1,3 +1,4 @@
+import { TaskCompaction } from '../components/TaskCompaction';
 import { TaskDiff } from '../components/TaskDiff';
 import { useTaskActions } from '../components/TaskActions';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
@@ -40,8 +41,11 @@ export function TaskDetailPage({ id }: { id: string }) {
   if (!task) return <><Skeleton rows={2} label="Loading task" /><Skeleton rows={4} /></>;
   const state = taskState(task); const terminal = ['completed', 'failed', 'cancelled'].includes(task.state);
   const finishedAt = terminal ? task.updatedAt : undefined;
-  const summary = summarize(task, items);
+  const summary = board?.stages.some(s => s.key === 'qa' && s.status === 'busy')
+    ? { title: 'QA verification in progress', tone: 'info', detail: 'The QA engineer is checking required acceptance criteria. Final review and commit follow only after QA passes.' }
+    : summarize(task, items);
   return <>
+    {terminal && <Card><TaskCompaction key={task.id} task={task} /></Card>}
     <a href="/ui/tasks" style={{ fontWeight: 700, fontSize: '13.5px', textDecoration: 'none' }}>← All tasks</a>
     <Card>
       <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -82,14 +86,14 @@ function summarize(task: Task, items: ItemProgress[]): { title: string; detail: 
     case 'running': case 'validating': case 'reviewing': case 'repairing': return { title: current ? `Now: ${itemVerb(current.state)} work item ${current.itemId}${current.agentId ? ` (${current.agentId})` : ''}` : `Now: ${task.state}`, tone: 'info', detail: items.length > 1 ? `${done} of ${items.length} items integrated. After every item is integrated, the combined result is validated and reviewed before one local commit. No merge, push or deployment happens.` : 'Implementation, real validation and an independent review precede one local commit on the task branch. No merge, push or deployment happens.' };
     case 'committing': return { title: 'Creating the reviewed local commit', tone: 'info', detail: 'This boundary cannot be cancelled; the outcome appears in Result.' };
     case 'completed': { const n = limitationCount(task.outcome); return { title: n ? `Completed with ${task.outcome?.limitationOverflow ? 'at least ' : ''}${n} check${n === 1 ? '' : 's'} not run in this environment` : 'Completed: one reviewed local commit on the task branch', tone: n ? 'warn' : 'info', detail: `Commit ${task.outcome?.commit?.slice(0, 7) ?? '—'} on ${task.workspace?.branch ?? 'the task branch'}. Nothing was merged or pushed; you integrate it yourself.${n ? ' The Result tab lists what you should verify yourself.' : ''}` }; }
-    case 'failed': return { title: /Service shutdown interrupted/.test(task.outcome?.error ?? '') ? 'Interrupted by a service shutdown' : 'Stopped: the task failed', tone: 'bad', detail: task.outcome?.error ?? 'See Activity for the last recorded step.' };
+    case 'failed': if (task.outcome?.error?.startsWith('QA could not verify required acceptance criteria.')) return { title: 'Implementation complete; verification stopped at QA', tone: 'warn', detail: 'The developer finished and project validation passed. QA could not verify some checks in its environment, so this earlier run stopped before review and commit. See Activity for the original evidence.' }; return { title: /Service shutdown interrupted/.test(task.outcome?.error ?? '') ? 'Interrupted by a service shutdown' : 'Stopped: the task failed', tone: 'bad', detail: task.outcome?.error ?? 'See Activity for the last recorded step.' };
     case 'cancelled': return { title: 'Cancelled by you', tone: 'warn', detail: 'Workers were stopped and worktrees preserved. Resubmitting creates a new task.' };
     default: return { title: task.state, tone: 'info', detail: '' };
   }
 }
 const itemVerb = (s: string) => ({ running: 'implementing', validating: 'validating', reviewing: 'reviewing', repairing: 'repairing', creating: 'preparing a worktree for', checkpointing: 'checkpointing', integrating: 'integrating' } as Record<string, string>)[s] ?? s;
 
-/** The team on this task: a pipeline of stages with the members who do them, then one card per member. Everything is derived in team-board.ts from recorded runs. */
+/** Pipeline overview followed by stage-ordered execution details, derived from recorded runs. */
 function WorkTab({ task, board, now, onActivity }: { task: Task; board: TeamBoard; now: number; onActivity: (item: string) => void }) {
   return <div class="stack">
     <Pipeline board={board} taskId={task.id} now={now} />
@@ -186,6 +190,8 @@ function evidenceTitle(e: Evidence): string {
     case 'run-started': return `${d.phase} run started${item}`;
     case 'run-completed': return `${d.phase} run completed${item}${d.phase === 'review' ? ` · ${reviewPassed(d.output as ReviewFacts | undefined) ? 'approved' : 'changes requested'}` : ''}`;
     case 'run-failed': return `${d.phase} run failed${item}`;
+    case 'qa-assignment': return d.state === 'assigned' ? `QA assigned to ${d.agentId}` : `QA skipped · ${d.reason}`;
+    case 'qa-result': return `QA ${d.state} · ${d.summary}`;
     case 'validation': return `validation ${typeof d.exitCode !== 'number' ? 'result unavailable' : d.truncated ? 'failed (output truncated)' : d.exitCode === 0 ? 'passed' : `failed (exit ${d.exitCode})`}${d.truncated ? ' · output truncated' : ''}${item} · ${[d.executable, ...((d.args as string[] | undefined) ?? [])].join(' ')}`;
     case 'work-item': return `item ${String(d.itemId)} → ${String(d.state)}`;
     case 'progress': return `engine ${String(d.kind)}${item}`;
@@ -203,8 +209,13 @@ function ResultTab({ task, evidence }: { task: Task; evidence: Evidence[] }) {
   const reviews = evidence.filter(e => e.kind === 'run-completed' && evidenceFacts(e).phase === 'review');
   const last = reviews[reviews.length - 1]; const review = last ? evidenceFacts(last).output as ReviewFacts | undefined : undefined;
   const validations = evidence.filter(e => e.kind === 'validation');
+  const qaEntry = evidence.filter(e => e.kind === 'qa-result').at(-1);
+  const qa = qaEntry ? evidenceFacts(qaEntry) : undefined;
+  const assignment = evidence.filter(e => e.kind === 'qa-assignment').at(-1);
+  const skipped = assignment ? evidenceFacts(assignment) : undefined;
+  const qaSummary = qa ? `${qa.state} · ${qa.summary}` : skipped?.state === 'skipped' ? String(skipped.reason ?? 'QA skipped') : 'No QA verification recorded';
   if (task.state !== 'completed') return <Card tone={task.state === 'failed' ? 'bad' : undefined}><div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-    <b>Result</b><span>Diff inspection is offered for completed tasks only.</span><div><b>Not verified here</b><LimitationReports outcome={task.outcome} /></div>
+    <b>Result</b><span>Diff inspection is offered for completed tasks only.</span><div class="wrap-anywhere"><b>Quality assurance</b> · {qaSummary}</div><div><b>Not verified here</b><LimitationReports outcome={task.outcome} /></div>
     {task.state === 'failed' || task.state === 'cancelled' ? <><div class="wrap-anywhere">{task.outcome?.error ?? 'No commit was created.'}</div><div class="muted" style={{ fontSize: '13px' }}>Worktrees are preserved for inspection{task.workspace ? <> under <span class="mono">{task.workspace.path}</span></> : null}. Resubmitting creates a new task. Cleanup is a separate, previewed action.</div><div style={{ display: 'flex', gap: '8px' }}><a class="btn" href={`/ui/tasks/new?from=${task.id}`}>Submit a new task from this request</a><Later label="Clean up worktrees" increment="U3" reason="Cleanup with a preview arrives in U3. CLI: devagents tasks cleanup" /></div></> : <div class="muted">Not available yet. Completion means one reviewed local commit{task.workspace ? <> on <span class="mono">{task.workspace.branch}</span></> : null}; you merge it yourself. Changed files, test evidence and the review outcome appear here afterwards.</div>}
   </div></Card>;
   return <div class="stack">
@@ -215,6 +226,7 @@ function ResultTab({ task, evidence }: { task: Task; evidence: Evidence[] }) {
       <dt>Repairs used</dt><dd>{task.outcome?.repairCycles ?? 0}</dd>
       <dt>Tests</dt><dd>{validations.length ? `${validations.filter(v => evidenceFacts(v).exitCode === 0 && !evidenceFacts(v).truncated).length} of ${validations.length} validation runs passed; see Activity for output` : 'none recorded'}</dd>
       <dt>Review</dt><dd class="wrap-anywhere">{review ? `${reviewPassed(review) ? 'Approved' : 'Changes requested'} · ${review.summary ?? ''}` : '—'}</dd>
+      <dt>Quality assurance</dt><dd class="wrap-anywhere">{qaSummary}{qa && ' · See Activity for criterion-by-criterion evidence'}</dd>
       <dt>Not verified here</dt><dd><LimitationReports outcome={task.outcome} /></dd>
       <dt>Diff</dt><dd>Read the recorded base-to-final change below.</dd>
       <dt>Worktree</dt><dd class="mono wrap-anywhere">{task.workspace?.path ?? '—'}</dd>

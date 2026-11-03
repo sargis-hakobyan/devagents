@@ -1,7 +1,7 @@
 import type { TaskState, TaskSummary } from './api';
 
 export type Tone = 'ok' | 'run' | 'warn' | 'bad' | 'neutral';
-export function taskState(t: Pick<TaskSummary, 'state' | 'error'>): { label: string; tone: Tone; icon: string } {
+export function taskState(t: Pick<TaskSummary, 'state' | 'error'> & { outcome?: { error?: string } | undefined }): { label: string; tone: Tone; icon: string } {
   switch (t.state) {
     case 'awaiting_mode': return { label: 'Awaiting mode choice', tone: 'warn', icon: '●' };
     case 'awaiting_plan_approval': return { label: 'Awaiting your approval', tone: 'warn', icon: '●' };
@@ -14,7 +14,7 @@ export function taskState(t: Pick<TaskSummary, 'state' | 'error'>): { label: str
     case 'committing': return { label: 'Committing', tone: 'run', icon: '▶' };
     case 'completed': return { label: 'Completed', tone: 'ok', icon: '✓' };
     case 'cancelled': return { label: 'Cancelled by you', tone: 'neutral', icon: '⊘' };
-    case 'failed': return /Service shutdown interrupted/.test(t.error ?? '') ? { label: 'Interrupted by shutdown', tone: 'warn', icon: '⚠' } : { label: 'Failed', tone: 'bad', icon: '✕' };
+    case 'failed': if ((t.error ?? t.outcome?.error)?.startsWith('QA could not verify required acceptance criteria.')) return { label: 'Stopped at QA', tone: 'warn', icon: '⚠' }; return /Service shutdown interrupted/.test(t.error ?? '') ? { label: 'Interrupted by shutdown', tone: 'warn', icon: '⚠' } : { label: 'Failed', tone: 'bad', icon: '✕' };
     default: return { label: t.state, tone: 'neutral', icon: '·' };
   }
 }
@@ -27,6 +27,7 @@ export function itemState(state: string): { label: string; tone: Tone; icon: str
     case 'reviewing': return { label: 'Reviewing', tone: 'run', icon: '▶' };
     case 'repairing': return { label: 'Repairing', tone: 'run', icon: '↻' };
     case 'checkpointing': return { label: 'Checkpointing', tone: 'run', icon: '▶' };
+    case 'implemented': return { label: 'Implementation complete', tone: 'ok', icon: '✓' };
     case 'reviewed': return { label: 'Reviewed', tone: 'ok', icon: '✓' };
     case 'integrating': return { label: 'Integrating', tone: 'run', icon: '▶' };
     case 'completed': return { label: 'Integrated', tone: 'ok', icon: '✓' };

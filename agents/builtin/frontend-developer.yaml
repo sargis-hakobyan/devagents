@@ -1,7 +1,7 @@
 schemaVersion: 1
 id: frontend-developer
 name: Frontend Developer
-description: Implements frontend interfaces
+description: Implements interfaces, client behavior, accessibility and frontend tests
 enabled: true
 engine: default
 provider: default

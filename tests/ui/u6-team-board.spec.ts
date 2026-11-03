@@ -11,28 +11,36 @@ type Row = { id: string; request: string; state: string };
 const find = async (text: string) => ((await (await call('/tasks?limit=200')).json()).tasks as Row[]).find(t => t.request.startsWith(text))!;
 const stages = (page: Page) => page.locator('.pipe > li .h');
 
-test('a completed multi-item task shows five finished stages, every member, the commit line and the unused QA engineer', async ({ page }) => {
+test('a completed multi-item task shows six finished stages including QA and the final commit', async ({ page }) => {
   await signIn(page); const task = await find('Implement three modules');
   await page.goto(`${base}/ui/tasks/${task.id}`);
   const pipeline = page.getByRole('region', { name: 'Your team on this task' });
-  await expect(stages(page)).toHaveText(['1 · Plan', '2 · Build', '3 · Review', '4 · Integrate', '5 · Commit']);
+  await expect(stages(page)).toHaveText(['1 · Plan', '2 · Build', '3 · Integrate', '4 · QA', '5 · Review', '6 · Commit']);
   await expect(pipeline.locator('.stagecol .stage', { hasText: '✓ Done' })).toHaveCount(5);
   await expect(pipeline.locator('[data-stage="build"] .member')).toHaveCount(3);
   await expect(pipeline.locator('[data-member="devagents"]')).toContainText('Committed ');
-  await expect(pipeline).toContainText('Not needed for this task: QA Engineer (no item asks for testing)');
-  const list = page.getByRole('region', { name: 'Team members' });
-  await expect(list.locator('article[data-status="done"]')).toHaveCount(6); // five members plus DevAgents for the commit
+  await expect(pipeline.locator('[data-stage="qa"]')).toContainText('✓ Passed');
+  const list = page.getByRole('region', { name: 'Execution workflow' });
+  await expect(list.getByRole('heading', { level: 2 })).toHaveText('Execution workflow');
+  await expect(list.locator('.workflow-step-heading h3')).toHaveText(['1. Planning', '2. Implementation', '3. Integration', '4. Quality assurance', '5. Review', '6. Commit']);
+  await expect(list.locator('article[data-status="done"]')).toHaveCount(8); // QA and integration each have their own stage
   await expect(list.locator('article[data-member="backend-developer"]')).toContainText('Tests ✓');
   await expect(list.locator('article[data-member="backend-developer"]')).toContainText('Integrated');
-  await expect(list.locator('article[data-member="qa-engineer"]')).toHaveAttribute('data-status', 'off');
+  await expect(list.locator('article[data-member="qa-engineer"]')).toHaveAttribute('data-status', 'done');
   await expect(page.locator('.stackbtn')).toHaveCount(0); // a finished task lists everyone; no stacks
 });
 
-test('a single-item task has four stages and no integration step; the activity link filters the Activity tab to that item', async ({ page }) => {
+test('a single-item task has five stages including QA and no integration step; the activity link filters the Activity tab to that item', async ({ page }) => {
   await signIn(page); const task = await find('Fix the greeting so the existing test passes');
   await page.goto(`${base}/ui/tasks/${task.id}`);
-  await expect(stages(page)).toHaveText(['1 · Plan', '2 · Build', '3 · Review', '4 · Commit']);
+  await expect(stages(page)).toHaveText(['1 · Plan', '2 · Build', '3 · QA', '4 · Review', '5 · Commit']);
   await expect(page.locator('[data-stage="review"] .member')).toContainText('Code Reviewer');
+  const detail = page.locator('[data-workflow-stage="build"]');
+  await expect(detail.locator('.work-item-title')).toHaveText('Fix greeting');
+  await expect(detail).toContainText('Prerequisites: approved plan');
+  await expect(detail.locator('.scope-paths')).not.toBeVisible();
+  await detail.getByText('Technical details', { exact: true }).click();
+  await expect(detail.locator('.scope-paths')).toBeVisible();
   await page.getByRole('button', { name: 'Show activity for fix' }).click();
   await expect(page.getByRole('tab', { name: 'Activity', exact: false })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('.card-head')).toContainText('Activity · item fix');
@@ -50,7 +58,8 @@ test('while a plan awaits approval, "You" is a member with the decision and ever
   await expect(plan).toContainText('● Needs you');
   await expect(plan.locator('[data-member="you"]')).toContainText(`Approve plan version `);
   await expect(page.locator('[data-stage="build"] .member')).toContainText('Starts after your decision');
-  await expect(page.getByRole('region', { name: 'Team members' }).locator('article').first()).toHaveAttribute('data-member', 'you');
+  await expect(page.locator('[data-workflow-stage="plan"] [data-member="you"]')).toBeVisible();
+  await expect(page.locator('[data-workflow-stage]').first()).toHaveAttribute('data-workflow-stage', 'plan');
 });
 
 test('a failed task names the stopped member, the sibling that never ran and the review and commit that were not reached', async ({ page }) => {
@@ -71,5 +80,5 @@ test('the team board stacks at 390 px without horizontal scrolling and renders h
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   expect(await page.evaluate(() => document.querySelectorAll('script[src="x"], img[src="x"], iframe').length)).toBe(0);
   await expect(page.getByRole('heading', { level: 1 })).toContainText('<script>');
-  await expect(page.getByRole('region', { name: 'Team members' }).locator('article')).not.toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Execution workflow' }).locator('article')).not.toHaveCount(0);
 });

@@ -43,7 +43,7 @@ const fixtureProject = await repo('fixture', {
 const websiteProject = await repo('website', { 'README.md': '# Website\n', 'greeting.cjs': "module.exports = () => 'broken';\n", 'greeting.test.cjs': "const test = require('node:test'); const assert = require('node:assert/strict'); test('greeting', () => assert.equal(require('./greeting.cjs')(), 'hello'));\n" });
 
 const store = new Store(join(data, 'devagents.db'));
-const config = Config.parse({ schemaVersion: 1, concurrency: 2, maxRepairCycles: 1 });
+const config = Config.parse({ schemaVersion: 1, concurrency: 2, maxRepairCycles: 1, qaEnabled: true });
 const service = new TaskService(store, config, data);
 await service.registerProject({ id: 'fixture', path: fixtureProject });
 await service.registerProject({ id: 'website', path: websiteProject, defaultMode: 'plan-approval' });
@@ -71,6 +71,7 @@ const engine = {
       if (multi) return { output: { summary: 'Implement independent A/B modules and combine them', risks: ['Fixture risk: module c depends on both a and b'], integration: { assignedAgent: 'general-developer', validation: [{ executable: 'node', args: ['--test', 'a.test.cjs', 'b.test.cjs', 'c.test.cjs'] }] }, items: ['a', 'b', 'c'].map(id => ({ id, title: `Module ${id}`, description: `Implement module ${id} so its test passes`, acceptanceCriteria: [`${id}.test.cjs passes`], dependsOn: id === 'c' ? ['a', 'b'] : [], requiredCapabilities: ['implementation'], assignedAgent: id === 'a' ? 'backend-developer' : id === 'b' ? 'frontend-developer' : 'general-developer', projectId, branch: `${branch}-${id}`, ownedPaths: [`project:/${id}/**`], validation: [{ executable: 'node', args: ['--test', `${id}.test.cjs`] }] })) } };
       return { output: { summary: 'Fix the greeting so the existing test passes', risks: [], integration: null, items: [{ id: 'fix', ownedPaths: ['project:/**'], title: 'Fix greeting', description: 'Return hello from greeting.cjs', acceptanceCriteria: ['greeting.test.cjs passes'], dependsOn: [], requiredCapabilities: ['implementation'], assignedAgent: 'general-developer', projectId, branch, validation: [{ executable: 'node', args: ['--test', 'greeting.test.cjs'] }] }] } };
     }
+    if (request.phase === 'qa') return { output: { summary: 'Fixture QA passed', checks: JSON.parse(/QA criteria:\n([^\n]+)/.exec(request.prompt)[1]).map(c => ({ criterionId: c.id, status: 'passed', evidence: 'Deterministic fixture verification' })), limitations: [] } };
     if (request.phase === 'setup') return { output: { ready: true, summary: 'Fixture prerequisites ready' } };
     if (request.phase === 'implementation') {
       if (hold) { const start = Date.now(); while (Date.now() - start < holdMs) { if (await access(holdFile).then(() => true, () => false)) break; if (request.signal.aborted) throw new Error('cancelled'); await new Promise(r => setTimeout(r, 250)); } }

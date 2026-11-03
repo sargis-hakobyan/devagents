@@ -22,6 +22,8 @@ export const Config = z.strictObject({
   schemaVersion: z.literal(1),
   defaultMode: Mode.optional(),
   devagentsRules: z.boolean().default(false),
+  /** Separate agent QA is opt-in; project validation and code review always remain enabled. */
+  qaEnabled: z.boolean().default(false),
   defaultEngine: Id.default('codex'),
   defaultProvider: Id.default('openai'),
   providers: z.array(Provider).default([{ id: 'openai', kind: 'openai', auth: 'login' }]),
@@ -29,6 +31,8 @@ export const Config = z.strictObject({
   maxRepairCycles: z.number().int().min(0).max(3).default(3),
   executionTimeoutMs: z.number().int().min(1000).max(3600000).default(1800000),
   validationTimeoutMs: z.number().int().min(1000).max(600000).default(600000),
+  minFreeDiskBytes: z.number().int().min(256 * 1024 ** 2).max(Number.MAX_SAFE_INTEGER).default(5 * 1024 ** 3),
+  compactCompletedTasks: z.boolean().default(true),
   workspaceScanLimit: z.number().int().min(1000).max(2000000).default(200000),
   /** An explicit model ID pins team snapshots; without it `model: default` means the runtime chooses at execution. */
   defaultModel: z.string().min(1).max(200).optional(),
@@ -103,7 +107,8 @@ export type Task = z.infer<typeof TaskInput> & {
   devagentsRules?: boolean;
   id: string; runId: string; state: TaskState; version: number;
   createdAt: string; updatedAt: string; plan?: TaskPlan;
-  workspace?: { path: string; branch: string; baseSha: string };
+  /** baseSha is the task's main snapshot; originalHead separately guards the user's checkout (absent on legacy tasks). */
+  workspace?: { path: string; branch: string; baseSha: string; originalHead?: string };
   agents?: AgentDefinition[];
   team?: TaskTeam;
   /** `limitations`: checks that could not run in this environment, reported rather than retried. */

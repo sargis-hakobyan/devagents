@@ -6,6 +6,7 @@ import { useNow, usePoll } from '../state';
 export function OverviewPage() {
   const now = useNow();
   const { data: overview, error } = usePoll(resources.overview.key, resources.overview.load, resources.overview.intervalMs);
+  const storage = usePoll(resources.storage.key, resources.storage.load, resources.storage.intervalMs).data;
   const status = usePoll(resources.status.key, resources.status.load, resources.status.intervalMs).data;
   const projects = usePoll(resources.projects.key, resources.projects.load, resources.projects.intervalMs).data;
   const teams = usePoll(resources.teams.key, resources.teams.load, resources.teams.intervalMs).data;
@@ -16,6 +17,8 @@ export function OverviewPage() {
   const attentionCount = n('awaiting_mode', 'awaiting_plan_approval');
   const headline = attentionCount ? `${attentionCount} task${attentionCount > 1 ? 's' : ''} waiting for you` : running.length ? 'Work is running' : queued.length ? 'Work is queued' : 'Nothing is running';
   return <>
+    {storage?.executionFailure && <div class="note warn" role="alert"><b>Execution halted.</b> {storage.executionFailure.message} Recover storage and restart the service before running more work. <a href={`/ui/tasks/${storage.executionFailure.taskId}`}>Inspect the affected task</a>.</div>}
+    {storage?.measured && storage.availableBytes! < storage.minimumStartBytes && <div class="note warn" role="alert"><b>Low disk space:</b> {(storage.availableBytes! / 1024 ** 3).toFixed(2)} GiB available. Preparation requires {(storage.minimumStartBytes / 1024 ** 3).toFixed(1)} GiB of headroom. Open a finished task to preview compaction.</div>}
     {((status && (!status.codex.installed || !status.codex.signedIn || status.codex.vaultLocked)) || projects?.length === 0) && <div class="note info"><a href="/ui/settings/setup">Finish setup</a> · Check connection availability, register a project and choose a team.</div>}
     <div class="page-head">
       <div><div class="h">Overview</div><h1>Workspace</h1><p>{headline}{running[0] ? ` · ${running[0].workItems.filter(i => i.state === 'completed').length} of ${running[0].workItems.length || '?'} items integrated on the running task` : ''}.</p></div>
@@ -73,6 +76,7 @@ export function OverviewPage() {
         <Card title="Scheduler"><div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
           <div class="mono">{status ? `concurrency ${status.limits.concurrency} · repairs ${status.limits.maxRepairCycles} · wave scheduling` : '…'}</div>
           <div class="muted" style={{ fontSize: '12px' }}>The next request starts after the current one finishes.</div>
+          <div class="muted" style={{ fontSize: '12px' }}>{storage?.measured ? `${(storage.availableBytes! / 1024 ** 3).toFixed(2)} GiB available on the task-data filesystem` : 'Storage availability not measured'}</div>
         </div></Card>
       </aside>
     </div>

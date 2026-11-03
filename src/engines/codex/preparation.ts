@@ -1,3 +1,4 @@
+import { assertDiskSpace } from '../../workspace/disk-space.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -10,8 +11,9 @@ import { safeEnvironment, sandboxFlags, verifyCodex } from './sandbox.js';
  * constructed by the environment adapter; callers cannot supply executable/argv or scripts.
  */
 export class CodexDependencyInstaller implements DependencyInstaller {
-  constructor(private readonly dataDir: string, private readonly binary = 'codex', private readonly options: { scanLimit?: number; timeoutMs?: number } = {}) {}
+  constructor(private readonly dataDir: string, private readonly binary = 'codex', private readonly options: { scanLimit?: number; timeoutMs?: number; minFreeDiskBytes?: number } = {}) {}
   async install(cwd: string, manager: 'npm' | 'pnpm', signal: AbortSignal) {
+    await assertDiskSpace(this.dataDir, this.options.minFreeDiskBytes);
     const home = join(this.dataDir, 'preparation-runs', randomUUID()); const temp = join(home, 'tmp');
     await mkdir(temp, { recursive: true, mode: 0o700 });
     try {

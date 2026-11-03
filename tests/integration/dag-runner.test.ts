@@ -4,12 +4,12 @@ import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fixture } from '../helpers.js';
-import { FixtureValidator } from '../fixtures/fake-engine.js';
+import { FixtureValidator, fixtureQualityReport } from '../fixtures/fake-engine.js';
 import { TaskRunner } from '../../src/orchestration/runner.js';
 import { git } from '../../src/workspace/git.js';
 import type { CodingEngine, EngineRequest, EngineResult } from '../../src/domain/engine.js';
 
-type Options = { failAfterReport?: boolean; limitations?: boolean; environmentRecovery?: boolean; synchronizeWorkers?: boolean; devagentsRules?: boolean; projectCommands?: boolean; hidden?: boolean; markdown?: boolean; unresolved?: 'markers' | 'separator'; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
+type Options = { qaFirstFails?: boolean; qaBlocked?: boolean; failAfterReport?: boolean; limitations?: boolean; environmentRecovery?: boolean; synchronizeWorkers?: boolean; devagentsRules?: boolean; projectCommands?: boolean; hidden?: boolean; markdown?: boolean; unresolved?: 'markers' | 'separator'; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
 async function dagFixture(options: Options = {}) {
   const f = await fixture(options.devagentsRules ?? true);
   // Modules live in per-item directories so ownership uses subtree grants, the only write-grant form the Linux runtime accepts.
@@ -43,6 +43,11 @@ async function dagFixture(options: Options = {}) {
     async execute(r, progress): Promise<EngineResult> {
       if (options.synchronizeWorkers && r.phase === 'implementation') assert.ok(preparedCwds.has(r.cwd), 'every worker must prepare before implementation');
       calls.push(r);
+      if (r.phase === 'qa') {
+        const report = fixtureQualityReport(r);
+        if (options.qaBlocked || options.qaFirstFails && calls.filter(c => c.phase === 'qa').length === 1) { report.checks[0]!.status = options.qaBlocked ? 'blocked' : 'failed'; report.checks[0]!.evidence = 'Combined behavior needs verification'; }
+        return { output: report };
+      }
       if (r.phase === 'planning') {
         const branch = await git(r.cwd, ['branch', '--show-current']);
         return { output: { summary: 'Build two modules and combine them', risks: [], integration: { assignedAgent: 'general-developer', validation: [{ executable: 'node', args: options.projectCommands ? ['-e', "require('./a.test.cjs');require('./b.test.cjs');require('./c.test.cjs')"] : ['--test', 'a.test.cjs', 'b.test.cjs', 'c.test.cjs'] }, ...(options.invalidCombinedCommand ? [{ executable: 'node', args: ['-e', 'throw new Error("Must not execute")'] }] : [])] }, items: ['a', 'b', 'c'].map(id => ({
@@ -206,6 +211,26 @@ test('service shutdown during a wave marks running workers interrupted and unsta
     assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
   } finally { await f.runner.stop(); await f.cleanup(); }
 });
+test('DAG completes from main while the source checkout is on a different branch', async () => {
+  const f = await dagFixture();
+  try {
+    const main = await git(f.project, ['rev-parse', 'main']);
+    await git(f.project, ['switch', '-c', 'unrelated-feature']);
+    await writeFile(join(f.project, 'feature-only.txt'), 'Do not include this in the task');
+    await git(f.project, ['add', 'feature-only.txt']); await git(f.project, ['commit', '-qm', 'Unrelated feature']);
+    const head = await git(f.project, ['rev-parse', 'HEAD']);
+    const task = f.service.submit({ projectId: 'fixture', request: 'Three modules', mode: 'autonomous' }, 'main-dag');
+    await f.runner.idle(); const done = f.store.task(task.id);
+    assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
+    assert.equal(done.workspace!.baseSha, main); assert.equal(done.workspace!.originalHead, head);
+    assert.equal(await git(f.project, ['rev-parse', 'HEAD']), head);
+    assert.equal(await git(done.workspace!.path, ['ls-files', 'feature-only.txt']), '');
+    const contexts = f.store.evidence(task.id).filter(e => e.kind === 'review-context');
+    assert.ok(contexts.length >= 4);
+    for (const entry of contexts) assert.equal((entry.data as { workspaceEvidence: { originalHeadUnchanged: boolean } }).workspaceEvidence.originalHeadUnchanged, true);
+  } finally { await f.runner.stop(); await f.cleanup(); }
+});
+
 test('cancellation drains all concurrent workers and prevents dependency execution', async () => {
   const f = await dagFixture({ wait: true });
   try {
@@ -369,5 +394,35 @@ test('a sibling failure retains reports already accepted from another worker', a
     await f.runner.idle(); const done = f.store.task(task.id);
     assert.equal(done.state, 'failed'); assert.equal(done.outcome!.commit, undefined);
     assert.ok(done.outcome!.limitations!.some(r => r.startsWith('Screenshot of module a')));
+  } finally { await f.runner.stop(); await f.cleanup(); }
+});
+
+for (const blocked of [false, true]) test(`combined QA ${blocked ? 'blocks unverifiable work' : 'rechecks after a bounded integration repair'}`, async () => {
+  const f = await dagFixture(blocked ? { qaBlocked: true } : { qaFirstFails: true });
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Modules', mode: 'autonomous' }, `combined-qa-${blocked}`);
+    await f.runner.idle(); const done = f.store.task(task.id);
+    assert.equal(done.state, blocked ? 'failed' : 'completed', JSON.stringify(done.outcome));
+    const qa = f.calls.filter(c => c.phase === 'qa');
+    assert.equal(qa.length, blocked ? 1 : 2);
+    assert.ok(qa.every(c => c.workItemId === '@integration' && c.cwd === done.workspace!.path));
+    assert.ok(qa.every(c => c.agent.id === 'qa-engineer' && c.agent.permissions.writePaths.length === 0));
+    const finalReviews = f.calls.filter(c => c.phase === 'review' && c.workItemId === '@integration');
+    assert.equal(finalReviews.length, blocked ? 0 : 1);
+    if (blocked) { assert.equal(done.outcome?.commit, undefined); assert.equal(done.outcome?.repairCycles, 0); }
+    else { assert.match(finalReviews[0]!.prompt, /QA report for this diff/); assert.equal(done.outcome?.repairCycles, 1); }
+  } finally { await f.runner.stop(); await f.cleanup(); }
+});
+
+test('disabling QA preserves parallel item validation, integration, and final code review', async () => {
+  const f = await dagFixture(); f.service.config.qaEnabled = false;
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Modules', mode: 'autonomous' }, 'combined-no-qa');
+    await f.runner.idle(); const done = f.store.task(task.id);
+    assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
+    assert.equal(f.calls.some(c => c.phase === 'qa'), false);
+    assert.equal(f.calls.filter(c => c.phase === 'review' && c.workItemId === '@integration').length, 1);
+    assert.equal(f.store.workItems(task.id).filter(i => i.state === 'completed').length, 3);
+    assert.ok(done.outcome?.commit);
   } finally { await f.runner.stop(); await f.cleanup(); }
 });

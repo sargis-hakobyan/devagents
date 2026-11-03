@@ -12,7 +12,16 @@ import { Config } from '../../src/domain/schemas.js';
 
 test('starter bootstrap is persistent and idempotent, defaults new projects and freezes normal task snapshots', async () => {
   const f = await fixture();
-  const runner = new TaskRunner(f.service, new FakeEngine(), new FixtureValidator());
+  const engine = new FakeEngine();
+  const execute = engine.execute.bind(engine);
+  engine.execute = async request => {
+    const result = await execute(request);
+    if (request.phase === 'planning') {
+      (result.output as { items: { assignedAgent: string }[] }).items[0]!.assignedAgent = 'backend-developer';
+    }
+    return result;
+  };
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator());
   try {
     const legacy = f.service.submit({ projectId: 'fixture', request: 'Already submitted' }, 'legacy');
     const starter = await f.service.initializeStarterTeam();

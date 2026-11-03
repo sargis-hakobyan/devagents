@@ -3,8 +3,10 @@ import { ImplementationEvidence } from './implementation-evidence.js';
 import { describeLimitations, implementationLimitationInstructions, LimitationLedger, planningLimitationInstructions, redactReportProse, reportDataInstructions, reviewLimitationInstructions } from '../domain/limitations.js';
 import { executionAgent, taskRules, validationInstructions } from '../domain/execution-policy.js';
 import { randomUUID } from 'node:crypto';
+import { redact, log } from '../telemetry/redact.js';
+import { assertDiskSpace, DATABASE_HEADROOM } from '../workspace/disk-space.js';
 import { z } from 'zod';
-import type { CodingEngine, EnginePhase, Validator } from '../domain/engine.js';
+import type { CodingEngine, EnginePhase, Validator, ValidationResult } from '../domain/engine.js';
 import { PolicyEngine } from '../domain/policy.js';
 import { protectedPath } from '../domain/protected-paths.js';
 import type { AgentDefinition, Task } from '../domain/schemas.js';
@@ -22,15 +24,17 @@ import { assertValidationCommands, validationFailed, describeValidationFailure }
 import { NodeEnvironmentPreparer, type EnvironmentPreparer } from '../workspace/environment.js';
 import { CodexDependencyInstaller } from '../engines/codex/preparation.js';
 import { selectImplementer, independentReviewer } from '../domain/roles.js';
-import { ImplementationOutput, PlanningOutput, ReviewOutput, SetupOutput, outputJsonSchema } from './outputs.js';
+import { ImplementationOutput, PlanningOutput, QualityOutput, ReviewOutput, SetupOutput, outputJsonSchema } from './outputs.js';
+import { qualityCriteria, qualityResult, selectQualityAgent } from './quality.js';
 import { validateWithSetup } from './validate.js';
 
 export const SHUTDOWN_REASON = 'Service shutdown interrupted execution; inspect preserved worktrees and evidence before submitting a new task';
 
 export class TaskRunner {
   private readonly queued = new Set<string>();
-  private active: { id: string; abort: AbortController; promise: Promise<void> } | undefined;
+  private active: { id: string; abort: AbortController; promise: Promise<void>; drained?: boolean } | undefined;
   private stopping = false;
+  executionFailure: { taskId: string; message: string } | undefined;
   private closing?: Promise<void>;
   private repairs = 0;
   private ledger: LimitationLedger | undefined;
@@ -39,10 +43,11 @@ export class TaskRunner {
   private readonly setupRecoveries = new Set<string>();
   private readonly setupSummaries = new Map<string, string>();
   private readonly implementationEvidence = new Map<string, string>();
+  private readonly qualityEvidence = new Map<string, string>();
   private prepared: { task: Task; rules: boolean; agents: AgentDefinition[]; lead: AgentDefinition } | undefined;
   readonly workflows: TaskWorkflows;
   constructor(private readonly service: TaskService, private readonly engine: CodingEngine, private readonly validator: Validator,
-    private readonly environment: EnvironmentPreparer = new NodeEnvironmentPreparer(service.dataDir, new CodexDependencyInstaller(service.dataDir, 'codex', { scanLimit: service.config.workspaceScanLimit }))) {
+    private readonly environment: EnvironmentPreparer = new NodeEnvironmentPreparer(service.dataDir, new CodexDependencyInstaller(service.dataDir, 'codex', { scanLimit: service.config.workspaceScanLimit, minFreeDiskBytes: service.config.minFreeDiskBytes }))) {
     const signal = (id: string) => {
       if (this.active?.id !== id) throw new AppError('workflow_ownership', 'Workflow does not own the active task slot');
       return this.active.abort.signal;
@@ -63,6 +68,8 @@ export class TaskRunner {
     });
   }
   enqueue(id: string): void {
+    this.service.assertNotMaintaining(id);
+    if (this.executionFailure) throw new AppError('execution_halted', 'Execution halted after an unexpected persistence/runtime failure; recover storage and restart the service before submitting more work', 503);
     if (this.stopping) throw new AppError('stopping', 'Service is shutting down', 503);
     const task = this.service.store.task(id);
     if (!['awaiting_mode', 'planning', 'awaiting_plan_approval', 'ready'].includes(task.state)) return;
@@ -71,9 +78,10 @@ export class TaskRunner {
     this.drain();
   }
   cancel(id: string): void {
+    this.service.assertNotMaintaining(id);
     if (this.active?.id === id) this.active.abort.abort();
     // The service records cancellation synchronously before this queued reconciliation runs.
-    this.queued.add(id); this.drain();
+    if (!this.executionFailure) { this.queued.add(id); this.drain(); }
   }
   stop(): Promise<void> {
     this.closing ??= (async () => {
@@ -82,22 +90,39 @@ export class TaskRunner {
     })();
     return this.closing;
   }
+  isDrained(id: string): boolean { return (this.active?.id !== id || this.active.drained === true) && !this.queued.has(id) && this.workflows.isDrained(id); }
   get busy(): boolean { return Boolean(this.active || this.queued.size); }
   async idle(): Promise<void> { while (this.active) await this.active.promise; }
   /** Call after domain recovery under the service lock. Restore waits, never auto-replay work. */
   async recover(): Promise<void> {
     for (const task of this.service.store.tasks()) {
-      if (terminalStates.includes(task.state)) await this.workflows.run(task.id);
+      if (terminalStates.includes(task.state)) {
+        await this.workflows.run(task.id);
+        await this.service.compactCompletedTask(task.id);
+      }
       else if (['awaiting_mode', 'awaiting_plan_approval'].includes(task.state)) this.enqueue(task.id);
     }
   }
   private drain(): void {
-    if (this.active || this.stopping) return;
+    if (this.active || this.stopping || this.executionFailure) return;
     const id = this.queued.values().next().value as string | undefined;
     if (!id) return; this.queued.delete(id);
     const abort = new AbortController();
-    const promise = Promise.resolve().then(() => this.run(id, abort.signal)).finally(() => { this.active = undefined; this.drain(); });
+    const promise = Promise.resolve().then(() => this.run(id, abort.signal)).catch(error => this.halt(id, error)).finally(async () => {
+      try {
+        await this.workflows.drain(id);
+        if (this.active?.id === id) this.active.drained = true;
+        if (!this.executionFailure) await this.service.compactCompletedTask(id);
+      } catch (error) { this.halt(id, error); }
+      finally { this.active = undefined; this.drain(); }
+    });
     this.active = { id, abort, promise };
+  }
+  private halt(id: string, error: unknown): void {
+    const message = String(redact(error instanceof Error ? error.message : String(error), this.service.store.secrets)).slice(0, 2000);
+    this.executionFailure ??= { taskId: id, message }; this.queued.clear();
+    // Logging must not depend on the failed database, nor take down the HTTP/read path.
+    try { log('execution_halted', { taskId: id, message }); } catch { /* stderr may also be unavailable */ }
   }
   private ensureActive(id: string, signal: AbortSignal): Task {
     const task = this.service.store.task(id);
@@ -137,9 +162,10 @@ export class TaskRunner {
     try {
       const cwd = context?.cwd ?? task.workspace!.path;
       const setup = phase === 'setup' ? undefined : this.setupSummaries.get(cwd);
-      const handoff = phase === 'review' ? this.implementationEvidence.get(cwd) : undefined;
+      const handoff = ['qa', 'review'].includes(phase) ? this.implementationEvidence.get(cwd) : undefined;
+      const quality = phase === 'review' ? this.qualityEvidence.get(cwd) : undefined;
       const observed = phase === 'implementation' ? new ImplementationEvidence(this.service.store.secrets) : undefined;
-      const result = await this.engine.execute({ devagentsRules: taskRules(task), runId, phase, cwd, ...(context ? { workItemId: context.workItemId } : {}), prompt: `${agent.instructions}\n\n${reportDataInstructions}\n\n${setup ? `Environment preparation notes (including any baseline failures to address):\n${setup}\n\n` : ''}${handoff ? `${handoff}\n\n` : ''}${prompt}`, agent, provider: this.provider(task, agent), schema: outputJsonSchema(schema), signal, timeoutMs: this.service.config.executionTimeoutMs }, event => {
+      const result = await this.engine.execute({ devagentsRules: taskRules(task), runId, phase, cwd, ...(context ? { workItemId: context.workItemId } : {}), prompt: `${agent.instructions}\n\n${reportDataInstructions}\n\n${setup ? `Environment preparation notes (including any baseline failures to address):\n${setup}\n\n` : ''}${handoff ? `${handoff}\n\n` : ''}${quality ? `QA report for this diff:\n${quality}\n\n` : ''}${prompt}`, agent, provider: this.provider(task, agent), schema: outputJsonSchema(schema), signal, timeoutMs: this.service.config.executionTimeoutMs }, event => {
         observed?.observe(event);
         this.service.store.record(id, 'progress', { runId, ...context, ...event });
       });
@@ -164,16 +190,18 @@ export class TaskRunner {
   private async prepare(id: string, signal: AbortSignal) {
     let task = this.ensureActive(id, signal);
     if (this.prepared?.task.id === id) return { ...this.prepared, task };
+    await assertDiskSpace(this.service.dataDir, this.service.config.minFreeDiskBytes);
     if (!['planning', 'ready'].includes(task.state)) throw new AppError('invalid_transition', 'Task cannot prepare in its current state');
     // A team task's roster was frozen at submission; a legacy task reads the registry now and snapshots it with the worktree.
     const rules = taskRules(task);
     const roster = task.agents ?? await this.service.agents(task.projectId);
-    const agents = roster.map(a => executionAgent(a, rules));
+    const agents = roster.map(a => executionAgent(!this.service.config.qaEnabled && a.capabilities.includes('testing') && !a.capabilities.some(c => ['implementation', 'planning', 'review'].includes(c)) ? { ...a, enabled: false } : a, rules));
     const lead = agents.find(a => a.enabled && a.delegation.canDelegate && a.capabilities.includes('planning'));
     if (!lead) throw new AppError('missing_agent', task.team ? `Team "${task.team.name}" has no enabled planner` : 'No enabled Tech Lead with planning capability');
     await this.engine.preflight(this.provider(task, lead));
     this.ensureActive(id, signal);
     if (!task.workspace) {
+      await assertDiskSpace(this.service.dataDir, this.service.config.minFreeDiskBytes);
       this.service.store.record(id, 'worktree-intent', { owner: task.id });
       const workspace = await new WorkspaceManager(this.service.dataDir).create(this.service.store.project(task.projectId), task.id, task.request);
       task = this.ensureActive(id, signal);
@@ -197,16 +225,20 @@ export class TaskRunner {
       this.ensureActive(id, signal);
       task = await this.service.proposePlan(id, plan, agents);
       this.ledger!.add(task.plan?.manualChecks);
+      this.assignQuality(task, agents);
     }
   }
   private async execute(id: string, signal: AbortSignal): Promise<void> {
     let { task, rules, agents } = await this.prepare(id, signal);
     task = this.ensureActive(id, signal);
     if (task.state !== 'ready' || !task.plan) throw new AppError('invalid_plan', 'No executable approved plan');
+    const qa = this.assignQuality(task, agents);
+    if (qa) await this.engine.preflight(this.provider(task, qa));
     if (task.plan.items.length > 1) {
       await runDag({ ledger: this.ledger!, service: this.service, engine: this.engine, validator: this.validator, task, agents, signal,
         active: () => this.ensureActive(id, signal), move: (state, reason, patch) => this.move(id, state, reason, patch),
         invoke: (phase, agent, prompt, schema, workerSignal, context) => this.invoke(id, phase, agent, prompt, schema, workerSignal, context),
+        quality: (current, evidence, owner) => this.quality(id, qa, owner, current, evidence, signal, '@integration'),
         workflows: this.workflows, prepareEnvironment: (cwd, commands, workerSignal, workItemId, feedback) => this.prepareEnvironment(id, cwd, commands, workerSignal, workItemId, feedback), provider: agent => this.provider(task, agent), onRepair: () => ++this.repairs, stopping: () => this.stopping,
       });
       return;
@@ -243,7 +275,8 @@ export class TaskRunner {
         recover: feedback => this.prepareEnvironment(id, task.workspace!.path, item.validation, signal, undefined, feedback),
       });
       const after = await changes(task.workspace!, developer);
-      if (validationFailed(evidence)) feedback = `${describeValidationFailure(evidence)}. Repair these failures:\n${validationEvidence(evidence)}`;
+      const qualityFeedback = validationFailed(evidence) ? '' : await this.quality(id, qa, developer, after, evidence, signal);
+      if (validationFailed(evidence) || qualityFeedback) feedback = qualityFeedback || `${describeValidationFailure(evidence)}. Repair these failures:\n${validationEvidence(evidence)}`;
       else {
         this.ensureActive(id, signal); this.move(id, 'reviewing', 'Independent review of the diff and validation evidence');
         for (const file of after.files) await new PolicyEngine().file(reviewer, task.workspace!.path, file, 'read');
@@ -272,6 +305,35 @@ export class TaskRunner {
       return false;
     });
   }
+  private assignQuality(task: Task, agents: AgentDefinition[]): AgentDefinition | undefined {
+    if (!this.service.config.qaEnabled) {
+      this.service.store.record(task.id, 'qa-assignment', { state: 'skipped', reason: 'QA is disabled; use your pipeline for verification' });
+      return undefined;
+    }
+    const implementers = task.plan!.items.map(item => selectImplementer(agents, item)?.id ?? '');
+    if (task.plan!.integration) implementers.push(task.plan!.integration.assignedAgent);
+    const reviewAgent = independentReviewer(agents, implementers);
+    const qa = selectQualityAgent(agents, [...implementers, ...(reviewAgent ? [reviewAgent.id] : [])]);
+    this.service.store.record(task.id, 'qa-assignment', qa ? { agentId: qa.id, state: 'assigned' } : { state: 'skipped', reason: 'No enabled QA agent in the task team' });
+    return qa;
+  }
+  private async quality(id: string, qa: AgentDefinition | undefined, owner: AgentDefinition, current: Awaited<ReturnType<typeof changes>>, evidence: ValidationResult[], signal: AbortSignal, workItemId?: string): Promise<string> {
+    if (!qa) return '';
+    const task = this.ensureActive(id, signal); const cwd = task.workspace!.path;
+    this.qualityEvidence.delete(cwd);
+    for (const file of current.files) await new PolicyEngine().file(qa, cwd, file, 'read');
+    const readOnlyQa: AgentDefinition = { ...qa, permissions: { ...qa.permissions, writePaths: [], allowPush: false } };
+    const report = await this.invoke(id, 'qa', readOnlyQa,
+      `Verify the complete implemented change as the independent QA engineer before final code review and commit. Do not modify project files, commit, push, or repair the implementation. Check every listed criterion exactly once using its criterionId. Inspect the actual diff and run focused checks when your tools permit. Record concrete evidence for each result. Typecheck and lint alone do not prove visual behavior, keyboard interaction, or runtime correctness. Do not mark an unexecuted behavioral check as passed. Code inspection may establish static criteria; say explicitly when that is the evidence. A defect is failed; a required check that cannot be verified is blocked with the missing prerequisite. Never waive a required criterion as a limitation. Optional manual checks may remain limitations; do not retry unavailable tools or install system packages. ${qa.permissions.allowCommands ? 'Use existing project tools for focused verification; write temporary test scripts or reports only outside the project in your temporary directory.' : 'Command execution is unavailable; report any criterion requiring it as blocked.'}\nQA criteria:\n${JSON.stringify(qualityCriteria(task))}\nPlan:\n${JSON.stringify(task.plan)}\nRecorded limitations (not evidence of passing required criteria):\n${JSON.stringify(this.ledger!.snapshot())}\nDiff:\n${current.diff}\nRecorded validation results:\n${validationEvidence(evidence)}`,
+      QualityOutput, signal, workItemId ? { cwd, workItemId } : undefined) as z.infer<typeof QualityOutput>;
+    this.ensureActive(id, signal);
+    if ((await changes(task.workspace!, owner)).digest !== current.digest) throw new AppError('qa_mutated_files', 'Files changed during QA; validation and QA evidence are invalid');
+    const result = qualityResult(task, report);
+    this.service.store.record(id, 'qa-result', { agentId: qa.id, ...result, ...report, ...(workItemId ? { workItemId } : {}) });
+    this.qualityEvidence.set(cwd, JSON.stringify(report));
+    if (result.state === 'blocked') throw new AppError('qa_blocked', `QA could not verify required acceptance criteria. ${result.feedback}`);
+    return result.state === 'failed' ? `QA requested repairs:\n${result.feedback}` : '';
+  }
   private async prepareEnvironment(id: string, cwd: string, commands: { executable: string; args: string[] }[], signal: AbortSignal, workItemId?: string, feedback?: string): Promise<void> {
     const task = this.ensureActive(id, signal);
     const rules = taskRules(task);
@@ -288,6 +350,7 @@ export class TaskRunner {
           ? agents.find(a => a.id === task.plan!.integration!.assignedAgent)
           : selectImplementer(agents, item);
         if (!agent) throw new AppError('missing_agent', 'No implementer available for environment setup');
+        await assertDiskSpace(this.service.dataDir, this.service.config.minFreeDiskBytes);
         record({ state: 'installing', message: feedback ? 'Agent repairing the environment after validation; no code-repair budget used' : 'Agent preparing project tools, dependencies and setup scripts' });
         const output = await this.invoke(id, 'setup', agent, `Prepare this worktree for the approved task's implementation and validation. Inspect the actual project instructions, manifests, lockfiles and setup scripts; use the project's tooling, including non-Node projects. Install missing dependencies and local tools, run necessary lifecycle scripts, hooks, code generation and builds. Network access is available inside the sandbox. Respect the package manager's own policies; do not disable checks or replace tests to claim success. Prefer existing locked versions. Use lightweight prerequisite probes to establish readiness; do not run all full validation suites during setup. The orchestrator runs the declared checks after implementation. Source or configuration fixes needed for setup stay visible for independent review. Do not implement the feature yet, commit, push or modify Git metadata. The original checkout and saved credentials are unavailable. Avoid Git-hook installation in this worktree (for Husky, use HUSKY=0). HOME is dedicated to this worktree and persists across setup, implementation and validation; put tools in $HOME/bin or $HOME/.local/bin, which are on PATH. Shell exports and daemons do not persist between calls. Readiness means tools and dependencies are usable, not that all existing tests already pass. Existing source/test syntax errors, failing assertions and project test-runner configuration defects are implementation work: return ready=true with those baseline failures described for the implementer. You may fix setup configuration without weakening checks. Report optional environment-blocked checks in limitations; they do not change readiness and must not trigger tooling repair. Never use limitations to waive the declared validation commands. Return ready=false only for an environment blocker you cannot resolve, such as unavailable credentials, services or required system privileges.\nValidation commands: ${JSON.stringify(commands)}\n${feedback ? `Previous preparation or validation reported a blocker. Diagnose and repair tooling/setup within your permissions. Distinguish an environment blocker from an existing source/test defect that implementation can repair:\n${feedback}` : ''}`, SetupOutput, signal, workItemId ? { cwd, workItemId } : undefined) as z.infer<typeof SetupOutput>;
         if (!output.ready) {
@@ -322,24 +385,38 @@ export class TaskRunner {
     this.service.store.checkpoint(id, task.version, { outcome: { ...task.outcome, repairCycles: this.repairs, ...snapshot } }, 'Reported environment limitations retained');
   }
   private async run(id: string, signal: AbortSignal): Promise<void> {
-    this.repairs = 0; this.prepared = undefined; this.setupWorktrees.clear(); this.setupRecoveries.clear(); this.setupSummaries.clear(); this.implementationEvidence.clear();
+    this.repairs = 0; this.prepared = undefined; this.setupWorktrees.clear(); this.setupRecoveries.clear(); this.setupSummaries.clear(); this.implementationEvidence.clear(); this.qualityEvidence.clear();
     this.attempts.clear();
     const initial = this.service.store.task(id);
     this.ledger = terminalStates.includes(initial.state) ? undefined : new LimitationLedger(this.service.store.secrets);
     this.ledger?.add(initial.plan?.manualChecks);
+    let pressureError: unknown; let checking: Promise<void> | undefined; let watching = true;
+    const watch = setInterval(() => {
+      if (checking || !watching) return;
+      checking = assertDiskSpace(this.service.dataDir, DATABASE_HEADROOM).catch(error => {
+        if (!watching) return;
+        pressureError = error; this.active?.abort.abort();
+      }).finally(() => { checking = undefined; });
+    }, 2000);
+    watch.unref();
     try {
+      // Disk preflight stays in the existing Mastra preparation hooks; this only monitors headroom.
       await this.workflows.run(id);
     } catch (error) {
+      const cancelled = signal.aborted && !pressureError;
+      this.active?.abort.abort();
+      await this.workflows.drain(id);
       const task = this.service.store.task(id);
       if (terminalStates.includes(task.state)) return;
-      const detail = error instanceof Error ? error.message : String(error);
-      // A service shutdown is not a user decision: record it as failed with an explicit reason so
-      // recovery and the event history show interrupted work rather than a cancellation.
+      const cause = pressureError ?? error;
+      const detail = cause instanceof Error ? cause.message : String(cause);
       const reason = this.stopping ? `${SHUTDOWN_REASON} (${detail})` : detail;
-      this.move(id, signal.aborted && !this.stopping && task.state !== 'committing' ? 'cancelled' : 'failed', reason, { outcome: { error: reason, repairCycles: this.repairs, ...this.ledger?.snapshot() } });
+      this.move(id, cancelled && !this.stopping && task.state !== 'committing' ? 'cancelled' : 'failed', reason, { outcome: { error: reason, repairCycles: this.repairs, ...this.ledger?.snapshot() } });
     } finally {
-      // This runs after child workflows drain, including cancellation's already-terminal task.
-      this.persistLimitations(id); this.ledger = undefined;
+      watching = false; clearInterval(watch); await checking;
+      await this.workflows.drain(id);
+      try { this.persistLimitations(id); } catch (error) { this.halt(id, error); }
+      this.ledger = undefined;
     }
   }
 }

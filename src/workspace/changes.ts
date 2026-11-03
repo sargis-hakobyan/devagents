@@ -31,7 +31,7 @@ export async function changes(workspace: NonNullable<Task['workspace']>, agent: 
   return { files, digest: digest.digest('hex'), diff: review };
 }
 export async function commitChanges(project: Project, workspace: NonNullable<Task['workspace']>, files: string[], message = 'Implement reviewed DevAgents task'): Promise<string> {
-  if (await git(project.path, ['rev-parse', 'HEAD']) !== workspace.baseSha) throw new AppError('base_diverged', 'Original project HEAD changed; inspect the worktree before integrating');
+  if (await git(project.path, ['rev-parse', 'HEAD']) !== (workspace.originalHead ?? workspace.baseSha)) throw new AppError('base_diverged', 'Original project HEAD changed; inspect the worktree before integrating');
   return commitOwned(workspace, files, message);
 }
 export async function commitOwned(workspace: NonNullable<Task['workspace']>, files: string[], message: string): Promise<string> {

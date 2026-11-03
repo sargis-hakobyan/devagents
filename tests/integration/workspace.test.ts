@@ -1,12 +1,66 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, writeFile, symlink, mkdir } from 'node:fs/promises';
+import { access, readFile, writeFile, symlink, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { WorkspaceManager, git, inspectProject } from '../../src/workspace/git.js';
 import { scopedPath } from '../../src/workspace/paths.js';
 import { changes, commitChanges } from '../../src/workspace/changes.js';
 import { fixture } from '../helpers.js';
+
+test('every task starts clean from current local main, ignoring other branches and prior task work', async () => {
+  const f = await fixture();
+  try {
+    await writeFile(join(f.project, '.gitignore'), 'ignored.txt\n');
+    await git(f.project, ['add', '.gitignore']); await git(f.project, ['commit', '-qm', 'Ignore local artifacts']);
+    const main = await git(f.project, ['rev-parse', 'main']);
+    await git(f.project, ['switch', '-c', 'unrelated-feature']);
+    await writeFile(join(f.project, 'feature-only.txt'), 'Another branch');
+    await git(f.project, ['add', '.']); await git(f.project, ['commit', '-qm', 'Unrelated work']);
+    const originalHead = await git(f.project, ['rev-parse', 'HEAD']);
+    await writeFile(join(f.project, 'README.md'), 'Staged user changes'); await git(f.project, ['add', 'README.md']);
+    await writeFile(join(f.project, 'README.md'), 'Unstaged user changes');
+    await writeFile(join(f.project, 'local.txt'), 'Untracked user file');
+    await writeFile(join(f.project, 'ignored.txt'), 'Ignored user file');
+    const originalStatus = await git(f.project, ['status', '--porcelain', '--ignored']);
+    const project = await inspectProject({ id: 'fixture', path: f.project });
+    assert.equal(project.baseSha, main, 'registration records main even when another branch is checked out');
+    const manager = new WorkspaceManager(f.dataDir); const id = randomUUID();
+    const a = await manager.create(project, id, 'Same request');
+    assert.equal(a.baseSha, main); assert.equal(a.originalHead, originalHead);
+    assert.equal(await git(a.path, ['status', '--porcelain', '--ignored']), '');
+    for (const file of ['feature-only.txt', 'local.txt', 'ignored.txt']) await assert.rejects(access(join(a.path, file)));
+    assert.equal(await readFile(join(a.path, 'README.md'), 'utf8'), '# Fixture\n');
+    await writeFile(join(a.path, 'task-only.txt'), 'First task result');
+    const result = await commitChanges(project, a, ['task-only.txt']);
+    const b = await manager.create(project, randomUUID(), 'Same request');
+    assert.notEqual(a.branch, b.branch); assert.equal(b.baseSha, main);
+    await assert.rejects(access(join(b.path, 'task-only.txt')), 'another task must not inherit this result');
+    await assert.rejects(manager.create(project, id, 'Same request'), 'existing task branches are never reset or reused');
+    assert.equal(await git(project.path, ['rev-parse', a.branch]), result);
+    // Simulate the user updating main after registration; the next task takes its new tip.
+    await git(project.path, ['update-ref', 'refs/heads/main', result, main]);
+    const c = await manager.create(project, randomUUID(), 'New main');
+    assert.equal(c.baseSha, result);
+    assert.equal(await git(c.path, ['status', '--porcelain', '--ignored']), '');
+    assert.equal(await git(f.project, ['symbolic-ref', '--short', 'HEAD']), 'unrelated-feature');
+    assert.equal(await git(f.project, ['rev-parse', 'HEAD']), originalHead);
+    assert.equal(await git(f.project, ['status', '--porcelain', '--ignored']), originalStatus);
+    assert.equal(await readFile(join(f.project, 'README.md'), 'utf8'), 'Unstaged user changes');
+  } finally { await f.cleanup(); }
+});
+
+test('missing local main fails explicitly instead of falling back to HEAD or origin/main', async () => {
+  const f = await fixture();
+  try {
+    await git(f.project, ['branch', '-m', 'other']);
+    await git(f.project, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+    const missingMain = (error: unknown) => (error as { code?: string }).code === 'main_branch_missing';
+    await assert.rejects(inspectProject({ id: 'fixture', path: f.project }), missingMain);
+    await assert.rejects(new WorkspaceManager(f.dataDir).create(f.store.project('fixture'), randomUUID(), 'No fallback'), missingMain);
+    assert.equal(await git(f.project, ['for-each-ref', '--format=%(refname)', 'refs/heads/devagents/']), '');
+  } finally { await f.cleanup(); }
+});
 
 test('large tracked lockfiles can be reviewed, fully fingerprinted and committed', async () => {
   const f = await fixture(false);

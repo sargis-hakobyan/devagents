@@ -199,6 +199,7 @@ fieldset:disabled .field input, fieldset:disabled .field select, fieldset:disabl
 .dot.done{background:#1E9A5B}.dot.busy{background:var(--run-icon)}.dot.you{background:var(--warn-icon)}
 .pipe{list-style:none;margin:0;padding:0;display:grid;gap:0 18px;align-items:stretch}
 .pipe.stages-5{grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)}
+.pipe.stages-6{grid-template-columns:repeat(6,minmax(0,1fr))}
 .pipe.stages-4{grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr)}
 .stagecol{position:relative;display:flex;flex-direction:column;gap:10px;padding:14px 12px;border-radius:12px;background:var(--sidebar);border:1px solid var(--row);min-width:0}
 .stagecol.now{background:#F3F6FF;border-color:#C5D3F7}
@@ -223,9 +224,32 @@ fieldset:disabled .field input, fieldset:disabled .field select, fieldset:disabl
 .stackbtn:hover{border-color:#8E92AD;background:var(--sidebar)}.stackbtn.open{border-style:solid}
 .stackgroup{display:flex;flex-direction:column;gap:10px}.stackrows{display:flex;flex-direction:column;gap:10px}
 .memberlist{display:flex;flex-direction:column;gap:12px}
+.workflow-heading h2{margin:0;font-size:18px;font-weight:700;letter-spacing:-.02em}
+.workflow-heading p,.workflow-step-heading p{margin:3px 0 0;color:var(--muted);font-size:13px}
+.workflow-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0}
+.workflow-step{position:relative;display:grid;grid-template-columns:32px minmax(0,1fr);gap:14px;padding:0 0 22px}
+.workflow-step:not(:last-child)::before{content:"";position:absolute;left:15px;top:34px;bottom:2px;width:2px;background:var(--border)}
+.workflow-number{position:relative;display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:var(--neutral-bg);border:1px solid var(--border);color:var(--muted);font-weight:700}
+.workflow-step.done>.workflow-number{background:var(--ok-bg);border-color:#B9E2CD;color:var(--ok-text)}
+.workflow-step.busy>.workflow-number{background:var(--run-bg);border-color:#ADC2EF;color:var(--run-text)}
+.workflow-step.fail>.workflow-number{background:var(--bad-bg);border-color:var(--bad-border);color:var(--bad-text)}
+.workflow-content{display:flex;flex-direction:column;gap:10px;min-width:0}
+.workflow-step-heading{padding-top:3px}.workflow-step-heading h3{margin:0;font-size:15px;font-weight:700}
+.work-item-title{font-size:14px;font-weight:650}
+.work-item-details{font-size:13px;color:var(--muted)}
+.work-item-details summary,.workflow-unused summary{cursor:pointer;font-weight:600;padding:4px 0}
+.work-item-details[open] summary{margin-bottom:8px}.work-item-details dl{color:var(--text);margin:0}
+.scope-paths{display:flex;flex-direction:column;gap:4px;min-width:0}
+.workflow-unused{margin-left:46px;border-top:1px solid var(--border);padding-top:10px;color:var(--muted);font-size:13px}
+.workflow-unused .stackrows{padding-top:10px}
 .mcard{padding:14px;display:flex;flex-direction:column;gap:10px}
 .mcard.now{border-color:var(--run-icon);box-shadow:0 0 0 3px var(--run-bg)}.mcard.need{border-color:var(--warn-border);background:#FFFBF2}.mcard.failed{border-color:var(--bad-border)}.mcard.off{opacity:.75;border-style:dashed}
 .mcard .member .stage{margin-left:auto;flex:0 0 auto}
 .mcard-item{display:flex;flex-direction:column;gap:8px;padding-top:8px;border-top:1px solid var(--row)}
 .mcard-facts{font-size:13px;grid-template-columns:96px minmax(0,1fr);gap:4px 10px}
-@media(max-width:900px){.pipe.stages-5,.pipe.stages-4{grid-template-columns:minmax(0,1fr);gap:10px}.link{display:none}.mcard-facts{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:900px){.pipe.stages-6,.pipe.stages-5,.pipe.stages-4{grid-template-columns:minmax(0,1fr);gap:10px}.link{display:none}.mcard-facts{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:600px){.workflow-step{grid-template-columns:26px minmax(0,1fr);gap:8px}.workflow-number{width:26px;height:26px}.workflow-step:not(:last-child)::before{left:12px;top:29px}.workflow-unused{margin-left:34px}.workflow-content .mcard>.member{flex-wrap:wrap}.workflow-content .mcard>.member>.stage{margin-left:52px}}
+
+.avatar.blocked{background:var(--warn-icon);box-shadow:0 0 0 2px #fff,0 0 0 4px var(--warn-icon)}
+.abadge.blocked{background:var(--accent);color:var(--ink)}
+.workflow-step.blocked>.workflow-number{background:var(--warn-bg);border-color:var(--warn-border);color:var(--warn-text)}

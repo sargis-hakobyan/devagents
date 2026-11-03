@@ -26,13 +26,15 @@ try {
   execFileSync('git', ['-C', project, '-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'Initial fixture']);
   await mkdir(data);
   store = new Store(join(data, 'state.db'));
-  const config = Config.parse({ schemaVersion: 1, executionTimeoutMs: 180000 });
+  // Keep this fixture's checkout for the post-completion sandbox containment check below.
+  const config = Config.parse({ schemaVersion: 1, executionTimeoutMs: 180000, compactCompletedTasks: false });
   const service = new TaskService(store, config, data);
   await service.registerProject({ id: 'fixture', path: project });
   const engine = live ? new CodexAdapter(process.env.DEVAGENTS_DATA_DIR ?? '.devagents') : {
     id: 'codex', async preflight() {},
     async execute(request) {
       if (request.phase === 'planning') return { output: { summary: 'Fix greeting', risks: [], integration: null, items: [{ id: 'fix', ownedPaths: ['project:/**'], title: 'Fix greeting', description: 'Return hello', acceptanceCriteria: ['Existing test passes'], dependsOn: [], requiredCapabilities: ['implementation'], assignedAgent: 'general-developer', projectId: 'fixture', branch: await git(request.cwd, ['branch', '--show-current']), validation: [{ executable: 'node', args: ['--test', 'greeting.test.cjs'] }] }] } };
+      if (request.phase === 'qa') return { output: { summary: 'Fixture QA passed', checks: JSON.parse(/QA criteria:\n([^\n]+)/.exec(request.prompt)[1]).map(c => ({ criterionId: c.id, status: 'passed', evidence: 'Deterministic fixture verification' })), limitations: [] } };
       if (request.phase === 'setup') return { output: { ready: true, summary: 'Fixture prerequisites ready' } };
       if (request.phase === 'implementation') { await writeFile(join(request.cwd, 'greeting.cjs'), "module.exports = () => 'hello';\n"); return { output: { summary: 'Fixed greeting' } }; }
       return { output: { approved: true, summary: 'Fixture reviewed', findings: [] } };

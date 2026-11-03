@@ -68,40 +68,63 @@ export function Pipeline({ board, taskId, now }: { board: TeamBoard; taskId: str
         <Folded taskId={taskId} group={s.key} rows={s.members} now={now} render={m => <MemberRow key={m.key} m={m} now={now} />} />
       </li>)}
     </ol>
-    {board.notNeeded.length > 0 && <div class="muted" style={{ fontSize: '12.5px' }}>Not needed for this task: {board.notNeeded.map(m => <span key={m.id}><b>{m.name}</b> ({m.reason})</span>).reduce<ComponentChildren[]>((acc, el, i) => (i ? [...acc, ' · ', el] : [el]), [])}.</div>}
+    {board.notNeeded.length > 0 && <div class="muted" style={{ fontSize: '12.5px' }}>Unassigned members: {board.notNeeded.map(m => <span key={m.id}><b>{m.name}</b> ({m.reason})</span>).reduce<ComponentChildren[]>((acc, el, i) => (i ? [...acc, ' · ', el] : [el]), [])}.</div>}
   </section>;
 }
 
-/** One card per member. The list folds at six full rows while the task is active; a finished task lists everyone. */
+/** Keep detailed cards in workflow order; status changes must not move stages around. */
 export function MemberList({ board, taskId, now, rulesOn, terminal, onActivity }: { board: TeamBoard; taskId: string; now: number; rulesOn: boolean; terminal: boolean; onActivity: (item: string) => void }) {
-  const rows = [...board.list, ...board.notNeeded.map(m => ({ ...m, key: `member:${m.id}` }))];
-  const card = (m: BoardMember) => <article key={m.key} class={`card mcard ${m.status === 'busy' ? 'now' : m.status === 'you' ? 'need' : m.status === 'fail' ? 'failed' : m.status === 'off' ? 'off' : ''}`} data-member={m.id} data-status={m.status}>
+  const titles = { plan: 'Planning', build: 'Implementation', qa: 'Quality assurance', review: 'Review', integrate: 'Integration', commit: 'Commit' };
+  const descriptions = {
+    plan: 'Define the scope and approve the plan.',
+    build: board.multi ? 'Work items follow their dependencies. Independent items can run in parallel; each is validated and reviewed.' : 'Prepare the environment, implement the change, and run validation.',
+    review: board.multi ? 'Review the combined changes after integration and validation.' : 'Review the implementation and validation results.',
+    integrate: 'Combine the reviewed work items and validate the complete change.',
+    qa: 'Independently verify acceptance criteria. Resolve defects and blocked checks before final review.',
+    commit: 'Save the approved changes as a local commit.',
+  };
+  const itemTitles = new Map(board.stages.flatMap(s => s.members.flatMap(m => m.items.map(i => [i.id, i.title] as const))));
+  const card = (m: BoardMember) => <article key={m.key} class={`card mcard ${m.status === 'busy' ? 'now' : ['you', 'blocked'].includes(m.status) ? 'need' : m.status === 'fail' ? 'failed' : m.status === 'off' ? 'off' : ''}`} data-member={m.id} data-status={m.status}>
     <div class="member">
       <Avatar role={m.role} status={m.status} repairing={m.repairing} />
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div class="name wrap-anywhere">{m.name}{m.id !== m.name && m.role !== 'you' && m.role !== 'system' && <span class="mono muted" style={{ fontWeight: 500, marginLeft: '6px' }}>{m.id}</span>}</div>
+        <div class="name wrap-anywhere" title={m.id}>{m.name}</div>
         {m.items.length === 0 && m.lines.map((l, i) => <div key={i} class="what wrap-anywhere">{l}</div>)}
-        {m.items.length > 0 && <div class="what wrap-anywhere">{m.items.map(i => <span key={i.id}><span class="mono">{i.id}</span> · {i.title}{i.ownedPaths.length ? <> · {rulesOn ? 'owns' : 'planned scope'} <span class="mono">{i.ownedPaths.join(', ')}</span></> : null}{i.dependsOn.length ? <> · depends on <span class="mono">{i.dependsOn.join(', ')}</span></> : null}</span>).reduce<ComponentChildren[]>((acc, el, i) => (i ? [...acc, <br key={`br${i}`} />, el] : [el]), [])}</div>}
+        {m.items.length > 0 && <div class="what">{m.items.length} work item{m.items.length === 1 ? '' : 's'}</div>}
       </div>
-      <Stage tone={m.status === 'done' ? 'ok' : m.status === 'busy' ? 'run' : m.status === 'you' ? 'warn' : m.status === 'fail' ? 'bad' : 'neutral'}>{statusBadge[m.status]} {statusLabel[m.status]}</Stage>
+      <Stage tone={m.status === 'done' ? 'ok' : m.status === 'busy' ? 'run' : ['you', 'blocked'].includes(m.status) ? 'warn' : m.status === 'fail' ? 'bad' : 'neutral'}>{statusBadge[m.status]} {statusLabel[m.status]}</Stage>
     </div>
     {m.items.map(i => <div key={i.id} class="mcard-item">
-      {m.items.length > 1 && <span class="mono muted" style={{ fontSize: '12px' }}>{i.id}</span>}
+      <div class="work-item-title wrap-anywhere">{i.title}</div>
+      <div class="what wrap-anywhere">{i.dependsOn.length ? `After: ${i.dependsOn.map(id => itemTitles.get(id) ?? id).join(' · ')}` : 'Prerequisites: approved plan'}{i.status === 'busy' ? ` · Now: ${i.verb}` : ''}</div>
       <div class="stages">{i.chips.map((c, k) => <Stage key={k} tone={c.tone}>{c.text}</Stage>)}</div>
+      <details class="work-item-details"><summary>Technical details</summary>
       <dl class="kv mcard-facts">
+        <dt>Item</dt><dd class="mono wrap-anywhere">{i.id}</dd>
+        <dt>{rulesOn ? 'Owned paths' : 'Planned scope'}</dt><dd class="scope-paths">{i.ownedPaths.length ? i.ownedPaths.map(path => <span key={path} class="mono wrap-anywhere">{path}</span>) : 'Agent write scope'}</dd>
         {i.startedAt && <><dt>{i.status === 'busy' ? 'Started' : 'Ran'}</dt><dd>{clock(i.startedAt)}{i.finishedAt ? ` → ${clock(i.finishedAt)}` : i.status === 'busy' ? ` · ${duration(now - new Date(i.startedAt).getTime())} so far` : ''}</dd></>}
         <dt>Validation</dt><dd class="mono wrap-anywhere">{i.validation.join(' ; ') || '—'}</dd>
         <dt>Repairs</dt><dd>{i.repairCycles} used</dd>
         {i.updatedAt && <><dt>Last event</dt><dd>{clock(i.updatedAt)}</dd></>}
       </dl>
+      </details>
       {i.error && <div class="note bad" style={{ fontSize: '12.5px' }}>{i.error}</div>}
       <div><button type="button" class="btn small" onClick={() => onActivity(i.id)}>Show activity for {i.id}</button></div>
     </div>)}
     {m.items.length > 0 && m.lines.length > m.items.length && <div class="what wrap-anywhere">{m.lines.slice(m.items.length === 1 ? 1 : 2).join(' · ')}</div>}
     {m.durationMs !== undefined && m.durationMs > 0 && m.items.length > 0 && <div class="muted" style={{ fontSize: '12.5px' }}>Recorded run time: {duration(m.durationMs)}{m.repairing ? ' · including repairs' : ''}</div>}
   </article>;
-  return <section class="memberlist" aria-label="Team members">
-    <div class="h">Who is finished, who is working, who is left</div>
-    <Folded taskId={taskId} group="list" rows={rows} now={now} limit={terminal ? Number.POSITIVE_INFINITY : 6} render={card} />
+  return <section class="memberlist" aria-label="Execution workflow">
+    <header class="workflow-heading"><h2>Execution workflow</h2><p>Follow the numbered stages from planning to commit.</p></header>
+    <ol class="workflow-steps">
+      {board.stages.map(s => <li key={s.key} class={`workflow-step ${s.status}`} data-workflow-stage={s.key}>
+        <span class="workflow-number" aria-hidden="true">{s.number}</span>
+        <div class="workflow-content">
+          <header class="workflow-step-heading"><h3><span class="sr-only">{s.number}. </span>{titles[s.key]}</h3><p>{descriptions[s.key]}</p></header>
+          <Folded taskId={taskId} group={`workflow-${s.key}`} rows={s.members} now={now} limit={terminal ? Number.POSITIVE_INFINITY : 6} render={card} />
+        </div>
+      </li>)}
+    </ol>
+    {board.notNeeded.length > 0 && <details class="workflow-unused"><summary>Unassigned members ({board.notNeeded.length})</summary><div class="stackrows">{board.notNeeded.map(card)}</div></details>}
   </section>;
 }

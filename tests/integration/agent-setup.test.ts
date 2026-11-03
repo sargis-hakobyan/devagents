@@ -33,7 +33,7 @@ test('rules-off setup uses the frozen implementer after approval and accepts cus
     f.service.approve(task.id, f.store.task(task.id).version); await runner.idle();
     const done = f.store.task(task.id);
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
-    assert.deepEqual(calls.map(c => c.phase), ['planning', 'setup', 'implementation', 'review']);
+    assert.deepEqual(calls.map(c => c.phase), ['planning', 'setup', 'implementation', 'qa', 'review']);
     assert.match(calls.find(c => c.phase === 'review')!.prompt, /Reviewed project-specific setup adjustment/);
     assert.ok(done.outcome?.files?.includes('SETUP.md'));
     assert.equal(await git(f.project, ['rev-parse', 'HEAD']), original);

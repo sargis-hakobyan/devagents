@@ -33,7 +33,7 @@ const multiRunning = () => {
 test('a multi-item task in flight: five stages, measured lines, reviewer up next, QA not needed, ordered list', () => {
   const { evidence, items } = multiRunning();
   const b = board(base(), items, evidence);
-  assert.deepEqual(b.stages.map(s => `${s.number} ${s.title}`), ['1 Plan', '2 Build', '3 Review', '4 Integrate', '5 Commit']);
+  assert.deepEqual(b.stages.map(s => `${s.number} ${s.title}`), ['1 Plan', '2 Build', '3 Integrate', '4 Review', '5 Commit']);
   assert.equal(stage(b, 'plan').chip.text, '✓ Done'); assert.deepEqual(member(b, 'plan', 'tech-lead').lines, ['Plan v7 · 3 items · 41 s', 'Approved automatically']);
   assert.equal(stage(b, 'build').chip.text, '▶ 2 of 3 done');
   const backend = member(b, 'build', 'backend-developer'); assert.equal(backend.status, 'done'); assert.equal(backend.name, 'Backend Developer'); assert.equal(backend.durationMs, 100_000);
@@ -43,7 +43,7 @@ test('a multi-item task in flight: five stages, measured lines, reviewer up next
   const reviewer = member(b, 'review', 'code-reviewer'); assert.equal(reviewer.status, 'next'); assert.deepEqual(reviewer.lines, ['2 ✓ · 0 findings', 'Next: item c, once its tests pass']); assert.equal(stage(b, 'review').chip.text, '2 of 3');
   assert.equal(member(b, 'integrate', 'general-developer').status, 'next'); assert.equal(member(b, 'integrate', 'general-developer').lines[0], 'Combined validation · 4 commands');
   assert.equal(member(b, 'commit', 'devagents').lines[0], 'One local commit on devagents/three-modules-12b1ca2d');
-  assert.deepEqual(b.notNeeded.map(m => [m.id, m.reason]), [['qa-engineer', 'no item asks for testing']]);
+  assert.deepEqual(b.notNeeded.map(m => [m.id, m.reason]), [['qa-engineer', 'not assigned by the plan']]);
   assert.deepEqual(b.list.map(m => `${m.id}:${m.status}`), ['general-developer:busy', 'code-reviewer:next', 'devagents:next', 'tech-lead:done', 'backend-developer:done', 'frontend-developer:done']);
   assert.equal(b.list.find(m => m.id === 'general-developer')!.lines.length, 3, 'the developer card merges its build and integrate lines');
   assert.equal(b.summary, '5 of 6 members involved · 3 finished · 1 working · 1 up next');
@@ -64,7 +64,7 @@ test('a single-item task attributes item-less runs, validations and reviews to i
   const plan = { items: [item('fix', 'general-developer')], integration: null };
   const evidence: Ev[] = [...run('i', 'implementation', 'general-developer', 70, 90), ev('validation', 95, { exitCode: 0 }), ...run('r', 'review', 'code-reviewer', 100, 110, {}, { approved: false, summary: 'no', findings: ['Rename it'] }), ...run('i2', 'implementation', 'general-developer', 111, 130), ev('validation', 135, { exitCode: 0 }), ...run('r2', 'review', 'code-reviewer', 140, 150, {}, { approved: false, summary: 'no', findings: ['Still'] })];
   const b = board(base({ state: 'failed', plan, outcome: { error: 'Repair budget exhausted' } }), [{ itemId: 'fix', state: 'failed', agentId: 'general-developer' }], evidence);
-  const dev = member(b, 'build', 'general-developer'); assert.deepEqual(dev.items[0]!.chips.map(c => c.text), ['Implemented ×2', 'Tests ✕ then ✓ (2 runs)', 'Review · 1 finding']); assert.equal(dev.items[0]!.error, 'Repair budget exhausted');
+  const dev = member(b, 'build', 'general-developer'); assert.deepEqual(dev.items[0]!.chips.map(c => c.text), ['Implemented ×2', 'Tests ✓', 'Review · 1 finding']); assert.equal(dev.items[0]!.error, 'Repair budget exhausted');
   assert.equal(member(b, 'review', 'code-reviewer').lines[0], '0 ✓ · 1 ✕ · 1 finding');
   const waiting = board(base({ state: 'awaiting_plan_approval', plan, approval: { status: 'awaiting' } }), [{ itemId: 'fix', state: 'awaiting_plan_approval', agentId: 'general-developer' }], []);
   assert.equal(member(waiting, 'build', 'general-developer').items[0]!.verb, 'waiting for your approval'); assert.equal(member(waiting, 'build', 'general-developer').status, 'next');
@@ -80,6 +80,94 @@ test('"You" is a member only while a decision is yours, placed before the lead f
   assert.deepEqual(stage(mode, 'plan').members.map(m => m.id), ['you', 'tech-lead']); assert.equal(member(mode, 'plan', 'tech-lead').lines[0], 'Plans after you choose a mode');
   assert.equal(stage(mode, 'build').members.length, 0); assert.equal(stage(mode, 'build').chip.text, 'Up next');
   assert.equal(board(base(), [], []).list.some(m => m.id === 'you'), false);
+});
+
+test('developer setup and final preflight stay visibly working until implementation starts', () => {
+  const task = base({ state: 'ready', plan: { items: [item('fix', 'general-developer')] } });
+  const items = [{ itemId: 'fix', state: 'ready', agentId: 'general-developer' }];
+  const evidence = [...run('p', 'planning', 'tech-lead', 0, 93), ev('environment', 93, { state: 'installing' }), ...run('s', 'setup', 'general-developer', 93)];
+  const setup = board(task, items, evidence, T0 + 130_000);
+  const dev = member(setup, 'build', 'general-developer');
+  assert.equal(setup.counts.working, 1);
+  assert.equal(stage(setup, 'build').chip.text, '▶ Setting up');
+  assert.equal(dev.status, 'busy');
+  assert.match(dev.lines[0]!, /setting up dependencies and tools · 37 s$/);
+  assert.equal(dev.items[0]!.chips[0]!.text, 'Setting up');
+  assert.equal(dev.durationMs, 37_000);
+  assert.equal(dev.lines.some(l => /slot|Waiting for implementation/.test(l)), false);
+
+  evidence.push(ev('run-completed', 138, { runId: 's', phase: 'setup' }));
+  const preflight = board(task, items, evidence, T0 + 142_000);
+  assert.equal(preflight.counts.working, 1);
+  assert.equal(stage(preflight, 'build').chip.text, '▶ Checking tools');
+  assert.match(member(preflight, 'build', 'general-developer').lines[0]!, /checking tools before continuing/);
+
+  evidence.push(ev('environment', 145, { state: 'ready' }), ...run('i', 'implementation', 'general-developer', 145));
+  const implementing = board({ ...task, state: 'running' }, [{ ...items[0]!, state: 'running' }], evidence, T0 + 155_000);
+  const implementingDev = member(implementing, 'build', 'general-developer');
+  assert.equal(implementingDev.items[0]!.verb, 'implementing');
+  assert.equal(implementingDev.items[0]!.chips.length, 3);
+  assert.equal(implementingDev.durationMs, 55_000, 'setup and implementation run time are both counted');
+});
+
+test('setup is scoped to the active work item and cannot reopen stopped or completed tasks', () => {
+  const evidence = [ev('environment', 10, { workItemId: 'a', state: 'installing' }), ...run('s', 'setup', 'backend-developer', 10, undefined, { workItemId: 'a' })];
+  const items = [{ itemId: 'a', state: 'running', agentId: 'backend-developer' }, { itemId: 'b', state: 'pending', agentId: 'frontend-developer' }];
+  const b = board(base(), items, evidence);
+  assert.equal(member(b, 'build', 'backend-developer').items[0]!.verb, 'setting up dependencies and tools');
+  assert.equal(member(b, 'build', 'frontend-developer').status, 'next');
+  for (const state of ['failed', 'cancelled', 'completed']) {
+    const stopped = board(base({ state, plan: { items: [item('a', 'backend-developer')] } }), [{ ...items[0]!, state }], evidence);
+    assert.equal(stopped.counts.working, 0);
+    assert.notEqual(member(stopped, 'build', 'backend-developer').items[0]!.state, 'setup');
+  }
+});
+
+test('environment-only preparation and setup-run-only evidence both show work without inventing a queue wait', () => {
+  const task = base({ state: 'ready', plan: { items: [item('fix', 'general-developer')] } });
+  const checking = board(task, [], [ev('environment', 10, { state: 'checking' })]);
+  assert.equal(stage(checking, 'build').chip.text, '▶ Checking tools');
+  const setup = board(task, [], run('s', 'setup', 'general-developer', 10));
+  assert.equal(stage(setup, 'build').chip.text, '▶ Setting up');
+  const ready = board(task, [], [...run('s', 'setup', 'general-developer', 10), ev('environment', 20, { state: 'ready' })]);
+  assert.equal(stage(ready, 'build').status, 'next', 'readiness supersedes an incomplete run log');
+  assert.equal(member(ready, 'build', 'general-developer').lines[1], 'Waiting for implementation to start');
+});
+
+test('QA has an explicit stage, counts as working, and never invents verification for historical tasks', () => {
+  const task = base({ state: 'validating', plan: { items: [item('fix', 'general-developer')] } });
+  const evidence = [ev('qa-assignment', 5, { state: 'assigned', agentId: 'qa-engineer' }), ...run('i', 'implementation', 'general-developer', 10, 20), ev('validation', 21, { exitCode: 0 }), ...run('q', 'qa', 'qa-engineer', 22)];
+  const active = board(task, [], evidence, T0 + 30_000);
+  assert.deepEqual(active.stages.map(s => s.title), ['Plan', 'Build', 'QA', 'Review', 'Commit']);
+  assert.equal(stage(active, 'qa').chip.text, '▶ Verifying');
+  assert.equal(active.counts.working, 1);
+  assert.match(member(active, 'qa', 'qa-engineer').lines[0]!, /8 s/);
+  assert.equal(active.notNeeded.some(m => m.id === 'qa-engineer'), false);
+
+  evidence.push(ev('run-completed', 32, { runId: 'q', phase: 'qa' }), ev('qa-result', 33, { state: 'passed', summary: 'All criteria verified' }));
+  const passed = board({ ...task, state: 'reviewing' }, [], evidence);
+  assert.equal(stage(passed, 'qa').status, 'done');
+  const repaired = board({ ...task, state: 'running' }, [], [...evidence, ...run('i2', 'implementation', 'general-developer', 40)]);
+  assert.equal(stage(repaired, 'qa').status, 'next', 'changed implementation requires fresh QA');
+  const blockedEvidence = [...evidence.slice(0, -1), ev('qa-result', 33, { state: 'blocked', summary: 'Browser unavailable' })];
+  const blocked = board({ ...task, state: 'failed' }, [{ itemId: 'fix', state: 'failed', agentId: 'general-developer' }], blockedEvidence);
+  assert.equal(stage(blocked, 'qa').chip.text, 'Blocked');
+  assert.equal(stage(blocked, 'qa').status, 'blocked');
+  assert.equal(member(blocked, 'build', 'general-developer').status, 'done');
+  assert.equal(member(blocked, 'build', 'general-developer').items[0]!.state, 'implemented');
+  assert.equal(blocked.counts.failed, 0); assert.equal(blocked.counts.blocked, 1);
+  assert.equal(stage(blocked, 'commit').status, 'aborted');
+  const multiplePassingChecks = board({ ...task, state: 'failed' }, [], [...blockedEvidence, ev('validation', 34, { exitCode: 0 }), ev('validation', 35, { exitCode: 0 })]);
+  assert.deepEqual(member(multiplePassingChecks, 'build', 'general-developer').items[0]!.chips[1], { tone: 'ok', text: 'Tests ✓' }, 'several passing commands are not failed test attempts');
+  const cancelled = board({ ...task, state: 'cancelled' }, [], evidence.slice(0, -2));
+  assert.equal(stage(cancelled, 'qa').status, 'aborted');
+  assert.equal(cancelled.counts.working, 0);
+  const historical = board({ ...task, state: 'completed' }, [], []);
+  assert.equal(historical.stages.some(s => s.key === 'qa'), false);
+  assert.equal(historical.notNeeded.find(m => m.id === 'qa-engineer')!.reason, 'not assigned by the plan');
+  const disabled = board({ ...task, state: 'completed' }, [], [ev('qa-assignment', 5, { state: 'skipped', reason: 'QA is disabled; use your pipeline for verification' })]);
+  assert.equal(disabled.stages.some(s => s.key === 'qa'), false);
+  assert.match(disabled.notNeeded.find(m => m.id === 'qa-engineer')!.reason!, /QA is disabled/);
 });
 
 test('completed: everyone finished with the commit line; failed: stopped member, aborted sibling, review and commit not reached', () => {

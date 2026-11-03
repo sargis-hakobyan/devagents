@@ -7,6 +7,7 @@ export function evidenceMetadata(data: unknown): Record<string, unknown> {
   }
   if (typeof source.exitCode === 'number' && Number.isFinite(source.exitCode)) metadata.exitCode = source.exitCode;
   if (typeof source.truncated === 'boolean') metadata.truncated = source.truncated;
+  if (typeof source.summary === 'string') metadata.summary = source.summary.slice(0, 512);
   if (Array.isArray(source.args)) metadata.args = source.args.slice(0, 16).filter((v): v is string => typeof v === 'string').map(v => v.slice(0, 128));
   const output = source.output;
   if (output && typeof output === 'object') {

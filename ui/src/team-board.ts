@@ -4,10 +4,10 @@
  * the Node unit suite can exercise every state; the components only render what this returns. Every
  * value is a recorded run, event or checkpoint; durations are differences of recorded timestamps.
  */
-export type BoardStatus = 'done' | 'busy' | 'next' | 'you' | 'fail' | 'aborted' | 'off';
+export type BoardStatus = 'done' | 'busy' | 'next' | 'you' | 'fail' | 'blocked' | 'aborted' | 'off';
 export type BoardRole = 'lead' | 'developer' | 'reviewer' | 'qa' | 'you' | 'system' | 'other';
 export type Tone = 'ok' | 'run' | 'warn' | 'bad' | 'neutral';
-export type StageKey = 'plan' | 'build' | 'review' | 'integrate' | 'commit';
+export type StageKey = 'plan' | 'build' | 'qa' | 'review' | 'integrate' | 'commit';
 export type StageChip = { tone: Tone; text: string };
 export type BoardItem = {
   id: string; title: string; state: string; status: BoardStatus; verb: string; repairCycles: number; chips: StageChip[];
@@ -18,7 +18,7 @@ export type BoardMember = {
   stage: StageKey; reason?: string; durationMs?: number; startedAt?: string; finishedAt?: string;
 };
 export type BoardStage = { key: StageKey; number: number; title: string; chip: StageChip; status: BoardStatus; members: BoardMember[] };
-export type Counts = { involved: number; roster: number; finished: number; working: number; next: number; needsYou: number; failed: number; aborted: number };
+export type Counts = { involved: number; roster: number; finished: number; working: number; next: number; needsYou: number; failed: number; blocked: number; aborted: number };
 export type TeamBoard = { stages: BoardStage[]; list: BoardMember[]; notNeeded: BoardMember[]; counts: Counts; summary: string; multi: boolean };
 
 type Command = { executable: string; args: string[] };
@@ -36,10 +36,10 @@ export type BoardInput = {
   now: number;
 };
 
-const BUSY = new Set(['creating', 'running', 'validating', 'reviewing', 'repairing', 'checkpointing', 'integrating']);
+const BUSY = new Set(['setup', 'checking-tools', 'creating', 'running', 'validating', 'reviewing', 'repairing', 'checkpointing', 'integrating']);
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
 const VERBS: Record<string, string> = { pending: 'waiting', draft: 'waiting', awaiting_mode: 'waiting for the mode choice', awaiting_plan_approval: 'waiting for your approval', planning: 'being planned', ready: 'queued', committing: 'committing', creating: 'preparing a worktree', running: 'implementing', validating: 'validating', reviewing: 'in review', repairing: 'repairing', checkpointing: 'checkpointing', integrating: 'integrating', reviewed: 'reviewed', completed: 'integrated', failed: 'failed', aborted: 'aborted', interrupted: 'interrupted', cancelled: 'cancelled', blocked: 'blocked' };
-const RANK: Record<BoardStatus, number> = { you: 0, fail: 1, busy: 2, aborted: 3, next: 4, done: 5, off: 6 };
+const RANK: Record<BoardStatus, number> = { you: 0, fail: 1, blocked: 1, busy: 2, aborted: 3, next: 4, done: 5, off: 6 };
 const FOLD_LIMIT = 4;
 
 const facts = (e: BoardInput['evidence'][number]): Record<string, unknown> => (e.truncated ? e.metadata ?? {} : (e.data ?? {})) as Record<string, unknown>;
@@ -59,7 +59,7 @@ const short = (sha: string | undefined) => (sha ? sha.slice(0, 7) : '—');
 const command = (c: Command) => [c.executable, ...c.args].join(' ');
 export function itemStatus(state: string): BoardStatus {
   if (BUSY.has(state)) return 'busy';
-  if (state === 'reviewed' || state === 'completed' || state === 'committing') return 'done';
+  if (state === 'implemented' || state === 'reviewed' || state === 'completed' || state === 'committing') return 'done';
   if (state === 'failed') return 'fail';
   if (state === 'aborted' || state === 'interrupted') return 'aborted';
   if (state === 'cancelled' || state === 'blocked') return 'off';
@@ -94,6 +94,7 @@ export function teamBoard(input: BoardInput): TeamBoard {
 
   // Runs and per-item facts from the evidence log.
   const runs = new Map<string, Run>(); const perItem = new Map<string, ItemFacts>(); let commitAt: string | undefined;
+  const environments = new Map<string, { state: string; at: string; startedAt: string }>();
   const itemFacts = (id: string) => { let f = perItem.get(id); if (!f) { f = { tests: [], implementations: 0 }; perItem.set(id, f); } return f; };
   // A single-item task runs without the DAG: its runs and validations carry no item id and belong to the only item.
   const onlyItem = !multi ? plan?.items[0]?.id : undefined;
@@ -107,11 +108,20 @@ export function teamBoard(input: BoardInput): TeamBoard {
       if (e.kind === 'run-completed' && item && r.phase === 'review') { const rv = reviewOf(d.output); if (rv) itemFacts(item).review = rv; }
     }
     if (e.kind === 'validation' && item) itemFacts(item).tests.push({ exitCode: Number(d.exitCode), truncated: d.truncated === true });
+    if (e.kind === 'environment' && item) {
+      const previous = environments.get(item);
+      environments.set(item, { state: str(d.state) ?? '', at: e.at, startedAt: previous && ['checking', 'installing'].includes(previous.state) ? previous.startedAt : e.at });
+    }
     if (e.kind === 'item-commit-created' && item) { const c = str(d.commit); if (c) itemFacts(item).commit = c; }
     if (e.kind === 'commit-created') commitAt = e.at;
     if (e.kind === 'work-item' && item) { const f = itemFacts(item); const s = str(d.state) ?? ''; if (s !== 'pending' && !f.startedAt) f.startedAt = e.at; if (itemStatus(s) !== 'busy' && itemStatus(s) !== 'next') f.finishedAt = e.at; else delete f.finishedAt; }
   });
   const runList = [...runs.values()].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+  const qaAssignment = input.evidence.filter(e => e.kind === 'qa-assignment').pop();
+  const qaRuns = runList.filter(r => r.phase === 'qa');
+  const qaResultEntry = input.evidence.filter(e => e.kind === 'qa-result').pop();
+  const qaResult = qaResultEntry ? facts(qaResultEntry) : undefined;
+  const qaOpen = !terminal && qaRuns.find(r => !r.endedAt);
   const runMs = (r: Run) => new Date(r.endedAt ?? new Date(now).toISOString()).getTime() - new Date(r.startedAt).getTime();
   const sumRuns = (rs: Run[]) => rs.reduce((t, r) => t + Math.max(0, runMs(r)), 0);
   const member = (p: Partial<BoardMember> & { id: string; stage: StageKey; status: BoardStatus }): BoardMember => ({ key: `${p.stage}:${p.id}`, name: nameOf(p.id), role: roleOf(agent(p.id)), repairing: false, lines: [], items: [], ...p });
@@ -119,23 +129,42 @@ export function teamBoard(input: BoardInput): TeamBoard {
   // Items: the progress rows, or one synthesized row for a single-item task that runs without the DAG.
   const progress = new Map(input.items.map(i => [i.itemId, i]));
   const implementationRuns = runList.filter(r => r.phase === 'implementation' && r.workItemId !== '@integration');
+  const setupRuns = runList.filter(r => r.phase === 'setup');
+  const preparation = (itemId: string) => {
+    if (terminal) return undefined;
+    const environment = environments.get(itemId);
+    const setup = setupRuns.filter(r => r.workItemId === itemId).pop();
+    const latestRun = runList.filter(r => r.workItemId === itemId).pop();
+    // Environment readiness includes the preflight after the setup agent returns.
+    if (environment && ['checking', 'installing'].includes(environment.state)) {
+      if (latestRun && latestRun.phase !== 'setup' && latestRun.startedAt > environment.at) return undefined;
+      return { state: setup?.endedAt && setup.endedAt >= environment.at || environment.state === 'checking' ? 'checking-tools' : 'setup', startedAt: environment.startedAt, agentId: setup?.agentId };
+    }
+    if (setup && !setup.endedAt && latestRun === setup && (!environment || environment.at < setup.startedAt)) return { state: 'setup', startedAt: setup.startedAt, agentId: setup.agentId };
+    return undefined;
+  };
   const synthesized = (): string => ({ running: 'running', validating: 'validating', reviewing: 'reviewing', repairing: 'repairing', committing: 'completed', completed: 'completed', failed: 'failed', cancelled: 'cancelled' } as Record<string, string>)[task.state] ?? 'pending';
   const items: (BoardItem & { agentId: string | undefined })[] = (plan?.items ?? []).map(planned => {
     const p = progress.get(planned.id); const f = perItem.get(planned.id);
-    const state = p?.state ?? (!multi ? synthesized() : 'pending'); const status = itemStatus(state);
+    const preparing = preparation(planned.id);
+    const latestImplementation = implementationRuns.filter(r => r.workItemId === planned.id).at(-1);
+    const blockedAfterImplementation = !multi && qaResult?.state === 'blocked' && latestImplementation?.endedAt && qaResultEntry!.at >= latestImplementation.endedAt;
+    const state = !multi && (qaOpen || blockedAfterImplementation) ? 'implemented' : preparing?.state ?? p?.state ?? (!multi ? synthesized() : 'pending'); const status = itemStatus(state);
     const lastTest = f?.tests[f.tests.length - 1]; const ran = f?.tests.length ?? 0;
+    const hadFailedTest = f?.tests.some(t => t.exitCode !== 0 || t.truncated) ?? false;
     const chips: StageChip[] = [
+      ...(preparing ? [{ tone: 'run' as const, text: state === 'checking-tools' ? 'Checking tools' : 'Setting up' }] : []),
       { tone: f?.implementations ? 'ok' : state === 'running' ? 'run' : 'neutral', text: `Implemented${(f?.implementations ?? 0) > 1 ? ` ×${f!.implementations}` : ''}` },
-      { tone: !ran ? (state === 'validating' ? 'run' : 'neutral') : lastTest!.exitCode === 0 && !lastTest!.truncated ? (ran > 1 ? 'warn' : 'ok') : 'bad', text: !ran ? (state === 'validating' ? 'Tests running' : 'Tests') : lastTest!.exitCode === 0 && !lastTest!.truncated ? (ran > 1 ? `Tests ✕ then ✓ (${ran} runs)` : 'Tests ✓') : lastTest!.truncated ? 'Tests · output truncated' : `Tests ✕ (exit ${lastTest!.exitCode})` },
+      { tone: !ran ? (state === 'validating' ? 'run' : 'neutral') : lastTest!.exitCode === 0 && !lastTest!.truncated ? (hadFailedTest ? 'warn' : 'ok') : 'bad', text: !ran ? (state === 'validating' ? 'Tests running' : 'Tests') : lastTest!.exitCode === 0 && !lastTest!.truncated ? (hadFailedTest ? `Tests ✕ then ✓ (${ran} runs)` : 'Tests ✓') : lastTest!.truncated ? 'Tests · output truncated' : `Tests ✕ (exit ${lastTest!.exitCode})` },
       { tone: !f?.review ? (state === 'reviewing' ? 'run' : 'neutral') : f.review.approved ? 'ok' : 'warn', text: !f?.review ? 'Review' : f.review.approved ? 'Review ✓' : `Review · ${plural(f.review.findings, 'finding')}` },
       ...(multi ? [{ tone: (p?.commit ?? f?.commit) ? 'ok' : 'neutral', text: (p?.commit ?? f?.commit) ? `Checkpoint ${short(p?.commit ?? f?.commit)}` : 'Checkpoint' } as StageChip, { tone: state === 'completed' ? 'ok' : 'neutral', text: state === 'completed' ? 'Integrated' : 'Integration' } as StageChip] : []),
     ];
     const runsFor = implementationRuns.filter(r => r.workItemId === planned.id || (!multi && !r.workItemId));
-    const agentId = p?.agentId ?? runsFor[0]?.agentId ?? planned.assignedAgent;
+    const agentId = preparing?.agentId || p?.agentId || runsFor[0]?.agentId || planned.assignedAgent;
     return {
-      id: planned.id, title: planned.title, state, status, verb: VERBS[state] ?? state, repairCycles: p?.repairCycles ?? (!multi ? task.outcome?.repairCycles ?? 0 : 0), chips, agentId,
+      id: planned.id, title: planned.title, state, status, verb: state === 'setup' ? 'setting up dependencies and tools' : state === 'checking-tools' ? 'checking tools before continuing' : VERBS[state] ?? state, repairCycles: p?.repairCycles ?? (!multi ? task.outcome?.repairCycles ?? 0 : 0), chips, agentId,
       validation: planned.validation.map(command), ownedPaths: planned.ownedPaths ?? [], dependsOn: planned.dependsOn,
-      ...(f?.startedAt ?? runsFor[0]?.startedAt ? { startedAt: f?.startedAt ?? runsFor[0]!.startedAt } : {}), ...(f?.finishedAt ? { finishedAt: f.finishedAt } : {}), ...(p?.updatedAt ? { updatedAt: p.updatedAt } : {}),
+      ...(preparing?.startedAt ?? f?.startedAt ?? runsFor[0]?.startedAt ? { startedAt: preparing?.startedAt ?? f?.startedAt ?? runsFor[0]!.startedAt } : {}), ...(!preparing && f?.finishedAt ? { finishedAt: f.finishedAt } : {}), ...(p?.updatedAt ? { updatedAt: p.updatedAt } : {}),
       ...(p?.error || p?.reason ? { error: [p.reason, p.error].filter(Boolean).join(' · ') } : !multi && status === 'fail' && task.outcome?.error ? { error: task.outcome.error } : {}),
     };
   });
@@ -171,18 +200,19 @@ export function teamBoard(input: BoardInput): TeamBoard {
     const statuses = its.map(i => i.status);
     const status: BoardStatus = statuses.includes('busy') ? 'busy' : statuses.includes('fail') ? 'fail' : statuses.includes('next') ? (terminal ? 'aborted' : 'next') : statuses.includes('aborted') ? 'aborted' : statuses.every(s => s === 'off') ? 'off' : 'done';
     const m = member({ id: id === '?' ? '?' : id, name: id === '?' ? 'Any eligible agent' : nameOf(id), role: id === '?' ? 'developer' : roleOf(agent(id)), stage: 'build', status, items: its, repairing: its.some(i => i.state === 'repairing') });
-    const own = implementationRuns.filter(r => r.agentId === id && (multi ? its.some(i => i.id === r.workItemId) : true));
+    const own = runList.filter(r => ['setup', 'implementation'].includes(r.phase) && r.workItemId !== '@integration' && r.agentId === id && (multi ? its.some(i => i.id === r.workItemId) : true));
     m.durationMs = sumRuns(own); if (own[0]) m.startedAt = own[0].startedAt; const last = own.filter(r => r.endedAt).pop(); if (last?.endedAt && status !== 'busy') m.finishedAt = last.endedAt;
     if (its.length === 1) m.lines.push(itemLine(its[0]!, true));
     else { const done = its.filter(i => i.status === 'done').length; const busy = its.filter(i => i.status === 'busy'); m.lines.push(`${plural(its.length, 'item')} · ${done} integrated${busy.length ? ` · ${busy.map(i => `${i.id} ${i.verb}`).join(', ')}` : ''}${its.some(i => i.status === 'fail') ? ` · ${its.filter(i => i.status === 'fail').map(i => i.id).join(', ')} failed` : ''}`); m.lines.push(its.map(i => i.id).join(', ')); }
-    if (its.length === 1 && status === 'next' && !terminal) m.lines.push(task.state === 'awaiting_plan_approval' || task.state === 'awaiting_mode' ? 'Starts after your decision' : its[0]!.dependsOn.length ? `Waits for ${its[0]!.dependsOn.join(', ')}` : 'Starts when a slot is free');
+    if (its.length === 1 && status === 'next' && !terminal) m.lines.push(task.state === 'awaiting_plan_approval' || task.state === 'awaiting_mode' ? 'Starts after your decision' : its[0]!.dependsOn.length ? `Waits for ${its[0]!.dependsOn.join(', ')}` : 'Waiting for implementation to start');
     return m;
   });
   const doneItems = items.filter(i => i.status === 'done').length; const busyItems = items.filter(i => i.status === 'busy').length; const failedItems = items.filter(i => i.status === 'fail').length;
   const buildStatus: BoardStatus = !items.length ? (terminal ? 'aborted' : 'next') : busyItems ? 'busy' : failedItems ? 'fail' : doneItems === items.length ? 'done' : terminal ? 'aborted' : 'next';
   const buildStage: BoardStage = { key: 'build', number: 2, title: 'Build', status: buildStatus, members: developers, chip: buildStatus === 'done' ? { tone: 'ok', text: '✓ Done' } : buildStatus === 'busy' ? { tone: 'run', text: `▶ ${doneItems} of ${items.length} done` } : buildStatus === 'fail' ? { tone: 'bad', text: `✕ ${failedItems} stopped` } : buildStatus === 'aborted' ? { tone: 'neutral', text: doneItems ? `${doneItems} of ${items.length} done` : 'Not reached' } : { tone: 'neutral', text: 'Up next' } };
+  if (busyItems && items.filter(i => i.status === 'busy').every(i => ['setup', 'checking-tools'].includes(i.state))) buildStage.chip.text = items.some(i => i.state === 'setup') ? '▶ Setting up' : '▶ Checking tools';
 
-  // Stage 3 · Review
+  // Review follows combined validation for multi-item tasks.
   const reviewRuns = runList.filter(r => r.phase === 'review');
   const reviewerIds = [...new Set(reviewRuns.map(r => r.agentId).filter(Boolean))];
   if (!reviewerIds.length) { const r = roster.find(a => a.capabilities.includes('review') && !groups.has(a.id)) ?? roster.find(a => a.capabilities.includes('review')); if (r) reviewerIds.push(r.id); else if (reviewRuns.length) reviewerIds.push('reviewer'); }
@@ -203,12 +233,12 @@ export function teamBoard(input: BoardInput): TeamBoard {
   });
   const reviewStatus: BoardStatus = reviewers.some(r => r.status === 'busy') ? 'busy' : reviewers.every(r => r.status === 'done') && reviewers.length ? 'done' : reviewers.some(r => r.status === 'aborted') ? 'aborted' : 'next';
   const reviewedCount = items.filter(i => perItem.get(i.id)?.review?.approved).length;
-  const reviewStage: BoardStage = { key: 'review', number: 3, title: 'Review', status: reviewStatus, members: reviewers, chip: reviewStatus === 'done' ? { tone: 'ok', text: '✓ Done' } : reviewStatus === 'busy' ? { tone: 'run', text: '▶ Working' } : reviewStatus === 'aborted' ? { tone: 'neutral', text: 'Not reached' } : multi && reviewedCount ? { tone: 'neutral', text: `${reviewedCount} of ${items.length}` } : { tone: 'neutral', text: 'Up next' } };
+  const reviewStage: BoardStage = { key: 'review', number: multi ? 4 : 3, title: 'Review', status: reviewStatus, members: reviewers, chip: reviewStatus === 'done' ? { tone: 'ok', text: '✓ Done' } : reviewStatus === 'busy' ? { tone: 'run', text: '▶ Working' } : reviewStatus === 'aborted' ? { tone: 'neutral', text: 'Not reached' } : multi && reviewedCount ? { tone: 'neutral', text: `${reviewedCount} of ${items.length}` } : { tone: 'neutral', text: 'Up next' } };
 
-  // Stage 4 · Integrate (multi-item only)
+  // Stage 3 · Integrate (multi-item only)
   let integrateStage: BoardStage | undefined;
   if (multi && plan) {
-    const integrationRuns = runList.filter(r => r.workItemId === '@integration' && r.phase !== 'review');
+    const integrationRuns = runList.filter(r => r.workItemId === '@integration' && !['review', 'qa'].includes(r.phase));
     const combined = perItem.get('@integration'); const lastCombined = combined?.tests[combined.tests.length - 1];
     const allDone = items.length > 0 && doneItems === items.length;
     const status: BoardStatus = task.state === 'committing' || task.state === 'completed' || (lastCombined?.exitCode === 0 && !lastCombined.truncated && allDone && reviewStatus !== 'busy') ? 'done'
@@ -219,7 +249,7 @@ export function teamBoard(input: BoardInput): TeamBoard {
     m.lines.push(`Combined validation · ${plural(commands, 'command')}${combined?.tests.length ? ` · ${lastCombined!.exitCode === 0 ? '✓' : `✕ exit ${lastCombined!.exitCode}`}` : ''}`);
     m.lines.push(status === 'aborted' ? 'Not reached' : status === 'done' ? 'Final review followed' : 'Then a final review');
     m.durationMs = sumRuns(integrationRuns);
-    integrateStage = { key: 'integrate', number: 4, title: 'Integrate', status, members: [m], chip: status === 'done' ? { tone: 'ok', text: '✓ Done' } : status === 'busy' ? { tone: 'run', text: '▶ Working' } : status === 'aborted' ? { tone: 'neutral', text: 'Not reached' } : { tone: 'neutral', text: 'Up next' } };
+    integrateStage = { key: 'integrate', number: 3, title: 'Integrate', status, members: [m], chip: status === 'done' ? { tone: 'ok', text: '✓ Done' } : status === 'busy' ? { tone: 'run', text: '▶ Working' } : status === 'aborted' ? { tone: 'neutral', text: 'Not reached' } : { tone: 'neutral', text: 'Up next' } };
   }
 
   // Stage 5 · Commit
@@ -231,14 +261,35 @@ export function teamBoard(input: BoardInput): TeamBoard {
   else { system.lines.push(`One local commit on ${task.workspace?.branch ?? 'the task branch'}`); system.lines.push('Nothing is merged or pushed'); }
   const commitStage: BoardStage = { key: 'commit', number: integrateStage ? 5 : 4, title: 'Commit', status: commitStatus, members: [system], chip: commitStatus === 'done' ? { tone: 'ok', text: '✓ Done' } : commitStatus === 'busy' ? { tone: 'run', text: '▶ Committing' } : commitStatus === 'aborted' ? { tone: 'neutral', text: task.state === 'cancelled' ? 'Cancelled' : 'No commit' } : { tone: 'neutral', text: 'Up next' } };
 
-  const stages = [planStage, buildStage, reviewStage, ...(integrateStage ? [integrateStage] : []), commitStage];
+  let qaStage: BoardStage | undefined;
+  const qaId = qaAssignment ? str(facts(qaAssignment).agentId) : qaRuns[0]?.agentId;
+  if (qaId) {
+    const lastRun = qaRuns.at(-1);
+    const laterImplementation = implementationRuns.some(r => r.startedAt > (lastRun?.endedAt ?? lastRun?.startedAt ?? '')) || runList.some(r => r.phase === 'implementation' && r.workItemId === '@integration' && r.startedAt > (lastRun?.endedAt ?? ''));
+    const currentResult = qaResultEntry && lastRun?.endedAt && qaResultEntry.at >= lastRun.endedAt && !laterImplementation ? qaResult : undefined;
+    const status: BoardStatus = qaOpen ? 'busy' : currentResult?.state === 'passed' ? 'done' : currentResult?.state === 'blocked' ? 'blocked' : terminal && (currentResult?.state === 'failed' || lastRun?.failed) ? 'fail' : terminal ? 'aborted' : 'next';
+    const m = member({ id: qaId, stage: 'qa', status, role: 'qa' });
+    m.durationMs = sumRuns(qaRuns.filter(r => r.endedAt || !terminal));
+    if (qaRuns[0]) m.startedAt = qaRuns[0].startedAt;
+    if (lastRun?.endedAt && status !== 'busy') m.finishedAt = lastRun.endedAt;
+    if (qaOpen) m.lines.push(`Verifying acceptance criteria · ${duration(now - new Date(qaOpen.startedAt).getTime())}`);
+    else if (currentResult) m.lines.push(`${currentResult.state === 'passed' ? 'Passed' : currentResult.state === 'blocked' ? 'Blocked' : 'Changes requested'} · ${str(currentResult.summary) ?? 'See Activity for QA evidence'}`);
+    if (status === 'next') m.lines.push(lastRun ? 'Rechecks after repairs and validation' : multi ? 'Starts after combined validation' : 'Starts after implementation and validation');
+    if (status === 'aborted') m.lines.push('QA did not complete');
+    if (status === 'fail' && !currentResult) m.lines.push('QA stopped before completing verification; see Activity');
+    qaStage = { key: 'qa', number: 0, title: 'QA', status, members: [m], chip: { tone: status === 'busy' ? 'run' : status === 'done' ? 'ok' : status === 'blocked' ? 'warn' : status === 'fail' ? 'bad' : 'neutral', text: status === 'busy' ? '▶ Verifying' : status === 'done' ? '✓ Passed' : status === 'blocked' ? 'Blocked' : status === 'fail' ? 'Stopped' : status === 'aborted' ? 'Not completed' : 'Up next' } };
+  }
+  const stages = [planStage, buildStage, ...(integrateStage ? [integrateStage] : []), ...(qaStage ? [qaStage] : []), reviewStage, commitStage];
+  stages.forEach((s, i) => { s.number = i + 1; });
 
   // Not needed: enabled roster members the plan gave nothing to do.
   const involved = new Set(stages.flatMap(s => s.members.map(m => m.id)));
-  const required = new Set((plan?.items ?? []).flatMap(i => i.requiredCapabilities));
   const notNeeded: BoardMember[] = roster.filter(a => !involved.has(a.id)).map(a => {
-    const cap = ['testing', 'review', 'implementation', 'backend', 'frontend', 'planning'].find(c => a.capabilities.includes(c) && !required.has(c));
-    return member({ id: a.id, stage: 'build', status: 'off', role: roleOf(a), lines: [plan ? (cap ? `Not needed: no item asks for ${cap}` : 'Not needed: not assigned by the plan') : 'Waits for the plan'], reason: cap ? `no item asks for ${cap}` : 'not assigned by the plan' });
+    if (roleOf(a) === 'qa' && qaAssignment && facts(qaAssignment).state === 'skipped') {
+      const reason = str(facts(qaAssignment).reason) ?? 'QA skipped';
+      return member({ id: a.id, stage: 'qa', status: 'off', role: 'qa', lines: [reason], reason });
+    }
+    return member({ id: a.id, stage: 'build', status: 'off', role: roleOf(a), lines: [plan ? 'Not assigned by the plan' : 'Waits for the plan'], reason: 'not assigned by the plan' });
   });
 
   // The ordered member list: one card per member, merged across stages, most urgent status first.
@@ -252,9 +303,10 @@ export function teamBoard(input: BoardInput): TeamBoard {
   const list = [...merged.values()].sort((a, b) => RANK[a.status] - RANK[b.status]);
   const people = list.filter(m => m.role !== 'you' && m.role !== 'system');
   const count = (s: BoardStatus) => people.filter(m => m.status === s).length;
-  const counts: Counts = { involved: people.filter(m => m.id !== '?').length, roster: roster.length, finished: count('done'), working: count('busy'), next: count('next'), needsYou: you ? 1 : 0, failed: count('fail'), aborted: count('aborted') };
+  const counts: Counts = { involved: people.filter(m => m.id !== '?').length, roster: roster.length, finished: count('done'), working: count('busy'), next: count('next'), needsYou: you ? 1 : 0, failed: count('fail'), blocked: count('blocked'), aborted: count('aborted') };
   const parts = [`${counts.involved} of ${plural(counts.roster, 'member')} involved`, `${counts.finished} finished`, `${counts.working} working`, `${counts.next} up next`];
   if (counts.failed) parts.push(`${counts.failed} stopped`); if (counts.aborted) parts.push(`${counts.aborted} did not get a turn`); if (you) parts.push('1 decision is yours');
+  if (counts.blocked) parts.push(`${counts.blocked} blocked`);
   return { stages, list, notNeeded, counts, summary: parts.join(' · '), multi };
 }
 
@@ -277,5 +329,5 @@ export function fold<T extends { status: BoardStatus }>(rows: T[], limit = FOLD_
   }
   return out;
 }
-export const statusLabel: Record<BoardStatus, string> = { done: 'finished', busy: 'working now', next: 'up next', you: 'needs you', fail: 'stopped', aborted: 'did not get a turn', off: 'not needed' };
-export const statusBadge: Record<BoardStatus, string> = { done: '✓', busy: '▶', next: '…', you: '!', fail: '✕', aborted: '⚠', off: '–' };
+export const statusLabel: Record<BoardStatus, string> = { done: 'finished', busy: 'working now', next: 'up next', you: 'needs you', fail: 'stopped', blocked: 'verification blocked', aborted: 'did not get a turn', off: 'unassigned' };
+export const statusBadge: Record<BoardStatus, string> = { done: '✓', busy: '▶', next: '…', you: '!', fail: '✕', blocked: '!', aborted: '⚠', off: '–' };

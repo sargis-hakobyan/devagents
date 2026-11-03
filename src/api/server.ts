@@ -183,6 +183,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
         if (!options.status) throw new AppError('not_found', 'Status reporting is not configured', 404);
         return send(res, 200, await options.status());
       }
+      if (req.method === 'GET' && path === '/storage') return send(res, 200, await service.storageStatus());
       if (req.method === 'GET' && path === '/tasks') {
         const states = z.array(State).max(State.options.length).parse(url.searchParams.getAll('state'));
         const project = url.searchParams.get('projectId'); const projectId = project ? Id.parse(project) : undefined;
@@ -199,13 +200,14 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
         const input = await body(req); assertExecutionReady();
         return send(res, 201, service.submit(input, key));
       }
-      const match = /^\/tasks\/([a-f0-9-]{36})(?:\/(events|evidence|items|diff|run|mode|plan|approve|cancel|cleanup)(?:\/(\d{1,12}))?)?$/.exec(path);
+      const match = /^\/tasks\/([a-f0-9-]{36})(?:\/(events|evidence|items|diff|run|mode|plan|approve|cancel|cleanup|compaction-preview|compact)(?:\/(\d{1,12}))?)?$/.exec(path);
       if (match) {
         const id = match[1]!; const action = match[2]; const sub = match[3];
         if (req.method === 'GET' && action === 'diff' && !sub) {
           if (url.search) throw new AppError('invalid_diff_request', 'Diff requests accept a task ID only; no paths, refs or options');
           return send(res, 200, await service.diff(id));
         }
+        if (req.method === 'GET' && action === 'compaction-preview' && !sub) return send(res, 200, await service.compactionPreview(id));
         if (req.method === 'GET' && !action) return send(res, 200, { ...service.store.task(id), approval: service.store.planApproval(id) });
         if (req.method === 'GET' && action === 'events') return send(res, 200, service.store.events(id, integer(url.searchParams.get('after'), 0), Math.min(integer(url.searchParams.get('limit'), 500), 1000)));
         if (req.method === 'GET' && action === 'evidence' && sub) return send(res, 200, boundEvidence(service.store.evidenceEntry(id, Number(sub)), EVIDENCE_ENTRY_BYTES));
@@ -217,6 +219,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
           if (action === 'plan') { const input = await body(req); assertExecutionReady(); return send(res, 200, await service.proposePlan(id, input)); }
           if (action === 'approve') { const input = await body(req); assertExecutionReady(); return send(res, 200, service.approve(id, z.strictObject({ version: z.number().int().nonnegative() }).parse(input).version)); }
           if (action === 'cancel') return send(res, 200, service.cancel(id));
+          if (action === 'compact') { const input = z.strictObject({ digest: z.string().regex(/^\d{13}\.[a-f0-9]{64}$/) }).parse(await body(req)); return send(res, 200, await service.compact(id, input.digest)); }
           if (action === 'cleanup') return send(res, 200, await service.cleanup(id));
         }
       }

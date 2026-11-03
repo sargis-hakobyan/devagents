@@ -39,6 +39,7 @@ try {
         const branch = await git(request.cwd, ['branch', '--show-current']);
         return { output: { summary: 'Implement independent A/B modules and combine them', risks: [], integration: { assignedAgent: 'general-developer', validation: [{ executable: 'node', args: ['--test', 'a.test.cjs', 'b.test.cjs', 'c.test.cjs'] }] }, items: ['a', 'b', 'c'].map(id => ({ id, title: `Module ${id}`, description: `Implement ${id}`, acceptanceCriteria: ['Existing test passes'], dependsOn: id === 'c' ? ['a', 'b'] : [], requiredCapabilities: ['implementation'], assignedAgent: id === 'a' ? 'backend-developer' : id === 'b' ? 'frontend-developer' : 'general-developer', projectId: 'fixture', branch: `${branch}-${id}`, ownedPaths: [`project:/${id}/**`], validation: [{ executable: 'node', args: ['--test', `${id}.test.cjs`] }] })) } };
       }
+      if (request.phase === 'qa') return { output: { summary: 'Fixture QA passed', checks: JSON.parse(/QA criteria:\n([^\n]+)/.exec(request.prompt)[1]).map(c => ({ criterionId: c.id, status: 'passed', evidence: 'Deterministic fixture verification' })), limitations: [] } };
       if (request.phase === 'setup') return { output: { ready: true, summary: 'Fixture prerequisites ready' } };
       if (request.phase === 'implementation') {
         const id = request.workItemId;
@@ -62,7 +63,7 @@ try {
   assert.equal(store.evidence(task.id).filter(e => e.kind === 'commit-created').length, 1);
   assert.equal(await git(project, ['rev-parse', 'HEAD']), original);
   assert.equal(await readFile(join(project, 'a', 'a.cjs'), 'utf8'), "module.exports=()=> 'broken';\n");
-  assert.equal(await git(done.workspace.path, ['status', '--porcelain']), '');
+  assert.equal(await git(project, ['rev-parse', done.workspace.branch]), done.outcome.commit, 'reviewed result survives automatic checkout cleanup');
   assert.deepEqual(done.outcome.files, ['a/a.cjs', 'b/b.cjs', 'c/c.cjs']);
   const runs = store.evidence(task.id).filter(e => e.kind === 'run-started' && e.data.phase === 'implementation');
   assert.equal(new Set(runs.filter(e => e.data.workItemId !== '@integration').map(e => e.data.cwd)).size, 3);

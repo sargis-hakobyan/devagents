@@ -1,7 +1,7 @@
 schemaVersion: 1
 id: tech-lead
 name: Tech Lead
-description: Plans work and selects suitable agents
+description: Defines architecture and contracts, then assigns independent work to suitable specialists
 enabled: true
 engine: default
 provider: default

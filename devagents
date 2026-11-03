@@ -71,9 +71,20 @@ open_link() {
 fingerprint=$({ cksum Dockerfile package.json package-lock.json tsconfig.json tsconfig.build.json; find src ui agents scripts -type f ! -path '*/node_modules/*' -exec cksum {} \; | LC_ALL=C sort; } | cksum)
 previous=$(cat .devagents/build.fingerprint 2>/dev/null || true)
 if [ "$build" = yes ] || [ "$fingerprint" != "$previous" ] || ! docker image inspect devagents:local >/dev/null 2>&1; then
+  previous_image=$(docker image inspect --format '{{.Id}}' devagents:local 2>/dev/null || true)
   echo 'Preparing DevAgents (the first build can take a few minutes)…'
   compose up -d --build --wait
   printf '%s\n' "$fingerprint" > .devagents/build.fingerprint
+  current_image=$(docker image inspect --format '{{.Id}}' devagents:local 2>/dev/null || true)
+  # Reclaim only the image this successful build replaced. Never prune unrelated
+  # images, caches, containers or volumes, or remove an image still tagged/in use.
+  if [ -n "$previous_image" ] && [ -n "$current_image" ] && [ "$previous_image" != "$current_image" ]; then
+    old_tags=$(docker image inspect --format '{{len .RepoTags}}' "$previous_image" 2>/dev/null || true)
+    old_containers=$(docker ps -aq --filter "ancestor=$previous_image" 2>/dev/null || echo unknown)
+    if [ "$old_tags" = 0 ] && [ -z "$old_containers" ]; then
+      docker image rm "$previous_image" >/dev/null 2>&1 || true
+    fi
+  fi
 else
   compose up -d --wait
 fi

@@ -56,7 +56,7 @@ function assertStrict(schema: Record<string, unknown>, path = '$'): void {
 }
 test('every registered model schema lists all properties as required, as strict structured output demands', () => {
   const inventory = modelSchemas();
-  assert.deepEqual(Object.keys(inventory).sort(), ['connectionCheck', 'implementation', 'planning', 'review', 'setup'], 'a new model call site must register its schema here');
+  assert.deepEqual(Object.keys(inventory).sort(), ['connectionCheck', 'implementation', 'planning', 'qa', 'review', 'setup'], 'a new model call site must register its schema here');
   for (const [name, schema] of Object.entries(inventory)) assertStrict(schema, name);
   const planning = outputJsonSchema(PlanningOutput) as z.core.JSONSchema.ObjectSchema;
   assert.ok((planning.required as string[]).includes('manualChecks'));

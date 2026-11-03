@@ -5,6 +5,12 @@ import { git } from '../../src/workspace/git.js';
 import { runProcess } from '../../src/engines/process.js';
 import { AppError } from '../../src/domain/errors.js';
 
+/** Deterministic QA output for the test engine only; production QA supplies actual evidence. */
+export function fixtureQualityReport(request: EngineRequest) {
+  const criteria = JSON.parse(/QA criteria:\n([^\n]+)/.exec(request.prompt)![1]!) as { id: string }[];
+  return { summary: 'Fixture acceptance checks passed', checks: criteria.map(c => ({ criterionId: c.id, status: 'passed', evidence: 'Deterministic fixture verification' })), limitations: [] };
+}
+
 export class FakeEngine implements CodingEngine {
   readonly id = 'codex';
   calls: EngineRequest[] = [];
@@ -16,6 +22,7 @@ export class FakeEngine implements CodingEngine {
       summary: 'Implement greeting', risks: [], integration: null, ...(this.options.manualChecks ? { manualChecks: this.options.manualChecks } : {}), items: [{ id: 'greeting', ownedPaths: ['project:/**'], title: 'Greeting', description: 'Implement greeting', acceptanceCriteria: ['Returns hello'], dependsOn: [], requiredCapabilities: ['implementation'], assignedAgent: 'general-developer', projectId: 'fixture', branch: await git(request.cwd, ['branch', '--show-current']), validation: [{ executable: 'node', args: ['--test', 'greeting.test.cjs'] }] }],
     } };
     if (request.phase === 'setup') return { output: { ready: true, summary: 'Fixture environment ready' } };
+    if (request.phase === 'qa') return { output: fixtureQualityReport(request) };
     if (request.phase === 'implementation') {
       if (this.options.waitForCancel) await new Promise<void>((_, reject) => {
         const abort = () => reject(new AppError('cancelled', 'Fixture cancelled'));

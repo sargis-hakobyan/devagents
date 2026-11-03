@@ -10,10 +10,13 @@ import { Config, Plan } from '../../src/domain/schemas.js';
 import { TaskService } from '../../src/orchestration/service.js';
 import { Store } from '../../src/persistence/store.js';
 
-test('autonomous task executes real fixture tests, separate review and local commit without touching dirty checkout', async () => {
+test('autonomous task starts from main and completes without touching a dirty feature checkout', async () => {
   const f = await fixture(); const engine = new FakeEngine();
   const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
+    const main = await git(f.project, ['rev-parse', 'main']);
+    await git(f.project, ['switch', '-c', 'user-feature']);
+    await git(f.project, ['commit', '--allow-empty', '-qm', 'Unrelated feature commit']);
     await writeFile(join(f.project, 'README.md'), 'Dirty user work');
     const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', acceptanceCriteria: ['Keep the public interface stable'], mode: 'autonomous' }, 'm2');
     runner.enqueue(task.id); runner.enqueue(task.id);
@@ -21,13 +24,15 @@ test('autonomous task executes real fixture tests, separate review and local com
     const done = f.store.task(task.id);
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     assert.match(done.outcome!.commit!, /^[a-f0-9]{40}$/);
-    assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'review']);
+    assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'qa', 'review']);
     assert.match(engine.calls[1]!.prompt, /Keep the public interface stable/);
-    assert.match(engine.calls[2]!.prompt, /Keep the public interface stable/);
-    assert.notEqual(engine.calls[1]!.agent.id, engine.calls[2]!.agent.id);
-    assert.deepEqual(engine.calls[2]!.agent.permissions.writePaths, []);
+    assert.match(engine.calls.find(c => c.phase === 'review')!.prompt, /Keep the public interface stable/);
+    assert.notEqual(engine.calls[1]!.agent.id, engine.calls.find(c => c.phase === 'review')!.agent.id);
+    assert.deepEqual(engine.calls.find(c => c.phase === 'review')!.agent.permissions.writePaths, []);
     assert.equal(await readFile(join(f.project, 'README.md'), 'utf8'), 'Dirty user work');
-    assert.equal(await git(f.project, ['branch', '--show-current']), 'main');
+    assert.equal(await git(f.project, ['branch', '--show-current']), 'user-feature');
+    assert.equal(done.workspace!.baseSha, main);
+    assert.notEqual(done.workspace!.originalHead, main);
     assert.equal(await git(done.workspace!.path, ['status', '--porcelain']), '');
     assert.ok(f.store.evidence(task.id).some(e => e.kind === 'validation' && (e.data as { exitCode: number }).exitCode === 0));
     assert.equal(f.store.evidence(task.id).filter(e => e.kind === 'commit-created').length, 1);
@@ -50,7 +55,7 @@ test('failed real validation triggers a bounded repair before review', async () 
   try {
     const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'repair'); await runner.idle();
     const done = f.store.task(task.id); assert.equal(done.state, 'completed', JSON.stringify(done.outcome)); assert.equal(done.outcome!.repairCycles, 1);
-    assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'implementation', 'review']);
+    assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'implementation', 'qa', 'review']);
     assert.equal(f.store.evidence(task.id).filter(e => e.kind === 'validation').length, 2);
   } finally { await runner.stop(); await f.cleanup(); }
 });
@@ -166,8 +171,8 @@ test('model prompts keep code syntax from the request, plan, diff and review fin
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     assert.equal(done.request, `Add ${code} without [REDACTED]`);
     assert.equal(done.plan!.items[0]!.description, `Type ${code}`);
-    assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'review', 'implementation', 'review']);
-    const [, implementation, review, repair] = engine.calls;
+    assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'qa', 'review', 'implementation', 'qa', 'review']);
+    const [, implementation, , review, repair] = engine.calls;
     for (const call of [implementation!, review!, repair!]) {
       assert.ok(call.prompt.includes(code), `${call.phase} prompt must keep code syntax`);
       assert.doesNotMatch(call.prompt, /fixture-secret-value/);
@@ -280,7 +285,7 @@ test('a rejection without findings is malformed review output and does not consu
     const done = f.store.task(task.id); assert.equal(done.state, 'failed');
     assert.match(done.outcome!.error!, /at least one actionable finding/);
     assert.equal(done.outcome!.repairCycles, 0);
-    assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'review']);
+    assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'qa', 'review']);
     assert.ok(f.store.evidence(task.id).some(e => e.kind === 'run-failed' && /actionable finding/.test(String((e.data as { error: string }).error))));
     assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
   } finally { await runner.stop(); await f.cleanup(); }
@@ -312,11 +317,11 @@ test('a check that cannot run in this environment is reported with the result an
     const done = f.store.task(task.id);
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     assert.equal(done.outcome!.repairCycles, 0, 'an environment limitation is not a repair reason');
-    assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'review']);
+    assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'qa', 'review']);
     assert.deepEqual(done.outcome!.limitations, ['Confirm the greeting renders at 390 px', 'Visual check could not run: no browser in this sandbox']);
     assert.deepEqual(done.plan!.manualChecks, ['Confirm the greeting renders at 390 px']);
     assert.match(engine.calls[1]!.prompt, /try once at most, then report it in limitations/);
-    assert.match(engine.calls[2]!.prompt, /are not findings/); assert.match(engine.calls[2]!.prompt, /Recorded limitations so far: \{"limitations":\["Confirm the greeting renders at 390 px","Visual check could not run/);
+    assert.match(engine.calls.find(c => c.phase === 'review')!.prompt, /are not findings/); assert.match(engine.calls.find(c => c.phase === 'review')!.prompt, /Recorded limitations so far: \{"limitations":\["Confirm the greeting renders at 390 px","Visual check could not run/);
     assert.match(f.store.events(task.id).at(-1)!.reason, /2 checks not run in this environment/);
     assert.equal(f.store.summaries({ limit: 5 }).tasks[0]!.limitations, 2);
     // A real validation failure still repairs, exactly as before.
