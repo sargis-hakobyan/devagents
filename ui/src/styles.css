@@ -163,7 +163,14 @@ fieldset:disabled .field input, fieldset:disabled .field select, fieldset:disabl
 
 .task-actions{display:flex;flex-direction:column;gap:10px;min-width:0;max-width:620px}.task-actions .note{overflow-wrap:anywhere}
 
-.diff-file{display:flex;flex-direction:column;align-items:flex-start;white-space:normal;text-align:left}.diff-file[aria-current=true]{border-color:var(--ink);background:var(--bg)}.diff-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:650px;overflow:auto}
+.diff-file{display:flex;flex-direction:column;align-items:flex-start;white-space:normal;text-align:left}.diff-file[aria-current=true]{border-color:var(--ink);background:var(--bg)}
+pre.diff-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:650px;overflow:auto;padding:0;background:#fff;color:#1f2328}
+.diff-line{display:block;min-height:1.5em;padding:0 10px;border-left:3px solid transparent}
+.diff-added{background:#dafbe1;border-left-color:#1a7f37}
+.diff-removed{background:#ffebe9;border-left-color:#cf222e}
+.diff-hunk{background:#ddf4ff;color:#0550ae}
+.diff-meta{background:#f6f8fa;color:#59636e}
+.diff-count-added{color:#1a7f37}.diff-count-removed{color:#cf222e}
 
 .diff-grid{grid-template-columns:minmax(0,1fr) minmax(0,2fr)}
 .decision-bar{position:sticky;bottom:12px;background:var(--panel,#fff);padding:12px;border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 28px rgba(35,31,74,.12)}

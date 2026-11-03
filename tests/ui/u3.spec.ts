@@ -304,7 +304,7 @@ test('real HTTP diffs distinguish hostile truncated text, binary, empty and miss
     return f.store.transition(task.id, t.version, 'completed', 'fixture', 'done', { outcome: { commit, repairCycles: 0 } });
   };
   try {
-    const changed = await complete({ '<img src=x onerror=alert(1)>': 'fixture-secret-value\n' + '<script>alert(1)</script>\n'.repeat(5000), 'asset.bin': Buffer.from([0, 1, 2]) });
+    const changed = await complete({ '<img src=x onerror=alert(1)>': 'fixture-secret-value\n' + '<script>alert(1)</script>\n'.repeat(5000), 'asset.bin': Buffer.from([0, 1, 2]), 'README.md': '# Updated fixture\n++header-like content\n' });
     const empty = await complete({});
     const response = await fetch(`${origin}/ui/bootstrap`, { method: 'POST', headers: { authorization: 'Bearer synthetic-diff-token', 'content-type': 'application/json' }, body: '{}' });
     await page.goto((await response.json()).url);
@@ -315,6 +315,23 @@ test('real HTTP diffs distinguish hostile truncated text, binary, empty and miss
     await expect(selected).toContainText('[REDACTED]'); await expect(selected).not.toContainText('fixture-secret-value');
     await expect(selected).toContainText('Truncated by the display or read limit.');
     await expect(page.locator('#app script, #app img')).toHaveCount(0);
+    await page.getByRole('button', { name: /README.md/ }).click();
+    const patch = selected.getByLabel('File patch');
+    await expect(patch.locator('.diff-removed')).toHaveText('-# Fixture\n');
+    await expect(patch.locator('.diff-added')).toHaveText(['+# Updated fixture\n', '+++header-like content\n']);
+    await expect(patch.locator('.diff-meta').filter({ hasText: /^\+\+\+ b\// })).toHaveCount(1);
+    await expect(patch.locator('.diff-added').first()).toHaveCSS('background-color', 'rgb(218, 251, 225)');
+    await expect(patch.locator('.diff-removed')).toHaveCSS('background-color', 'rgb(255, 235, 233)');
+    await expect(patch.locator('.diff-hunk')).toHaveCSS('background-color', 'rgb(221, 244, 255)');
+    const diffResponse = await fetch(`${origin}/tasks/${changed.id}/diff`, { headers: { authorization: 'Bearer synthetic-diff-token' } });
+    const diff = await diffResponse.json();
+    expect(await patch.textContent()).toBe(diff.files.find((file: { path: string }) => file.path === 'README.md').text);
+    await patch.screenshot({ path: join(shots, 'colored-diff-desktop.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(patch).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await selected.screenshot({ path: join(shots, 'colored-diff-mobile.png') });
+    await page.setViewportSize({ width: 1360, height: 900 });
     await page.getByRole('button', { name: /asset.bin/ }).click(); await expect(page.getByText('Binary content is not shown.', { exact: true })).toBeVisible();
     await openResult(empty.id); await expect(page.getByText('Both commits exist.', { exact: false })).toBeVisible();
     await git(f.project, ['update-ref', '-d', `refs/heads/${changed.workspace!.branch}`]);

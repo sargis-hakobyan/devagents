@@ -16,6 +16,8 @@ Selected boards: Overview, Tasks, Task detail (running), Teams with the member e
 
 Every example value mirrors the deterministic fixtures (project `fixture`, task "Three modules", items a/b/c, the six built-in roles, the U2 fixture teams). Counts and stages are real backend fields; there are no percentages, time estimates or model-availability claims the backend cannot measure. Controls whose contract is still to come (cleanup preview, patch download, browser credential entry, the opt-in paid connection test) are drawn disabled with a reason.
 
+The implemented read-only diff extends the boards with GitHub-style green/red line backgrounds and counts, blue hunk headers and neutral metadata. Patch markers remain visible alongside colour.
+
 ## Chosen palette (Direction A)
 
 | Token | Value | Use |

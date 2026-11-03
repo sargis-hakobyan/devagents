@@ -2,6 +2,8 @@
 
 DevAgents uses Mastra workflows to run AI development teams on your local Git projects. Agents plan changes, write code, run tests and independently review the result. Follow progress and approve work in your browser.
 
+Completed tasks include a read-only diff with GitHub-style green additions, red deletions, blue hunk headers and coloured file counts.
+
 Each new task starts from the current local `main` commit in a clean, isolated Git worktree on its own `devagents/<request>-<id>` branch. Other branches and uncommitted files are not copied. Results are local commits; DevAgents does not automatically merge or push them.
 
 Separate agent QA is disabled by default (`qaEnabled: false`); use your CI pipeline for QA verification. Developer validation and independent code review remain enabled. If explicitly enabled with `qaEnabled: true`, an independent QA engineer is assigned from the task's frozen team. After validation (and integration for multi-item tasks), QA verifies each required acceptance criterion before final code review and commit. QA defects use the existing bounded repair loop; every repaired result is checked again. Teams without an enabled QA agent record an explicit skip. Historical tasks are not retroactively marked QA-verified.
