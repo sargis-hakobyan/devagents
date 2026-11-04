@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { api, ApiError, resources, type Diagnostic, type Readiness, type TeamDetail, type TeamDraft, type TeamMember, type TeamOptions } from '../api';
 import { Card, Chip, Empty, ErrorNote, Skeleton } from '../components/ui';
+import { EngineBadge } from '../components/EngineBadge';
+import { RoleGlyph } from '../components/TeamBoard';
+import { roleOf } from '../team-board';
 import { formatTime, relative } from '../format';
 import { useNow, usePoll } from '../state';
 
@@ -169,7 +172,7 @@ export function TeamEditorPage({ id }: { id: string }) {
       <Card title={`Members · ${draft.members.length}`} foot={readiness ? <span style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}><span><b>Readiness:</b> <RoleLine diagnostics={readiness.diagnostics} /></span>{readiness.diagnostics.filter(d => !d.memberId).map((d, i) => <span key={i} class={d.level === 'error' ? 'diag-error' : ''}>{d.level === 'error' ? '✕' : '⚠'} {d.message}</span>)}</span> : check.pending ? 'Checking with the service…' : 'Add members to see the readiness check.'}>
         {draft.members.length === 0 ? <Empty title="No members yet"><span>Use <b>Add member</b> to copy a template or create a custom role. A ready team needs a planner, a writable implementer and an independent reviewer.</span></Empty>
           : <ul class="members">{draft.members.map((m, i) => { const errors = memberDiagnostics(m.id).filter(d => d.level === 'error').length; return <li key={i}><button type="button" aria-current={i === selected ? 'true' : undefined} onClick={() => setSelected(i)}>
-            <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}><b class="wrap-anywhere">{m.name}</b><span class="muted" style={{ fontSize: '12px' }}>{m.origin === 'template' ? `from template ${m.templateId ?? ''}` : 'custom'} · {m.delegation.canDelegate ? 'planner' : 'worker'}</span></span>
+            <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}><span class="member-engine-name"><span class="member-role-icons"><span class="member-role-avatar"><RoleGlyph role={roleOf(m)} size={18} /></span><EngineBadge engine={m.engine === 'default' ? options?.defaults.engine : m.engine} /></span><b class="wrap-anywhere">{m.name}</b></span><span class="muted" style={{ fontSize: '12px' }}>{m.origin === 'template' ? `from template ${m.templateId ?? ''}` : 'custom'} · {m.delegation.canDelegate ? 'planner' : 'worker'}</span></span>
             <span style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>{errors > 0 && <Chip tone="warn" title={`${errors} issue${errors === 1 ? '' : 's'}`}>⚠ {errors}</Chip>}{m.enabled ? <Chip tone="ok">On</Chip> : <Chip tone="neutral">Off</Chip>}</span>
           </button></li>; })}</ul>}
       </Card>

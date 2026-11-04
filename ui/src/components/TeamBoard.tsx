@@ -1,29 +1,33 @@
 import { useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { Stage } from './ui';
+import { EngineBadge } from './EngineBadge';
 import { fold, statusBadge, statusLabel, duration, clock, type BoardMember, type BoardRole, type BoardStatus, type TeamBoard } from '../team-board';
 
-/** Role glyphs: a list for the lead, code brackets for developers, a magnifier for reviewers, a flask for QA, a person for you, the spark for DevAgents. */
-function Glyph({ role, size }: { role: BoardRole; size: number }) {
+/** Compact role symbols share rounded strokes and a 24 px grid. */
+export function RoleGlyph({ role, size }: { role: BoardRole; size: number }) {
   const common = { width: size, height: size, viewBox: '0 0 24 24', 'aria-hidden': true } as const;
-  const stroke = { fill: 'none', stroke: 'currentColor', 'stroke-width': 2.2, 'stroke-linecap': 'round' as const };
+  const stroke = { fill: 'none', stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round' as const, 'stroke-linejoin': 'round' as const };
   switch (role) {
-    case 'lead': return <svg {...common} {...stroke}><path d="M5 6h14M5 12h9M5 18h6" /><circle cx="18" cy="17" r="3" /></svg>;
-    case 'reviewer': return <svg {...common} {...stroke}><circle cx="10.5" cy="10.5" r="6.5" /><path d="m20 20-4.8-4.8M8 10.5l1.8 1.8 3.2-3.4" /></svg>;
-    case 'qa': return <svg {...common} {...stroke}><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3" /></svg>;
+    case 'lead': return <svg {...common} {...stroke}><rect x="9" y="3" width="6" height="5" rx="1" /><path d="M12 8v4M5 16v-4h14v4" /><rect x="2" y="16" width="6" height="5" rx="1" /><rect x="16" y="16" width="6" height="5" rx="1" /></svg>;
+    case 'reviewer': return <svg {...common} {...stroke}><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Z" /><path d="M14 3v6h6M8 15l2.5 2.5L16 12" /></svg>;
+    case 'qa': return <svg {...common} {...stroke}><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3M8 15h8" /></svg>;
     case 'you': return <svg {...common} {...stroke}><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>;
     case 'system': return <svg {...common} fill="currentColor"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z" /></svg>;
-    default: return <svg {...common} {...stroke}><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16" /></svg>;
+    default: return <svg {...common} {...stroke}><path d="m7 8-4 4 4 4M17 8l4 4-4 4M14 5l-4 14" /></svg>;
   }
 }
-export function Avatar({ role, status, size = 'sm', repairing }: { role: BoardRole; status: BoardStatus; size?: 'lg' | 'sm' | 'xs'; repairing?: boolean }) {
+export function Avatar({ role, status, size = 'sm', repairing, engine }: { role: BoardRole; status: BoardStatus; size?: 'lg' | 'sm' | 'xs'; repairing?: boolean; engine?: string | undefined }) {
   const px = size === 'lg' ? 26 : size === 'sm' ? 20 : 14;
-  return <span class={`avatar ${size} ${status}`} title={statusLabel[status]}><Glyph role={role} size={px} />{size !== 'xs' && <span class={`abadge ${status}`} aria-hidden="true">{repairing ? '↻' : statusBadge[status]}</span>}</span>;
+  const avatar = <span class={`avatar ${size} ${status}`} title={statusLabel[status]}><RoleGlyph role={role} size={px} />{size !== 'xs' && <span class={`abadge ${status}`} aria-hidden="true">{repairing ? '↻' : statusBadge[status]}</span>}</span>;
+  return size !== 'xs' && role !== 'system' && role !== 'you'
+    ? <span class="avatar-with-engine">{avatar}<EngineBadge engine={engine} /></span>
+    : avatar;
 }
 function MemberRow({ m, now }: { m: BoardMember; now: number }) {
   void now;
   return <div class="member" data-member={m.id} data-status={m.status}>
-    <Avatar role={m.role} status={m.status} repairing={m.repairing} />
+    <Avatar role={m.role} status={m.status} repairing={m.repairing} engine={m.engine} />
     <div style={{ minWidth: 0 }}>
       <div class="name wrap-anywhere">{m.name}</div>
       {m.lines.map((l, i) => <div key={i} class="what wrap-anywhere">{l}</div>)}
@@ -86,7 +90,7 @@ export function MemberList({ board, taskId, now, rulesOn, terminal, onActivity }
   const itemTitles = new Map(board.stages.flatMap(s => s.members.flatMap(m => m.items.map(i => [i.id, i.title] as const))));
   const card = (m: BoardMember) => <article key={m.key} class={`card mcard ${m.status === 'busy' ? 'now' : ['you', 'blocked'].includes(m.status) ? 'need' : m.status === 'fail' ? 'failed' : m.status === 'off' ? 'off' : ''}`} data-member={m.id} data-status={m.status}>
     <div class="member">
-      <Avatar role={m.role} status={m.status} repairing={m.repairing} />
+      <Avatar role={m.role} status={m.status} repairing={m.repairing} engine={m.engine} />
       <div style={{ minWidth: 0, flex: 1 }}>
         <div class="name wrap-anywhere" title={m.id}>{m.name}</div>
         {m.items.length === 0 && m.lines.map((l, i) => <div key={i} class="what wrap-anywhere">{l}</div>)}

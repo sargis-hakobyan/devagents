@@ -16,7 +16,7 @@ test('execution updates live from reviewer findings to developer repair and re-r
   try {
     const task = f.service.submit({ projectId: 'fixture', request: 'Live repair timeline fixture', mode: 'autonomous' }, 'execution-browser');
     const record = (kind: string, data: object) => f.store.record(task.id, kind, data);
-    const start = (runId: string, phase: string, agentId: string, workItemId = 'backend') => record('run-started', { runId, phase, agentId, workItemId });
+    const start = (runId: string, phase: string, agentId: string, workItemId = 'backend') => record('run-started', { runId, phase, agentId, workItemId, ...(agentId === 'Backend Developer' ? { engine: 'claude-code' } : agentId === 'Frontend Developer' ? { engine: 'codex' } : {}) });
     const end = (runId: string, output: object) => record('run-completed', { runId, output });
     start('developer', 'implementation', 'Backend Developer');
     start('frontend', 'implementation', 'Frontend Developer', 'frontend');
@@ -29,6 +29,9 @@ test('execution updates live from reviewer findings to developer repair and re-r
     await page.goto((await bootstrap.json()).url); await page.goto(`${origin}/ui/tasks/${task.id}`);
     const timeline = page.getByRole('region', { name: 'Execution workflow' });
     await expect(timeline.locator('[data-execution-id="run-review"]')).toContainText('Working now');
+    await expect(timeline.locator('[data-execution-id="run-developer"]').getByRole('img', { name: 'Engine: Claude', exact: true })).toBeVisible();
+    await expect(timeline.locator('[data-execution-id="run-frontend"]').getByRole('img', { name: 'Engine: Codex', exact: true })).toBeVisible();
+    await expect(timeline.locator('[data-execution-id="run-review"]').getByRole('img', { name: 'Engine: not recorded', exact: true })).toBeVisible();
     const groups = timeline.locator('[data-validation-group]');
     await expect(groups).toHaveCount(1);
     await expect(groups.first().locator('summary')).toHaveText('5 automated checks5 passed');

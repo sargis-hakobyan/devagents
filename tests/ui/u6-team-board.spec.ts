@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fixtureDir, port } from './playwright.config.js';
 const base = `http://127.0.0.1:${port}`;
@@ -20,6 +20,8 @@ test('a completed multi-item task shows six finished stages including QA and the
   await expect(pipeline.locator('[data-stage="build"] .member')).toHaveCount(3);
   await expect(pipeline.locator('[data-member="devagents"]')).toContainText('Committed ');
   await expect(pipeline.locator('[data-stage="qa"]')).toContainText('✓ Passed');
+  await expect(pipeline.locator('[data-member="backend-developer"]').getByRole('img', { name: 'Engine: Codex', exact: true })).toBeVisible();
+  await expect(pipeline.locator('[data-member="devagents"] .engine-badge')).toHaveCount(0);
   await page.getByText('Planned responsibilities and work items', { exact: true }).click();
   const list = page.getByRole('region', { name: 'Planned responsibilities', exact: true });
   await expect(list.getByRole('heading', { level: 2 })).toHaveText('Planned responsibilities');
@@ -29,6 +31,12 @@ test('a completed multi-item task shows six finished stages including QA and the
   await expect(list.locator('article[data-member="backend-developer"]')).toContainText('Integrated');
   await expect(list.locator('article[data-member="qa-engineer"]')).toHaveAttribute('data-status', 'done');
   await expect(page.locator('.stackbtn')).toHaveCount(0); // a finished task lists everyone; no stacks
+  await expect(list.locator('article[data-member="backend-developer"]').getByRole('img', { name: 'Engine: Codex', exact: true })).toBeVisible();
+  const shots = join(process.cwd(), 'test-results/ui-screenshots'); await mkdir(shots, { recursive: true });
+  await pipeline.screenshot({ path: join(shots, 'engine-badges-board.png') });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await pipeline.screenshot({ path: join(shots, 'engine-badges-board-mobile.png') });
 });
 
 test('a single-item task has five stages including QA and no integration step; the activity link filters the Activity tab to that item', async ({ page }) => {

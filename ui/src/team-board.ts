@@ -15,14 +15,14 @@ export type BoardItem = {
 };
 export type BoardMember = {
   key: string; id: string; name: string; role: BoardRole; status: BoardStatus; repairing: boolean; lines: string[]; items: BoardItem[];
-  stage: StageKey; reason?: string; durationMs?: number; startedAt?: string; finishedAt?: string;
+  engine?: string | undefined; stage: StageKey; reason?: string; durationMs?: number; startedAt?: string; finishedAt?: string;
 };
 export type BoardStage = { key: StageKey; number: number; title: string; chip: StageChip; status: BoardStatus; members: BoardMember[] };
 export type Counts = { involved: number; roster: number; finished: number; working: number; next: number; needsYou: number; failed: number; blocked: number; aborted: number };
 export type TeamBoard = { stages: BoardStage[]; list: BoardMember[]; notNeeded: BoardMember[]; counts: Counts; summary: string; multi: boolean };
 
 type Command = { executable: string; args: string[] };
-type RosterAgent = { id: string; name: string; capabilities: string[]; enabled: boolean; delegation?: { canDelegate: boolean } };
+type RosterAgent = { engine?: string | undefined; id: string; name: string; capabilities: string[]; enabled: boolean; delegation?: { canDelegate: boolean } };
 export type BoardInput = {
   task: {
     id: string; state: string; version: number; createdAt: string; updatedAt: string;
@@ -65,7 +65,7 @@ export function itemStatus(state: string): BoardStatus {
   if (state === 'cancelled' || state === 'blocked') return 'off';
   return 'next';
 }
-function roleOf(agent: RosterAgent | undefined): BoardRole {
+export function roleOf(agent: RosterAgent | undefined): BoardRole {
   const c = agent?.capabilities ?? [];
   if (c.includes('planning')) return 'lead';
   if (c.includes('review') && !c.includes('implementation')) return 'reviewer';
@@ -74,7 +74,7 @@ function roleOf(agent: RosterAgent | undefined): BoardRole {
   return 'other';
 }
 
-type Run = { runId: string; phase: string; agentId: string; workItemId?: string; startedAt: string; endedAt?: string; failed?: boolean; output?: Record<string, unknown> };
+type Run = { engine?: string | undefined; runId: string; phase: string; agentId: string; workItemId?: string; startedAt: string; endedAt?: string; failed?: boolean; output?: Record<string, unknown> };
 type ItemFacts = { tests: { exitCode: number; truncated: boolean }[]; review?: { approved: boolean; findings: number }; implementations: number; commit?: string; startedAt?: string; finishedAt?: string };
 function reviewOf(output: unknown): { approved: boolean; findings: number } | undefined {
   if (!output || typeof output !== 'object') return undefined;
@@ -100,7 +100,7 @@ export function teamBoard(input: BoardInput): TeamBoard {
   const onlyItem = !multi ? plan?.items[0]?.id : undefined;
   input.evidence.forEach((e, index) => {
     const d = facts(e); const runId = str(d.runId) ?? (e.kind === 'run-completed' || e.kind === 'run-failed' ? `unrecorded:${index}` : undefined); const item = str(d.workItemId) ?? str(d.itemId) ?? (e.kind === 'work-item' ? undefined : onlyItem);
-    if (e.kind === 'run-started' && runId) runs.set(runId, { runId, phase: str(d.phase) ?? '', agentId: str(d.agentId) ?? '', ...(item ? { workItemId: item } : {}), startedAt: e.at });
+    if (e.kind === 'run-started' && runId) runs.set(runId, { runId, engine: str(d.engine), phase: str(d.phase) ?? '', agentId: str(d.agentId) ?? '', ...(item ? { workItemId: item } : {}), startedAt: e.at });
     if ((e.kind === 'run-completed' || e.kind === 'run-failed') && runId) {
       const r = runs.get(runId) ?? { runId, phase: str(d.phase) ?? '', agentId: '', ...(item ? { workItemId: item } : {}), startedAt: e.at }; runs.set(runId, r);
       r.endedAt = e.at; if (e.kind === 'run-failed') r.failed = true; else if (d.output && typeof d.output === 'object') r.output = d.output as Record<string, unknown>;
@@ -124,7 +124,7 @@ export function teamBoard(input: BoardInput): TeamBoard {
   const qaOpen = !terminal && qaRuns.find(r => !r.endedAt);
   const runMs = (r: Run) => new Date(r.endedAt ?? new Date(now).toISOString()).getTime() - new Date(r.startedAt).getTime();
   const sumRuns = (rs: Run[]) => rs.reduce((t, r) => t + Math.max(0, runMs(r)), 0);
-  const member = (p: Partial<BoardMember> & { id: string; stage: StageKey; status: BoardStatus }): BoardMember => ({ key: `${p.stage}:${p.id}`, name: nameOf(p.id), role: roleOf(agent(p.id)), repairing: false, lines: [], items: [], ...p });
+  const member = (p: Partial<BoardMember> & { id: string; stage: StageKey; status: BoardStatus }): BoardMember => ({ key: `${p.stage}:${p.id}`, name: nameOf(p.id), engine: runList.filter(r => r.agentId === p.id && r.engine && r.engine !== 'default').at(-1)?.engine ?? agent(p.id)?.engine, role: roleOf(agent(p.id)), repairing: false, lines: [], items: [], ...p });
 
   // Items: the progress rows, or one synthesized row for a single-item task that runs without the DAG.
   const progress = new Map(input.items.map(i => [i.itemId, i]));

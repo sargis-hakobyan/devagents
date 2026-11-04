@@ -2,14 +2,14 @@
 export type ExecutionEvent = { sequence: number; kind: string; at: string; data: Record<string, unknown> };
 export type ExecutionEntry = {
   id: string; sequence: number; kind: 'agent' | 'validation' | 'commit'; actor: string; agentId: string | null;
-  phase: string; scope: string; scopeLabel: string; attempt: number; startedAt: string; finishedAt: string | null;
+  engine?: string | undefined; phase: string; scope: string; scopeLabel: string; attempt: number; startedAt: string; finishedAt: string | null;
   status: 'running' | 'completed' | 'approved' | 'changes-requested' | 'failed' | 'interrupted' | 'blocked';
   summary: string; findings: string[]; follows: { id: string; reason: string }[]; parallelWith: string[];
 };
 export type Execution = { state: string; updatedAt: string; entries: ExecutionEntry[] };
 type TaskFacts = {
   state: string; updatedAt: string;
-  agents?: { id: string; name: string }[] | undefined; team?: { members: { id: string; name: string }[] } | undefined;
+  agents?: { id: string; name: string; engine?: string | undefined }[] | undefined; team?: { members: { id: string; name: string; engine?: string | undefined }[] } | undefined;
   plan?: { items: { id: string; title: string }[] } | undefined;
 };
 const str = (v: unknown) => typeof v === 'string' ? v : '';
@@ -19,7 +19,8 @@ export function taskExecution(task: TaskFacts, events: ExecutionEvent[]): Execut
   const entries: ExecutionEntry[] = []; const runs = new Map<string, ExecutionEntry>();
   const attempts = new Map<string, number>();
   const pending = new Map<string, Map<string, { id: string; reason: string }>>();
-  const names = new Map((task.team?.members ?? task.agents ?? []).map(a => [a.id, a.name]));
+  const roster = task.team?.members ?? task.agents ?? [];
+  const names = new Map(roster.map(a => [a.id, a.name]));
   const issues = (scope: string) => { let value = pending.get(scope); if (!value) { value = new Map(); pending.set(scope, value); } return value; };
   for (const event of events) {
     const d = event.data; const scope = str(d.workItemId) || '@task';
@@ -29,7 +30,7 @@ export function taskExecution(task: TaskFacts, events: ExecutionEvent[]): Execut
       const phase = str(d.phase); const agentId = str(d.agentId) || null;
       const key = JSON.stringify([scope, phase]); const attempt = (attempts.get(key) ?? 0) + 1; attempts.set(key, attempt);
       const entry: ExecutionEntry = { id: `run-${runId}`, sequence: event.sequence, kind: 'agent', actor: names.get(agentId ?? '') ?? agentId ?? 'Unknown agent', agentId,
-        phase, scope, scopeLabel: label, attempt, startedAt: event.at, finishedAt: null, status: 'running', summary: '', findings: [],
+        engine: str(d.engine) || roster.find(a => a.id === agentId)?.engine, phase, scope, scopeLabel: label, attempt, startedAt: event.at, finishedAt: null, status: 'running', summary: '', findings: [],
         follows: phase === 'implementation' ? [...issues(scope).values()] : [], parallelWith: [] };
       // Sequence order proves which runs were still open when this one started, even with equal timestamps.
       for (const other of runs.values()) if (other.status === 'running') { other.parallelWith.push(entry.id); entry.parallelWith.push(other.id); }

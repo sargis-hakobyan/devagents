@@ -292,6 +292,7 @@ export class Store {
     return this.db.prepare(`SELECT sequence, kind, json_extract(data, '$.at') AS at,
       json_object('runId', json_extract(data, '$.data.runId'), 'phase', json_extract(data, '$.data.phase'),
         'agentId', json_extract(data, '$.data.agentId'), 'workItemId', json_extract(data, '$.data.workItemId'),
+        'engine', substr(json_extract(data, '$.data.engine'), 1, 256),
         'summary', substr(json_extract(data, '$.data.output.summary'), 1, 4000),
         'approved', json_extract(data, '$.data.output.approved'),
         'findings', json_extract(data, '$.data.output.findings'),

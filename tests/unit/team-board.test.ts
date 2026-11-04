@@ -233,3 +233,17 @@ test('review evidence recorded without a run id or roster still reaches the item
   const reviewer = member(b, 'review', 'reviewer'); assert.equal(reviewer.name, 'Reviewer'); assert.equal(reviewer.status, 'done'); assert.equal(reviewer.lines[0], '1 ✓ · 0 findings');
   assert.equal(b.counts.roster, 0);
 });
+
+
+test('member engine uses recorded runs or the frozen roster without guessing for older tasks', () => {
+  const agents = roster.map(a => ({ ...a, engine: a.id === 'backend-developer' ? 'claude-code' : 'codex' }));
+  const evidence = run('backend', 'implementation', 'backend-developer', 10, 20, { workItemId: 'a', engine: 'codex' });
+  const b = board(base({ agents }), [], evidence);
+  assert.equal(member(b, 'build', 'backend-developer').engine, 'codex');
+  assert.equal(member(b, 'build', 'frontend-developer').engine, 'codex');
+  const frozen = board(base({ agents: undefined, team: { members: agents } }), [], []);
+  assert.equal(member(frozen, 'build', 'backend-developer').engine, 'claude-code');
+  assert.equal(member(frozen, 'commit', 'devagents').engine, undefined);
+  const older = board(base(), [], []);
+  assert.equal(member(older, 'build', 'backend-developer').engine, undefined);
+});

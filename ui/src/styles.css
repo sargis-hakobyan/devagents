@@ -301,3 +301,13 @@ pre.diff-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:650px;overf
 .execution-checks li>.wrap-anywhere{flex:1;min-width:140px}
 .execution-commit{display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;font-size:13px;padding:8px 0}
 @media(max-width:600px){.execution-check-marker{width:26px}.execution-checks summary .stage{margin-left:6px}}
+
+/* Role avatars and compact engine indicators. */
+@media(min-width:901px){.pipe .member{flex-direction:column;gap:8px}}
+.engine-badge{display:inline-grid;place-items:center;flex:0 0 auto;width:12px;height:12px;color:var(--ink);font-size:10px;font-weight:800;line-height:1;vertical-align:middle}
+.engine-badge.claude-code{color:#8A3F27}.engine-badge.unknown{color:var(--muted)}
+.engine-badge svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.avatar-with-engine{display:inline-flex;align-items:center;gap:8px;flex:0 0 auto}
+.member-role-icons{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;color:var(--ink)}
+.member-role-avatar{display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:var(--ink);color:#fff;flex:0 0 auto}
+.member-engine-name{display:flex;align-items:center;gap:6px;min-width:0}

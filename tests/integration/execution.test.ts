@@ -12,7 +12,7 @@ test('execution endpoint keeps real attempts, concurrent actors and scoped repai
   try {
     const task = f.service.submit({ projectId: 'fixture', request: 'Execution fixture', mode: 'autonomous' }, 'execution');
     const record = (kind: string, data: object) => f.store.record(task.id, kind, data);
-    const start = (runId: string, phase: string, agentId: string, workItemId: string) => record('run-started', { runId, phase, agentId, workItemId });
+    const start = (runId: string, phase: string, agentId: string, workItemId: string) => record('run-started', { runId, phase, agentId, workItemId, engine: agentId === 'frontend' ? 'codex' : 'claude-code' });
     const end = (runId: string, output: object = {}) => record('run-completed', { runId, output });
     start('front', 'implementation', 'frontend', 'frontend'); start('back', 'implementation', 'backend', 'backend');
     end('back', { summary: 'Backend written' }); end('front', { summary: 'Frontend written' });
@@ -31,6 +31,9 @@ test('execution endpoint keeps real attempts, concurrent actors and scoped repai
     assert.equal(response.status, 200); const body = await response.text(); const result = JSON.parse(body) as Execution;
     assert.ok(!body.includes('not-in-execution')); assert.ok(!body.includes('fixture-secret-value')); assert.ok(body.length < 12000);
     const entries = result.entries;
+    assert.equal(entries[0]!.engine, 'codex');
+    assert.equal(entries[1]!.engine, 'claude-code');
+    assert.equal(entries.find(e => e.kind === 'validation')!.engine, undefined);
     assert.deepEqual(entries.filter(e => e.kind === 'agent').map(e => e.id), ['run-front', 'run-back', 'run-review', 'run-unrelated', 'run-repair', 'run-review2', 'run-interrupted']);
     assert.deepEqual(entries[0]!.parallelWith, ['run-back']);
     assert.equal(entries[2]!.status, 'changes-requested');
@@ -61,4 +64,16 @@ test('validation recovery clears only the recovered command; QA findings and rea
   assert.equal(result.entries[4]!.status, 'changes-requested'); assert.equal(result.entries[5]!.follows[0]!.id, 'run-qa');
   assert.equal(result.entries[5]!.status, 'failed');
   assert.deepEqual(taskExecution({ state: 'planning', updatedAt: '' }, []).entries, []);
+});
+
+
+test('execution engine prefers the recorded run, falls back to the frozen roster and never guesses a missing engine', () => {
+  const events: ExecutionEvent[] = ['recorded', 'snapshot', 'missing'].map((id, i) => ({
+    sequence: i + 1, at: '2026-11-04T10:00:00Z', kind: 'run-started',
+    data: { runId: id, agentId: id, phase: 'implementation', ...(id === 'recorded' ? { engine: 'claude-code' } : {}) },
+  }));
+  const result = taskExecution({ state: 'running', updatedAt: '', team: { members: [
+    { id: 'recorded', name: 'Recorded', engine: 'codex' }, { id: 'snapshot', name: 'Snapshot', engine: 'codex' },
+  ] } }, events);
+  assert.deepEqual(result.entries.map(e => e.engine), ['claude-code', 'codex', undefined]);
 });

@@ -50,7 +50,7 @@ export function ExecutionWorkflow({ taskId, now, onActivity }: { taskId: string;
             <span class="workflow-number" aria-hidden="true">{numbers.get(entry.id)}</span>
             <article class={`card mcard execution-card ${entry.status === 'running' ? 'now' : ''}`} data-status={entry.status} data-agent={entry.agentId ?? 'devagents'}>
               <header class="execution-title">
-                <Avatar role={role} status={status.board} repairing={repair} />
+                <Avatar role={role} status={status.board} repairing={repair} engine={entry.engine} />
                 <div class="execution-identity"><h3>{entry.actor}</h3><div class="what wrap-anywhere">{phase} · {entry.scopeLabel}{entry.kind === 'agent' ? ` · Attempt ${entry.attempt}` : ''}</div></div>
                 <Stage tone={status.tone}>{status.label}</Stage>
               </header>

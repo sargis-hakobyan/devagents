@@ -2,7 +2,7 @@
 export function evidenceMetadata(data: unknown): Record<string, unknown> {
   if (!data || typeof data !== 'object') return {};
   const source = data as Record<string, unknown>; const metadata: Record<string, unknown> = {};
-  for (const key of ['workItemId', 'itemId', 'agentId', 'runId', 'phase', 'state', 'kind', 'commit', 'executable']) {
+  for (const key of ['workItemId', 'itemId', 'agentId', 'engine', 'runId', 'phase', 'state', 'kind', 'commit', 'executable']) {
     if (typeof source[key] === 'string') metadata[key] = source[key].slice(0, 256);
   }
   if (typeof source.exitCode === 'number' && Number.isFinite(source.exitCode)) metadata.exitCode = source.exitCode;
