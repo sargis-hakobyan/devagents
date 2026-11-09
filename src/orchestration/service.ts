@@ -49,6 +49,7 @@ export class TaskService {
   }
   private async maintenance<T>(id: string, action: (task: Task) => Promise<T>): Promise<T> {
     this.assertNotMaintaining(id);
+    if (this.store.dispatch(id)?.blocker) throw new AppError('recovery_required', 'Task execution was interrupted; inspect prior workers and retained work before cleanup', 409);
     const task = this.store.task(id);
     if (!terminalStates.includes(task.state)) throw new AppError('task_active', 'Storage maintenance requires a completed, failed or cancelled task', 409);
     if (this.runner && !this.runner.isDrained?.(id)) throw new AppError('task_active', 'Task workers are still draining; try again after they stop', 409);

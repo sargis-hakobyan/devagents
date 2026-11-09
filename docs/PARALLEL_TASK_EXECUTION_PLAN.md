@@ -4,7 +4,8 @@ Status: implementation in progress. Direction agreed on 2026-11-09. Baseline: `8
 
 - Step 1: SQLite dispatch storage and serial scheduling implemented. Submission, user mode/approval decisions and cancellation persist dispatch atomically; claims coalesce duplicate requests and retain later continuations.
 - Step 2: independent task executions, bounded global operations and preparation reservations implemented; two tasks were verified overlapping in the same repository with separate repair budgets and results.
-- Steps 3–4: ownership/recovery hardening and cancellation/cleanup/UI integration remain in progress.
+- Step 3: execution-scoped generation checks, claim heartbeats and conservative startup reconciliation implemented. Uncertain prior workers block automatic cleanup/replay; safe queued work can start after restart.
+- Step 4: cancellation/cleanup/UI integration remains in progress.
 
 Enable separate tasks to execute concurrently in native and Docker installations, with their own state, worktrees, cancellation and results. Use a durable queue to schedule work and Mastra to execute each task's workflow. Local parallelism must work without AWS. The same execution boundary will support a later distributed AWS deployment.
 

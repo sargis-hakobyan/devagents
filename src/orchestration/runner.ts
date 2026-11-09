@@ -24,11 +24,13 @@ export class TaskRunner {
   private readonly poll: ReturnType<typeof setInterval>;
   private checking: Promise<void> | undefined;
   private stopping = false;
+  private recovering = false;
   private closing?: Promise<void>;
   executionFailure: { taskId: string; message: string } | undefined;
   readonly workflows: TaskWorkflows;
   constructor(private readonly service: TaskService, engine: CodingEngine | EngineRegistry,
-    private readonly validator: Validator, private readonly environment?: EnvironmentPreparer) {
+    private readonly validator: Validator, private readonly environment?: EnvironmentPreparer, options: { startPaused?: boolean } = {}) {
+    this.recovering = options.startPaused ?? false;
     this.engines = engine instanceof EngineRegistry ? engine : new EngineRegistry([engine]);
     this.resources = new ExecutionResources(service.dataDir, service.config.maxConcurrentOperations, service.config.minFreeDiskBytes);
     const context = (id: string) => {
@@ -44,6 +46,10 @@ export class TaskRunner {
     });
     this.poll = setInterval(() => {
       this.drain();
+      if (!this.stopping && !this.executionFailure && !this.recovering) {
+        try { for (const active of this.active.values()) this.service.store.heartbeatDispatch(active.claim); }
+        catch (error) { this.halt('ownership', error); }
+      }
       if (!this.active.size || this.checking || this.stopping || this.executionFailure) return;
       this.checking = assertDiskSpace(service.dataDir, DATABASE_HEADROOM).catch(async error => {
         if (!this.stopping) { await service.diskReserve.release().catch(() => {}); this.halt('storage', error); }
@@ -77,14 +83,33 @@ export class TaskRunner {
   }
   /** Only invoked under the local service lock; active effects are never replayed. */
   async recover(): Promise<void> {
-    for (const task of this.service.store.tasks()) {
-      if (terminalStates.includes(task.state)) { await this.workflows.run(task.id); await this.service.cleanupTerminalTask(task.id); }
-      else if (['awaiting_mode', 'awaiting_plan_approval'].includes(task.state)) this.service.store.requestDispatch(task.id, true);
+    if (this.active.size) throw new AppError('recovery_active', 'Recovery requires a stopped scheduler', 409);
+    this.recovering = true;
+    try {
+      this.service.store.recover();
+      for (const task of this.service.store.tasks()) {
+        const queue = this.service.store.dispatch(task.id);
+        if (queue?.blocker) { if (terminalStates.includes(task.state)) await this.workflows.run(task.id); continue; }
+        const snapshot = await this.workflows.state(task.id);
+        const safeWait = snapshot?.status === 'suspended' && ['awaiting_mode', 'awaiting_plan_approval'].includes(task.state);
+        const uncertain = queue?.owner && !safeWait
+          && this.service.store.evidence(task.id).some(e => ['worktree-intent', 'run-started', 'commit-intent'].includes(e.kind));
+        if (uncertain) {
+          this.service.store.recoverDispatch(task.id, 'Prior execution did not record completion; worker termination is unverified. Inspect retained work before cleanup.');
+          continue;
+        }
+        this.service.store.recoverDispatch(task.id);
+        if (terminalStates.includes(task.state)) { await this.workflows.run(task.id); await this.service.cleanupTerminalTask(task.id); }
+        else if (['awaiting_mode', 'awaiting_plan_approval'].includes(task.state)) this.service.store.requestDispatch(task.id, true);
+        else if (['planning', 'ready'].includes(task.state)) this.service.store.requestDispatch(task.id, true);
+      }
+    } finally {
+      this.recovering = false;
     }
     this.drain();
   }
   private drain(): void {
-    if (this.stopping || this.executionFailure) return;
+    if (this.stopping || this.executionFailure || this.recovering) return;
     while (this.active.size < this.service.config.maxConcurrentTasks) {
       let claim: DispatchClaim | undefined;
       try { claim = this.service.store.claimDispatch(this.owner, new Set(this.active.keys())); }
@@ -100,11 +125,15 @@ export class TaskRunner {
       const execution = new TaskExecution(id, this.service, this.engines, validator, environment, this.workflows, this.resources, () => this.stopping);
       const active: Active = { execution, claim, drained: false, promise: Promise.resolve() };
       this.active.set(id, active);
-      active.promise = Promise.resolve().then(async () => { await this.service.diskReserve.replenish(); await execution.run(); })
-        .catch(error => this.halt(id, error)).finally(async () => {
+      active.promise = Promise.resolve().then(() => this.service.store.withDispatch(active.claim, async () => {
+        await this.service.diskReserve.replenish(); await execution.run();
+      })).catch(error => this.halt(id, error)).finally(async () => {
           try {
             await this.workflows.drain(id); active.drained = true;
-            if (!this.executionFailure) { this.service.store.finishDispatch(active.claim); await this.service.cleanupTerminalTask(id); }
+            if (!this.executionFailure) {
+              await this.service.store.withDispatch(active.claim, () => this.service.cleanupTerminalTask(id));
+              this.service.store.finishDispatch(active.claim);
+            }
           } catch (error) { this.halt(id, error); }
           finally { this.active.delete(id); this.drain(); }
         });

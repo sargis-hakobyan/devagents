@@ -55,6 +55,7 @@ export class TaskExecution {
       [...task.plan!.items.flatMap(i => i.validation), ...(task.plan!.integration?.validation ?? [])], this.abort.signal);
   }
   private ensureActive(id: string, signal: AbortSignal): Task {
+    this.service.store.assertExecution(id);
     if (id !== this.id) throw new AppError('workflow_ownership', 'Workflow task identity changed');
     const task = this.service.store.task(id);
     if (signal.aborted || terminalStates.includes(task.state)) throw new AppError('cancelled', 'Task cancelled');
@@ -336,6 +337,7 @@ export class TaskExecution {
   }
   async run(): Promise<void> {
     const id = this.id; const signal = this.abort.signal;
+    this.service.store.assertExecution(id);
     const initial = this.service.store.task(id);
     this.repairs = initial.outcome?.repairCycles ?? 0;
     this.ledger = terminalStates.includes(initial.state) ? undefined : new LimitationLedger(this.service.store.secrets);

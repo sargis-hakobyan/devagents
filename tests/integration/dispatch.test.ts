@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { fixture, validPlan } from '../helpers.js';
 import { Store } from '../../src/persistence/store.js';
+import { TaskRunner } from '../../src/orchestration/runner.js';
+import { FakeEngine, FixtureValidator } from '../fixtures/fake-engine.js';
 
 test('dispatch survives reopening and duplicate submissions retain one queue request', async () => {
   const f = await fixture(); const second = new Store(join(f.dataDir, 'test.db'));
@@ -47,4 +49,47 @@ test('submission failure rolls back the task, idempotency identity and queue tog
     const task = f.service.submit({ projectId: 'fixture', request: 'Atomic' }, 'atomic');
     assert.deepEqual(f.store.pendingDispatches(), [task.id]);
   } finally { await f.cleanup(); }
+});
+
+test('stale generations and cross-task callbacks cannot write task state or accepted evidence', async () => {
+  const f = await fixture();
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Owned task' }, 'owned');
+    const other = f.service.submit({ projectId: 'fixture', request: 'Other task' }, 'other');
+    const old = f.store.claimDispatch('first')!;
+    let resume!: () => void; const paused = new Promise<void>(r => { resume = r; });
+    const late = f.store.withDispatch(old, async () => { await paused; f.store.record(task.id, 'late', {}); });
+    f.store.recoverDispatch(task.id);
+    const current = f.store.claimDispatch('second')!;
+    const rejection = assert.rejects(late, /no longer owns/); resume(); await rejection;
+    assert.throws(() => f.store.withDispatch(old, () => f.store.checkpoint(task.id, task.version, {}, 'stale')), /no longer owns/);
+    f.store.withDispatch(current, () => {
+      assert.throws(() => f.store.record(other.id, 'wrong-task', {}), /identity/);
+      f.store.record(task.id, 'accepted', {});
+    });
+    assert.deepEqual(f.store.evidence(task.id).map(e => e.kind), ['accepted']);
+    assert.equal(f.store.evidence(other.id).length, 0);
+    f.store.finishDispatch(current);
+  } finally { await f.cleanup(); }
+});
+
+test('startup recovers queued work and claims without effects but quarantines interrupted execution', async () => {
+  const f = await fixture(); const engine = new FakeEngine();
+  const queued = f.service.submit({ projectId: 'fixture', request: 'Never started', mode: 'autonomous' }, 'never-started');
+  const old = f.store.claimDispatch('dead-service')!; assert.equal(old.taskId, queued.id);
+  const interrupted = f.service.submit({ projectId: 'fixture', request: 'Interrupted', mode: 'autonomous' }, 'interrupted');
+  f.store.record(interrupted.id, 'worktree-intent', { owner: interrupted.id });
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator(), undefined, { startPaused: true }); f.service.attachRunner(runner);
+  try {
+    await runner.recover(); await runner.idle();
+    assert.equal(f.store.task(queued.id).state, 'completed');
+    assert.equal(f.store.evidence(queued.id).filter(e => e.kind === 'commit-created').length, 1);
+    assert.equal(f.store.task(interrupted.id).state, 'failed');
+    assert.match(f.store.dispatch(interrupted.id)!.blocker!, /termination is unverified/);
+    assert.equal(engine.calls.some(c => c.cwd.endsWith(interrupted.id)), false);
+    await assert.rejects(f.service.compactionPreview(interrupted.id), /prior workers/);
+    for (let i = 0; i < 20; i++) runner.enqueue(queued.id);
+    await runner.idle();
+    assert.equal(f.store.evidence(queued.id).filter(e => e.kind === 'commit-created').length, 1);
+  } finally { await runner.stop(); await f.cleanup(); }
 });

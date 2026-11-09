@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -12,6 +13,8 @@ import type { DispatchClaim, DispatchRecord } from '../domain/dispatch.js';
 
 export class Store {
   private readonly db: DatabaseSync;
+  private readonly execution = new AsyncLocalStorage<DispatchClaim>();
+  private transactionDepth = 0;
   /** Known secret values (environment heuristic plus configured provider keys); shared with every response and diff path. */
   constructor(path: string, readonly secrets: readonly string[] = environmentSecrets()) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -64,13 +67,14 @@ export class Store {
   }
   close(): void { this.db.close(); }
   private transaction<T>(fn: () => T): T {
-    this.db.exec('BEGIN IMMEDIATE');
+    if (this.transactionDepth) return fn();
+    this.db.exec('BEGIN IMMEDIATE'); this.transactionDepth++;
     try { const value = fn(); this.db.exec('COMMIT'); return value; }
     catch (error) {
       // SQLITE_FULL can roll back automatically. A second rollback must not mask that cause.
       try { this.db.exec('ROLLBACK'); } catch { /* preserve the original transaction failure */ }
       throw error;
-    }
+    } finally { this.transactionDepth--; }
   }
   /** Called within the same transaction as submission/approval/cancellation. */
   private requestDispatchRow(task: Task, force = false): void {
@@ -111,9 +115,46 @@ export class Store {
     });
   }
   finishDispatch(claim: DispatchClaim): void {
-    const changed = this.db.prepare(`UPDATE dispatch_queue SET handled=claimed, owner=NULL, heartbeat_at=NULL
+    const changed = this.db.prepare(`UPDATE dispatch_queue SET handled=CASE WHEN (SELECT state FROM tasks WHERE id=task_id) IN ('completed','failed','cancelled') THEN requested ELSE claimed END, owner=NULL, heartbeat_at=NULL
       WHERE task_id=? AND owner=? AND generation=?`).run(claim.taskId, claim.owner, claim.generation).changes;
     if (!changed) throw new AppError('dispatch_ownership', 'Dispatch ownership changed', 409);
+  }
+
+  withDispatch<T>(claim: DispatchClaim, work: () => T): T {
+    this.assertClaim(claim); return this.execution.run(claim, work);
+  }
+  private assertClaim(claim: DispatchClaim): void {
+    const row = this.dispatch(claim.taskId);
+    if (!row || row.owner !== claim.owner || row.generation !== claim.generation || row.claimed !== claim.sequence || row.blocker) {
+      throw new AppError('dispatch_ownership', 'Execution no longer owns this task', 409);
+    }
+  }
+  assertExecution(id: string): void {
+    const claim = this.execution.getStore();
+    if (!claim || claim.taskId !== id) throw new AppError('dispatch_ownership', 'Execution task identity does not match its claim', 409);
+    this.assertClaim(claim);
+  }
+  private assertWriter(id: string): void {
+    // API/user mutations have no execution context and retain their version/auth checks.
+    if (this.execution.getStore()) this.assertExecution(id);
+  }
+  heartbeatDispatch(claim: DispatchClaim): void {
+    const changed = this.db.prepare('UPDATE dispatch_queue SET heartbeat_at=? WHERE task_id=? AND owner=? AND generation=? AND blocker IS NULL')
+      .run(new Date().toISOString(), claim.taskId, claim.owner, claim.generation).changes;
+    if (!changed) throw new AppError('dispatch_ownership', 'Execution no longer owns this task', 409);
+  }
+  /** Only startup reconciliation under the service lock may retire an orphaned claim. No TTL takeover. */
+  recoverDispatch(id: string, blocker?: string): void {
+    this.transaction(() => {
+      const task = this.task(id);
+      if (!this.dispatch(id)) this.requestDispatchRow(task);
+      this.db.prepare(`UPDATE dispatch_queue SET owner=NULL, heartbeat_at=NULL, generation=generation+1,
+        handled=CASE WHEN ? IS NOT NULL OR (SELECT state FROM tasks WHERE id=task_id) IN ('completed','failed','cancelled') THEN requested ELSE handled END,
+        blocker=? WHERE task_id=?`).run(blocker ?? null, blocker ?? null, id);
+    });
+  }
+  recoveryBlockers(): { taskId: string; message: string }[] {
+    return this.db.prepare('SELECT task_id AS taskId, blocker AS message FROM dispatch_queue WHERE blocker IS NOT NULL ORDER BY queued_at').all() as { taskId: string; message: string }[];
   }
 
   /** Redact display prose separately; preserve code-bearing requests, commands and plan descriptions. */
@@ -317,6 +358,7 @@ export class Store {
   }
   transition(id: string, expectedVersion: number, state: TaskState, actor: string, reason: string, patch: Partial<Pick<Task, 'mode' | 'plan' | 'workspace' | 'agents' | 'outcome'>> = {}): Task {
     return this.transaction(() => {
+      this.assertWriter(id);
       const task = this.task(id);
       if (task.version !== expectedVersion) throw new AppError('stale_task', 'Task changed; reload before retrying', 409);
       assertTransition(task.state, state);
@@ -329,6 +371,7 @@ export class Store {
   }
   checkpoint(id: string, expectedVersion: number, patch: Partial<Pick<Task, 'workspace' | 'agents' | 'outcome'>>, reason: string): Task {
     return this.transaction(() => {
+      this.assertWriter(id);
       const task = this.task(id);
       if (task.version !== expectedVersion) throw new AppError('stale_task', 'Task changed; reload before retrying', 409);
       const updated = { ...task, ...patch, version: task.version + 1, updatedAt: new Date().toISOString() };
@@ -338,8 +381,10 @@ export class Store {
     });
   }
   record(id: string, kind: string, data: unknown): void {
-    this.task(id);
-    this.db.prepare('INSERT INTO evidence (task_id,kind,data) VALUES (?,?,?)').run(id, kind, this.json({ at: new Date().toISOString(), data }));
+    this.transaction(() => {
+      this.assertWriter(id); this.task(id);
+      this.db.prepare('INSERT INTO evidence (task_id,kind,data) VALUES (?,?,?)').run(id, kind, this.json({ at: new Date().toISOString(), data }));
+    });
   }
   evidence(id: string, after = 0, limit = 100000): { sequence: number; kind: string; at: string; data: unknown }[] {
     this.task(id);
@@ -430,6 +475,7 @@ export class Store {
     for (const task of interrupted) {
       const reason = 'Process interrupted; inspect task evidence and any recovery snapshot before submitting a new task';
       this.transition(task.id, task.version, 'failed', 'recovery', reason, { outcome: { ...task.outcome, error: reason, repairCycles: task.outcome?.repairCycles ?? 0 } });
+      this.recoverDispatch(task.id, 'Execution was interrupted; prior worker termination is unverified. Inspect retained work before cleanup or resubmission.');
     }
     return interrupted.map(t => t.id);
   }

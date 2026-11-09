@@ -148,3 +148,7 @@ Run `./devagents start` after updating this checkout. The launcher fingerprints 
 Saved team members are explicit copies of templates, so restart preserves their instructions and model choices. Update an existing member's instructions in Teams to adopt a revised default; preserve any custom instructions. New template copies use the updated defaults. Already submitted tasks retain their frozen team snapshot.
 
 Separate agent QA remains disabled by default (`qaEnabled: false`). Developer validation and independent review remain mandatory. If QA is explicitly enabled later, its verification stage runs before final review; parallel QA/review is not currently scheduled.
+
+### Interrupted parallel executions
+
+After an abrupt service interruption, DevAgents preserves uncertain task environments and marks them as requiring inspection. A durable recovery blocker prevents those tasks from being replayed or automatically compacted when prior worker termination cannot be verified. Other safely queued work can continue. Do not remove a retained environment until its worker processes have stopped; the current release does not offer a general failed-task resume or a UI action that overrides this protection.

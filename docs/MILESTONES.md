@@ -341,3 +341,9 @@ Verification: backend typecheck and 21 focused queue, Mastra recreation/race, st
 Extracted per-task execution state and enabled bounded concurrent top-level workflows. Default task capacity stays one; YAML and environment overrides allow local/native and Docker parallelism. Global FIFO operation permits cover engine calls, validation and restricted preparation; shared preparation reservations coordinate disk headroom. The service monitors disk pressure centrally, and emergency reserve mutations serialize through one service-owned coordinator. Default environment preparers are per execution; adapters retain per-call scratch isolation.
 
 Verification: backend typecheck and 37 focused tests passed, including two top-level tasks overlapping in one repository while a third waits, separate repair budgets/limitations/commits, original-checkout preservation, abortable FIFO permits and shared disk reservations. Ownership/recovery hardening and UI integration follow in steps 3–4.
+
+## Parallel tasks step 3 — ownership and recovery — 2026-11-09
+
+Execution contexts now carry dispatch claims through asynchronous workflow callbacks. Task transitions, checkpoints and accepted evidence validate their task identity and generation inside the SQLite write transaction. Stale claims cannot complete or overwrite a newer execution. Claim heartbeats report liveness without TTL takeover. Startup pauses scheduling while reconciling queued work, approval waits and interrupted runs; uncertain worker termination leaves a durable recovery blocker and refuses automatic compaction/removal. The local service lock remains mandatory. No general failed-task replay or distributed ownership is introduced.
+
+Verification: typecheck and 25 focused tests passed, including stale/cross-task writes, duplicate dispatch/completion, restart before effects, interrupted-work quarantine, actual fixture-process death, approval races and terminal cleanup.

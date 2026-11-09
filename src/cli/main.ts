@@ -56,7 +56,7 @@ cli.command('serve').description('Start the local API').action(async () => {
   const sandbox = { scanLimit: config.workspaceScanLimit };
   const engines = new EngineRegistry([new CodexAdapter(dataDir, 'codex', sandbox), new ClaudeAdapter(dataDir, sandbox)]);
   const service = new TaskService(store, config, dataDir, process.platform, engines.ids());
-  const runner = new TaskRunner(service, engines, new CodexValidator(dataDir, 'codex', sandbox));
+  const runner = new TaskRunner(service, engines, new CodexValidator(dataDir, 'codex', sandbox), undefined, { startPaused: true });
   service.attachRunner(runner);
   // Docker explicitly binds to all container interfaces; Compose exposes only host loopback.
   const host = process.env.DEVAGENTS_HOST ?? '127.0.0.1';
