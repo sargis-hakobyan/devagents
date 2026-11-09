@@ -86,6 +86,7 @@ DevAgents currently runs one top-level task at a time, with bounded parallel wor
 | [Technical reference](docs/REFERENCE.md) | CLI commands, configuration, security, usage estimates, and storage recovery |
 | [Decisions](docs/DECISIONS.md) | Architectural choices and their rationale |
 | [Milestones](docs/MILESTONES.md) | Implemented capabilities, verification history, and planned work |
+| [Parallel task plan](docs/PARALLEL_TASK_EXECUTION_PLAN.md) | Planned local task concurrency, durable scheduling, isolation, and the later AWS path |
 | [Contributor instructions](AGENTS.md) | Repository conventions and development rules |
 
 ## Development

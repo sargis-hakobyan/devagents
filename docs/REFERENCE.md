@@ -327,6 +327,8 @@ Failed checks use the existing bounded implementation/integration repair budget 
 
 ### Execution persistence
 
+Task submission and user scheduling decisions also write a SQLite dispatch request in the same transaction. The service claims requests atomically and keeps a newer approval request pending while an older workflow run suspends. The queue survives restart; it does not authorize replaying an interrupted command or commit. One service still owns the local data directory.
+
 Mastra is a production dependency. `devagents-task-v1` runs mode selection, worktree preparation, planning, plan approval, environment preparation and execution. Mastra `dountil` controls implementation/review repair cycles and `foreach` dispatches bounded worker waves. Domain policy still selects dependency-ready workers, enforces per-role limits, validates plans, protects worktrees and requires independent review.
 
 The existing `devagents.db` remains authoritative for tasks, version-checked approvals, frozen teams and evidence. Mastra stores workflow snapshots in `workflows.db` in the same private data directory/volume. Back up the entire data directory with the service stopped. A task's Mastra run ID is its task ID; `workflow-child` evidence links worker-wave and repair-cycle runs. Snapshot inputs and outputs contain only task references and iteration metadata; failures include bounded, redacted error excerpts. Prompts, diffs, full command output and provider settings are not copied into workflow payloads. No Mastra server or Studio endpoint is exposed.

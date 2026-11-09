@@ -1,3 +1,4 @@
+import type { DispatchClaim } from '../domain/dispatch.js';
 import { EngineRegistry } from '../engines/registry.js';
 import { priceFor } from '../domain/usage.js';
 import { validationEvidence } from './validation-evidence.js';
@@ -33,8 +34,9 @@ import { validateWithSetup } from './validate.js';
 export const SHUTDOWN_REASON = 'Service shutdown interrupted execution; inspect task evidence and any recovery snapshot before submitting a new task';
 
 export class TaskRunner {
-  private readonly queued = new Set<string>();
-  private active: { id: string; abort: AbortController; promise: Promise<void>; drained?: boolean } | undefined;
+  private readonly owner = randomUUID();
+  private readonly poll: ReturnType<typeof setInterval>;
+  private active: { id: string; abort: AbortController; promise: Promise<void>; claim: DispatchClaim; drained?: boolean } | undefined;
   private stopping = false;
   executionFailure: { taskId: string; message: string } | undefined;
   private closing?: Promise<void>;
@@ -51,6 +53,7 @@ export class TaskRunner {
   private readonly engines: EngineRegistry;
   constructor(private readonly service: TaskService, engine: CodingEngine | EngineRegistry, private readonly validator: Validator,
     private readonly environment: EnvironmentPreparer = new NodeEnvironmentPreparer(service.dataDir, new CodexDependencyInstaller(service.dataDir, 'codex', { scanLimit: service.config.workspaceScanLimit, minFreeDiskBytes: service.config.minFreeDiskBytes }))) {
+    this.poll = setInterval(() => this.drain(), 1000); this.poll.unref();
     this.engines = engine instanceof EngineRegistry ? engine : new EngineRegistry([engine]);
     const signal = (id: string) => {
       if (this.active?.id !== id) throw new AppError('workflow_ownership', 'Workflow does not own the active task slot');
@@ -78,24 +81,24 @@ export class TaskRunner {
     const task = this.service.store.task(id);
     if (!['awaiting_mode', 'planning', 'awaiting_plan_approval', 'ready'].includes(task.state)) return;
     // An approval may arrive while Mastra is still persisting its suspension. Do not lose it.
-    this.queued.add(id);
+    this.service.store.requestDispatch(id);
     this.drain();
   }
   cancel(id: string): void {
     this.service.assertNotMaintaining(id);
     if (this.active?.id === id) this.active.abort.abort();
     // The service records cancellation synchronously before this queued reconciliation runs.
-    if (!this.executionFailure) { this.queued.add(id); this.drain(); }
+    if (!this.executionFailure) { this.service.store.requestDispatch(id); this.drain(); }
   }
   stop(): Promise<void> {
     this.closing ??= (async () => {
-      this.stopping = true; this.queued.clear(); this.active?.abort.abort();
+      this.stopping = true; clearInterval(this.poll); this.active?.abort.abort();
       await this.active?.promise; await this.workflows.close();
     })();
     return this.closing;
   }
-  isDrained(id: string): boolean { return (this.active?.id !== id || this.active.drained === true) && !this.queued.has(id) && this.workflows.isDrained(id); }
-  get busy(): boolean { return Boolean(this.active || this.queued.size); }
+  isDrained(id: string): boolean { return (this.active?.id !== id || this.active.drained === true) && !this.service.store.pendingDispatches().includes(id) && this.workflows.isDrained(id); }
+  get busy(): boolean { return Boolean(this.active || this.service.store.pendingDispatches().length); }
   async idle(): Promise<void> { while (this.active) await this.active.promise; }
   /** Call after domain recovery under the service lock. Restore waits, never auto-replay work. */
   async recover(): Promise<void> {
@@ -104,27 +107,31 @@ export class TaskRunner {
         await this.workflows.run(task.id);
         await this.service.cleanupTerminalTask(task.id);
       }
-      else if (['awaiting_mode', 'awaiting_plan_approval'].includes(task.state)) this.enqueue(task.id);
+      else if (['awaiting_mode', 'awaiting_plan_approval'].includes(task.state)) { this.service.store.requestDispatch(task.id, true); this.enqueue(task.id); }
     }
   }
   private drain(): void {
     if (this.active || this.stopping || this.executionFailure) return;
-    const id = this.queued.values().next().value as string | undefined;
-    if (!id) return; this.queued.delete(id);
+    let claim: DispatchClaim | undefined;
+    try { claim = this.service.store.claimDispatch(this.owner); } catch (error) { this.halt('scheduler', error); return; }
+    if (!claim) return; const id = claim.taskId;
     const abort = new AbortController();
     const promise = Promise.resolve().then(() => this.run(id, abort.signal)).catch(error => this.halt(id, error)).finally(async () => {
       try {
         await this.workflows.drain(id);
         if (this.active?.id === id) this.active.drained = true;
-        if (!this.executionFailure) await this.service.cleanupTerminalTask(id);
+        if (!this.executionFailure) {
+          this.service.store.finishDispatch(claim!);
+          await this.service.cleanupTerminalTask(id);
+        }
       } catch (error) { this.halt(id, error); }
       finally { this.active = undefined; this.drain(); }
     });
-    this.active = { id, abort, promise };
+    this.active = { id, abort, promise, claim };
   }
   private halt(id: string, error: unknown): void {
     const message = String(redact(error instanceof Error ? error.message : String(error), this.service.store.secrets)).slice(0, 2000);
-    this.executionFailure ??= { taskId: id, message }; this.queued.clear();
+    this.executionFailure ??= { taskId: id, message };
     // Logging must not depend on the failed database, nor take down the HTTP/read path.
     try { log('execution_halted', { taskId: id, message }); } catch { /* stderr may also be unavailable */ }
   }

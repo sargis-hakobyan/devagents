@@ -8,6 +8,7 @@ import { Mode, TaskInput, TeamInput, type Project, type Task, type TaskEvent, ty
 import { environmentSecrets, redact, redactValues } from '../telemetry/redact.js';
 import { limitationCount, normalizeLegacyLimitations, redactReportProse } from '../domain/limitations.js';
 import { STARTER_TEAM_ID } from '../domain/starter-team.js';
+import type { DispatchClaim, DispatchRecord } from '../domain/dispatch.js';
 
 export class Store {
   private readonly db: DatabaseSync;
@@ -18,7 +19,7 @@ export class Store {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
     // Version 4 added optional QA settings. Preserve that table when the QA feature is stashed.
-    if (version > 4) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
+    if (version > 5) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
     if (version === 0) this.db.exec(`
       BEGIN IMMEDIATE;
       CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, data TEXT NOT NULL);
@@ -49,6 +50,17 @@ export class Store {
       PRAGMA user_version=3;
       COMMIT;
     `);
+    if (version < 5) this.db.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS dispatch_queue (
+        task_id TEXT PRIMARY KEY REFERENCES tasks(id), requested INTEGER NOT NULL,
+        handled INTEGER NOT NULL DEFAULT 0, requested_version INTEGER NOT NULL,
+        generation INTEGER NOT NULL DEFAULT 0, owner TEXT, claimed INTEGER NOT NULL DEFAULT 0,
+        queued_at TEXT NOT NULL, heartbeat_at TEXT, blocker TEXT
+      );
+      PRAGMA user_version=5;
+      COMMIT;
+    `);
   }
   close(): void { this.db.close(); }
   private transaction<T>(fn: () => T): T {
@@ -60,6 +72,50 @@ export class Store {
       throw error;
     }
   }
+  /** Called within the same transaction as submission/approval/cancellation. */
+  private requestDispatchRow(task: Task, force = false): void {
+    const previous = this.dispatch(task.id);
+    if (previous && !force && previous.requestedVersion >= task.version) return;
+    const now = new Date().toISOString();
+    this.db.prepare(`INSERT INTO dispatch_queue(task_id, requested, requested_version, queued_at)
+      VALUES (?, 1, ?, ?) ON CONFLICT(task_id) DO UPDATE SET
+      requested=requested+1, requested_version=excluded.requested_version,
+      queued_at=CASE WHEN requested=handled AND owner IS NULL THEN excluded.queued_at ELSE queued_at END`)
+      .run(task.id, task.version, now);
+  }
+  requestDispatch(id: string, force = false): void {
+    this.transaction(() => {
+      const task = this.task(id);
+      if (!['awaiting_mode', 'planning', 'awaiting_plan_approval', 'ready', 'cancelled'].includes(task.state)) return;
+      this.requestDispatchRow(task, force);
+    });
+  }
+  dispatch(id: string): DispatchRecord | undefined {
+    return this.db.prepare(`SELECT task_id AS taskId, requested, handled, requested_version AS requestedVersion,
+      generation, owner, claimed, queued_at AS queuedAt, heartbeat_at AS heartbeatAt, blocker
+      FROM dispatch_queue WHERE task_id=?`).get(id) as DispatchRecord | undefined;
+  }
+  pendingDispatches(): string[] {
+    return this.db.prepare(`SELECT q.task_id FROM dispatch_queue q JOIN tasks t ON t.id=q.task_id
+      WHERE q.requested>q.handled AND q.owner IS NULL AND q.blocker IS NULL
+      AND t.state IN ('awaiting_mode','planning','awaiting_plan_approval','ready','cancelled')
+      ORDER BY q.queued_at, q.rowid`).all().map(row => String(row.task_id));
+  }
+  claimDispatch(owner: string): DispatchClaim | undefined {
+    return this.transaction(() => {
+      const taskId = this.pendingDispatches()[0]; if (!taskId) return;
+      const row = this.db.prepare(`UPDATE dispatch_queue SET owner=?, generation=generation+1,
+        claimed=requested, heartbeat_at=? WHERE task_id=? AND owner IS NULL AND blocker IS NULL
+        RETURNING generation, claimed`).get(owner, new Date().toISOString(), taskId)!;
+      return { taskId, owner, generation: Number(row.generation), sequence: Number(row.claimed) };
+    });
+  }
+  finishDispatch(claim: DispatchClaim): void {
+    const changed = this.db.prepare(`UPDATE dispatch_queue SET handled=claimed, owner=NULL, heartbeat_at=NULL
+      WHERE task_id=? AND owner=? AND generation=?`).run(claim.taskId, claim.owner, claim.generation).changes;
+    if (!changed) throw new AppError('dispatch_ownership', 'Dispatch ownership changed', 409);
+  }
+
   /** Redact display prose separately; preserve code-bearing requests, commands and plan descriptions. */
   private safeTask(task: Task): Task {
     return { ...task, ...(task.plan ? { plan: redactReportProse(task.plan, this.secrets) } : {}), ...(task.outcome ? { outcome: normalizeLegacyLimitations(redactReportProse(task.outcome, this.secrets)) } : {}) };
@@ -254,6 +310,7 @@ export class Store {
       if (team) task = { ...task, team, agents: team.members.map(m => ({ ...m, schemaVersion: 1 as const, instructionsFile: 'team', source: `team:${team.id}@${team.revision}` })) };
       this.db.prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)').run(task.id, task.projectId, task.state, task.version, this.taskJson(task));
       this.db.prepare('INSERT INTO requests VALUES (?, ?, ?)').run(key, fingerprint, task.id);
+      this.requestDispatchRow(task);
       this.append(task, 'user', `${mode ? 'Task submitted with autonomy mode' : 'Choose autonomous or plan-approval to continue'}${team ? ` · team "${team.name}" revision ${team.revision} frozen` : ''}`);
       return task;
     });
@@ -265,6 +322,7 @@ export class Store {
       assertTransition(task.state, state);
       const updated: Task = { ...task, ...patch, state, version: task.version + 1, updatedAt: new Date().toISOString() };
       this.db.prepare('UPDATE tasks SET state=?, version=?, data=? WHERE id=?').run(state, updated.version, this.taskJson(updated), id);
+      if (actor === 'user' && ['planning', 'ready', 'cancelled'].includes(state)) this.requestDispatchRow(updated);
       this.append(updated, actor, reason);
       return this.task(id);
     });

@@ -95,6 +95,7 @@ Ownership clarified by the owner on 2026-10-30: Codex handles implementation fix
 U1 is the first integrated UI increment before M4. Keep U2/U3 and M4 as separately reviewed work; a team editor must not claim unavailable engines or capabilities work.
 
 ## Later
+- [ ] Parallel top-level tasks on native/Docker installations: independent execution contexts, durable dispatch, duplicate prevention, resource limits and per-task cancellation. Follow [the implementation plan](PARALLEL_TASK_EXECUTION_PLAN.md); this remains planned after the baseline at `8c96ec3`.
 - [x] M4 implementation: Claude adapter, per-member routing and deterministic engine fixtures (see the 2026-11-03 update below).
 - [ ] M4 authenticated acceptance: Claude model access and a paid end-to-end fixture remain unverified.
 - [ ] M5: authorized GitHub integration, recovery hardening, multi-arch CI/release.
@@ -328,3 +329,9 @@ Deployed and applied to all 34 historical terminal tasks: no task worktrees rema
 Resolved six browser-test failures found while committing the accumulated changes. The compaction fixture now supplies the execution-history endpoint instead of accidentally reaching the authenticated service and signing out. Evidence and hostile-content checks open the intended disclosures. Unsupported-engine assertions use the current adapter diagnostic, locked-setup checks cover each provider separately, and the legacy-plan test creates its own planned task rather than relying on the latest cancelled task. Existing security, confirmation and evidence assertions remain enforced; this follow-up changes no production UI or execution behavior.
 
 The Docker suite now also runs the existing Claude MCP/runtime containment fixture with synthetic credentials and mocked inference. Standard checks on the committed implementation passed 291 tests with four optional checks skipped, backend/UI typechecks and the production build. Typechecks passed again after the test fixes. The complete browser suite passed all 49 workflows, and the narrow setup screenshot was inspected. The full isolated Docker suite passed packaging, sessions, encrypted credential reuse across restart, dependency preparation, private pnpm caches, procfs isolation, Claude sandbox tools, deterministic M2/M3, and two concurrent Codex protocol workers. No authenticated model requests were made in this verification pass.
+
+## Parallel tasks step 1 — local durable dispatch — 2026-11-09
+
+Added schema-5 dispatch storage without removing optional schema-4 settings. Submission, user mode/approval decisions and cancellation persist queue requests atomically with task state. The serial runner claims work from SQLite, coalesces repeated requests and preserves continuations arriving during suspension. A periodic scan backs up immediate wake-ups. Parallel execution and recovery fencing follow in subsequent steps.
+
+Verification: backend typecheck and 21 focused queue, Mastra recreation/race, storage-failure and team migration tests passed. No authenticated calls or service deployment.

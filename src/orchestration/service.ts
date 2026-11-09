@@ -268,7 +268,7 @@ export class TaskService {
     if (task.state === 'cancelled') return task;
     if (task.state === 'committing') throw new AppError('commit_in_progress', 'Local commit is being finalized; inspect the resulting task before further action', 409);
     if (terminalStates.includes(task.state)) throw new AppError('invalid_transition', 'Task already finished', 409);
-    this.runner?.cancel(id);
-    return this.store.transition(id, task.version, 'cancelled', 'user', 'Task cancelled or plan rejected');
+    const cancelled = this.store.transition(id, task.version, 'cancelled', 'user', 'Task cancelled or plan rejected');
+    this.runner?.cancel(id); return cancelled;
   }
 }
