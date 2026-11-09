@@ -26,7 +26,8 @@ export class TaskService {
   private runner?: Runner;
   private readonly maintaining = new Set<string>();
   private compactor: WorktreeCompactor | undefined;
-  get diskReserve(): DiskReserve { return new DiskReserve(this.dataDir); }
+  private reserve?: DiskReserve;
+  get diskReserve(): DiskReserve { return this.reserve ??= new DiskReserve(this.dataDir); }
   /** `executableEngines` is what this build can actually run; the schema accepts more engines than that. */
   constructor(readonly store: Store, readonly config: AppConfig, readonly dataDir: string, readonly platform: NodeJS.Platform = process.platform, readonly executableEngines: ReadonlySet<string> = new Set(['codex'])) {}
   get support(): RuntimeSupport { return { config: this.config, capabilities: builtinCapabilities, executableEngines: this.executableEngines, platform: this.platform }; }

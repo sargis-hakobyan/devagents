@@ -3,7 +3,8 @@
 Status: implementation in progress. Direction agreed on 2026-11-09. Baseline: `8c96ec3`. The sections below describe the target; delivery status is recorded here as each step lands.
 
 - Step 1: SQLite dispatch storage and serial scheduling implemented. Submission, user mode/approval decisions and cancellation persist dispatch atomically; claims coalesce duplicate requests and retain later continuations.
-- Steps 2–4: independent parallel execution/resources, ownership/recovery hardening, and cancellation/cleanup/UI integration remain in progress.
+- Step 2: independent task executions, bounded global operations and preparation reservations implemented; two tasks were verified overlapping in the same repository with separate repair budgets and results.
+- Steps 3–4: ownership/recovery hardening and cancellation/cleanup/UI integration remain in progress.
 
 Enable separate tasks to execute concurrently in native and Docker installations, with their own state, worktrees, cancellation and results. Use a durable queue to schedule work and Mastra to execute each task's workflow. Local parallelism must work without AWS. The same execution boundary will support a later distributed AWS deployment.
 
@@ -91,13 +92,13 @@ Task rows, queue requests and append-only domain events share an application tra
 
 ### Admission and fairness
 
-Proposed configuration, not currently accepted by the schema:
+Configuration implemented in step 2 (restart required):
 
 | Setting | Proposed behavior |
 | --- | --- |
 | `maxConcurrentTasks` | Default 1 for compatibility; configure 2 for the first parallel acceptance run |
 | Existing `concurrency` | Retain its work-item-per-task meaning and default 2 |
-| `maxConcurrentOperations` | Proposed default 2; service-wide bound on active engine calls, validation commands and dependency-preparation operations |
+| `maxConcurrentOperations` | Default 2; service-wide bound on active engine calls, validation commands and dependency-preparation operations |
 | Existing member concurrency | Retain per-task frozen member limits; identical role IDs in separate tasks do not accidentally share a member identity |
 
 Acquire a global operation permit only around actual execution, not while a parent workflow waits for a child, approval, or another permit. Release it in `finally` after subprocess drain. Nested phases must not acquire the same permit twice. These limits govern dispatched operations; Docker CPU, memory and PID limits still govern their child processes.

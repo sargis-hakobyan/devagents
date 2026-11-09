@@ -335,3 +335,9 @@ The Docker suite now also runs the existing Claude MCP/runtime containment fixtu
 Added schema-5 dispatch storage without removing optional schema-4 settings. Submission, user mode/approval decisions and cancellation persist queue requests atomically with task state. The serial runner claims work from SQLite, coalesces repeated requests and preserves continuations arriving during suspension. A periodic scan backs up immediate wake-ups. Parallel execution and recovery fencing follow in subsequent steps.
 
 Verification: backend typecheck and 21 focused queue, Mastra recreation/race, storage-failure and team migration tests passed. No authenticated calls or service deployment.
+
+## Parallel tasks step 2 — independent execution and resource limits — 2026-11-09
+
+Extracted per-task execution state and enabled bounded concurrent top-level workflows. Default task capacity stays one; YAML and environment overrides allow local/native and Docker parallelism. Global FIFO operation permits cover engine calls, validation and restricted preparation; shared preparation reservations coordinate disk headroom. The service monitors disk pressure centrally, and emergency reserve mutations serialize through one service-owned coordinator. Default environment preparers are per execution; adapters retain per-call scratch isolation.
+
+Verification: backend typecheck and 37 focused tests passed, including two top-level tasks overlapping in one repository while a third waits, separate repair budgets/limitations/commits, original-checkout preservation, abortable FIFO permits and shared disk reservations. Ownership/recovery hardening and UI integration follow in steps 3–4.

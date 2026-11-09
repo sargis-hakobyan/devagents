@@ -6,6 +6,10 @@ import { AppError } from './domain/errors.js';
 
 export async function loadConfig(path = process.env.DEVAGENTS_CONFIG): Promise<AppConfig> {
   const config = Config.parse(path ? parse(await readFile(resolve(path), 'utf8')) : { schemaVersion: 1 });
+  for (const [key, variable] of [['maxConcurrentTasks', 'DEVAGENTS_MAX_CONCURRENT_TASKS'], ['maxConcurrentOperations', 'DEVAGENTS_MAX_CONCURRENT_OPERATIONS']] as const) {
+    const value = process.env[variable];
+    if (value !== undefined && value !== '') config[key] = Config.shape[key].parse(Number(value));
+  }
   const rules = process.env.DEVAGENTS_RULES;
   if (rules !== undefined && rules !== '') {
     if (rules !== 'true' && rules !== 'false') throw new AppError('invalid_config', 'DEVAGENTS_RULES must be true or false');

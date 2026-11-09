@@ -76,7 +76,7 @@ Model choices do not guarantee account access or quota. DevAgents stores task st
 - **QA is opt-in.** `qaEnabled: false` keeps separate agent QA disabled. Developer validation and independent review still run. Read the [QA contract](docs/REFERENCE.md#optional-qa-gate) before enabling it.
 - **Verification has evidence.** Unavailable optional checks are reported as limitations. A required acceptance criterion blocked at the QA gate prevents a final task commit.
 
-DevAgents currently runs one top-level task at a time, with bounded parallel workers inside it. It is a local, single-user application.
+DevAgents defaults to one top-level task and supports configurable parallel tasks, with bounded workers inside each task and shared operation limits. See [concurrency configuration](docs/SETUP.md#large-projects-and-execution-budgets). It remains a local, single-user application.
 
 ## Documentation
 

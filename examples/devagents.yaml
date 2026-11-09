@@ -1,4 +1,6 @@
 schemaVersion: 1
+maxConcurrentTasks: 1
+maxConcurrentOperations: 2
 qaEnabled: false # separate agent QA is opt-in; developer validation and independent review remain required
 devagentsRules: false # true adds role scopes, command allowlist and read-only validation
 defaultEngine: codex

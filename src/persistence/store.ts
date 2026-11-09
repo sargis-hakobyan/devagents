@@ -101,9 +101,9 @@ export class Store {
       AND t.state IN ('awaiting_mode','planning','awaiting_plan_approval','ready','cancelled')
       ORDER BY q.queued_at, q.rowid`).all().map(row => String(row.task_id));
   }
-  claimDispatch(owner: string): DispatchClaim | undefined {
+  claimDispatch(owner: string, excluded: ReadonlySet<string> = new Set()): DispatchClaim | undefined {
     return this.transaction(() => {
-      const taskId = this.pendingDispatches()[0]; if (!taskId) return;
+      const taskId = this.pendingDispatches().find(id => !excluded.has(id)); if (!taskId) return;
       const row = this.db.prepare(`UPDATE dispatch_queue SET owner=?, generation=generation+1,
         claimed=requested, heartbeat_at=? WHERE task_id=? AND owner IS NULL AND blocker IS NULL
         RETURNING generation, claimed`).get(owner, new Date().toISOString(), taskId)!;

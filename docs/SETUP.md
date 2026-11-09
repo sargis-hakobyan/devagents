@@ -95,6 +95,8 @@ Both modes retain cancellation, resource limits, independent review, local-only 
 
 ## Large projects and execution budgets
 
+Independent tasks can run concurrently in native and Docker installations. The default remains one task. Set `DEVAGENTS_MAX_CONCURRENT_TASKS=2` in the launcher's `.env` and restart to admit two tasks; `DEVAGENTS_MAX_CONCURRENT_OPERATIONS=2` bounds engine calls, validation and preparation operations across all tasks. Native YAML uses `maxConcurrentTasks` (1–8) and `maxConcurrentOperations` (1–16). Environment overrides take precedence. Existing `concurrency` still limits work-item waves inside each task. Approval waits release task capacity, and each task retains its own branch, worktree, repair budget and cancellation. Increase limits only within the machine's CPU, memory and disk capacity.
+
 Docker defaults to 4 GiB RAM and 4 CPUs shared by DevAgents, agents and project commands. Configure `DEVAGENTS_MEMORY`, `DEVAGENTS_CPUS` and `DEVAGENTS_PIDS` in `.env`, then restart with `./devagents start`. Allocate enough memory to Docker itself too. These limits govern project installs/builds/tests, not cloud model inference.
 
 Default agent calls may run for 30 minutes, individual validation commands for 10 minutes, and each implementation/review loop permits three repair cycles. Explicit YAML settings still override these defaults. Setup uses lightweight prerequisite probes; full validation runs after implementation.

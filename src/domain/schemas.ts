@@ -32,6 +32,8 @@ export const Config = z.strictObject({
   defaultProvider: Id.default('openai'),
   providers: z.array(Provider).default([{ id: 'openai', kind: 'openai', auth: 'login' }, { id: 'anthropic', kind: 'anthropic', auth: 'login' }]),
   concurrency: z.number().int().min(1).max(8).default(2),
+  maxConcurrentTasks: z.number().int().min(1).max(8).default(1),
+  maxConcurrentOperations: z.number().int().min(1).max(16).default(2),
   maxRepairCycles: z.number().int().min(0).max(3).default(3),
   executionTimeoutMs: z.number().int().min(1000).max(3600000).default(1800000),
   validationTimeoutMs: z.number().int().min(1000).max(600000).default(600000),
