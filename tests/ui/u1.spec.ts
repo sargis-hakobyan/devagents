@@ -121,7 +121,9 @@ test('hostile task content renders as text: no script runs, no element is create
   expect(await page.locator('#app iframe').count()).toBe(0);
   expect(await page.locator('#app b', { hasText: 'bold' }).count()).toBe(0);
   await page.getByRole('tab', { name: 'Plan' }).click();
+  await page.getByText('Technical details', { exact: true }).click();
   await expect(page.getByText('<iframe src="https://example.invalid"></iframe> must render as text')).toBeVisible();
+  expect(await page.locator('#app iframe').count()).toBe(0);
   expect(await page.locator('#app a[href^="javascript:"]').count()).toBe(0);
   await page.goto(`${base}/ui/tasks`);
   await expect(page.getByText("<script>alert('hostile')</script>", { exact: false }).first()).toBeVisible();

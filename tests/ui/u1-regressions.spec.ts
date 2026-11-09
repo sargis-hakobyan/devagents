@@ -77,6 +77,7 @@ test('cancelled plans distinguish rejection from a recorded approval', async ({ 
 });
 test('large evidence retains pass, failure, truncation and review outcomes in every task view', async ({ page }) => {
   await signIn(page, `/ui/tasks/${completedId}`);
+  await page.getByText('Planned responsibilities and work items', { exact: true }).click();
   await expect(page.getByText('Review ✓', { exact: true })).toBeVisible();
   await page.getByRole('tab', { name: /Activity/ }).click();
   await expect(page.locator('summary', { hasText: 'validation passed' })).toHaveCount(2);

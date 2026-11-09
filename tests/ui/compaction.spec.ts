@@ -10,6 +10,7 @@ test('compaction previews escaped paths and sends only the reviewed digest on ex
   await page.route('**/ui/session', route => route.fulfill({ json: { authenticated: true, csrfToken: 'fixture-csrf', expiresAt: new Date(Date.now() + 600000).toISOString() } }));
   await page.route(url => url.pathname === `/tasks/${id}`, route => route.fulfill({ json: { id, projectId: 'fixture', request: 'Finished work', state: 'cancelled', version: 3, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), acceptanceCriteria: [] } }));
   for (const endpoint of ['items', 'events', 'evidence']) await page.route(`**/tasks/${id}/${endpoint}*`, route => route.fulfill({ json: [] }));
+  await page.route(`**/tasks/${id}/execution`, route => route.fulfill({ json: { state: 'cancelled', updatedAt: new Date().toISOString(), entries: [] } }));
   await page.route(`**/tasks/${id}/compaction-preview`, route => route.fulfill({ json: { taskId: id, digest, computedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 600000).toISOString(), reclaimableBytes: 1024 ** 3, candidates: [{ worktree: '/data/worktrees/<script>hostile</script>', path: 'node_modules', bytes: 1024 ** 3, entries: 2 }], kept: ['Source edits and history are kept.'] } }));
   await page.route(`**/tasks/${id}/compact`, async route => {
     removals++; expect(route.request().postDataJSON()).toEqual({ digest });

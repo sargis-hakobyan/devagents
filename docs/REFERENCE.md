@@ -278,7 +278,7 @@ node scripts/sandbox-spike.mjs  # Requires Codex; no credentials
 npm run test:m2                # Single-item fixture with real sandboxed tests/Git
 npm run test:m3                # Three-item DAG, dependencies and combined review
 npm run test:codex-protocol    # Real runtime/tools against a local model-protocol fixture
-npm run test:docker            # Requires Docker; includes M2, M3, runtime fixtures and the browser UI session exchange
+npm run test:docker            # Requires Docker; includes M2/M3, Codex/Claude sandbox fixtures and browser sessions
 npm run test:ui                # Browser workflow tests against the labelled development fixture (Playwright, Chromium)
 # Only after authenticating the dedicated native profile:
 npm run test:codex-live        # Single-item live model fixture

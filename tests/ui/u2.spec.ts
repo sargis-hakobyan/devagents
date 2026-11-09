@@ -88,7 +88,9 @@ test('forbidden grants and unsupported choices are refused or disabled with reas
   await page.goto(`${base}/ui/teams/${design.id}`);
   await page.getByRole('button', { name: 'Graphic Designer' }).click();
   await expect(page.getByRole('list', { name: 'Member diagnostics' })).toContainText('capability "asset-design" has no backend');
-  await expect(page.locator('option', { hasText: 'claude-code — not available until M4' })).toHaveJSProperty('disabled', true);
+  const claudeOption = page.getByRole('combobox', { name: /^Engine/ }).locator('option[value="claude-code"]');
+  await expect(claudeOption).toHaveText('claude-code — no adapter registered in this build');
+  await expect(claudeOption).toHaveJSProperty('disabled', true);
   await expect(page.locator('option', { hasText: 'Inherit (codex)' })).toHaveJSProperty('disabled', false);
   await page.getByText('Advanced · capabilities, scope, commands, concurrency').click();
   await expect(page.getByRole('button', { name: '✕ asset-design — no backend' })).toHaveAttribute('aria-pressed', 'true');

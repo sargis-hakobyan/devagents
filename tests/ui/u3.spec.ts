@@ -314,10 +314,16 @@ test('locked or unavailable setup keeps terminal recovery and makes no automatic
   });
   await page.goto(`${base}/ui/settings/setup`);
   await expect(page.getByRole('heading', { name: 'Get ready to run work' })).toBeVisible();
-  await expect(page.getByText('Credentials locked', { exact: true })).toBeVisible();
-  await expect(page.getByText('✕ Not installed ·', { exact: true })).toBeVisible();
-  await page.getByText('Continue in your terminal', { exact: true }).click();
+  const codex = page.locator('section.card').filter({ has: page.getByText('1 · Connect Codex', { exact: true }) });
+  const claude = page.locator('section.card').filter({ has: page.getByText('Connect Claude', { exact: true }) });
+  for (const connection of [codex, claude]) {
+    await expect(connection.getByText('Credentials locked', { exact: true })).toBeVisible();
+    await expect(connection.getByText('✕ Not installed ·', { exact: true })).toBeVisible();
+    await expect(connection.getByRole('button', { name: /Use an .* API key/ })).toBeDisabled();
+    await connection.getByText('Continue in your terminal', { exact: true }).click();
+  }
   await expect(page.getByText('npm run cli -- auth setup', { exact: true })).toBeVisible();
+  await expect(claude.getByText('docker compose exec devagents node dist/cli/main.js auth claude --method api-key', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Test connection · terminal only' })).toBeDisabled();
   await expect(page.locator('input')).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -472,9 +478,13 @@ test('settings and task details show the default-off policy and its frozen task 
 
 
 test('older plans remain readable without a verification summary', async ({ page }) => {
-  await signIn(page);
-  const tasks = (await (await call('/tasks?state=cancelled')).json()).tasks;
-  const task = await (await call(`/tasks/${tasks[0].id}`)).json();
+  await signIn(page); await stopInitialHold(page);
+  const submitted = await call('/tasks', 'POST', { projectId: 'fixture', request: 'Legacy plan compatibility fixture', mode: 'plan-approval' }, { 'idempotency-key': crypto.randomUUID() });
+  expect(submitted.ok).toBe(true);
+  const { id } = await submitted.json();
+  await expect.poll(async () => (await (await call(`/tasks/${id}`)).json()).state).toBe('awaiting_plan_approval');
+  expect((await call(`/tasks/${id}/cancel`, 'POST', {})).ok).toBe(true);
+  const task = await (await call(`/tasks/${id}`)).json();
   const summary = task.plan.summary;
   await page.route(`${base}/tasks/${task.id}`, async route => {
     const response = await route.fetch(); const body = await response.json();
