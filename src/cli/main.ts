@@ -3,7 +3,8 @@ import { SetupAuth, codexSetupDriver, claudeSetupDriver, assertSignInIdle, type 
 import { readHiddenKey } from './secret-prompt.js';
 import { Command, Option } from 'commander';
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
@@ -56,7 +57,12 @@ cli.command('serve').description('Start the local API').action(async () => {
   const sandbox = { scanLimit: config.workspaceScanLimit };
   const engines = new EngineRegistry([new CodexAdapter(dataDir, 'codex', sandbox), new ClaudeAdapter(dataDir, sandbox)]);
   const service = new TaskService(store, config, dataDir, process.platform, engines.ids());
-  const runner = new TaskRunner(service, engines, new CodexValidator(dataDir, 'codex', sandbox), undefined, { startPaused: true });
+  const credentialRuntime = process.env.DEVAGENTS_CREDENTIAL_RUNTIME;
+  const runner = new TaskRunner(service, engines, new CodexValidator(dataDir, 'codex', sandbox), undefined, {
+    startPaused: true,
+    admission: () => credentialRuntime && !existsSync(join(credentialRuntime, 'unlocked'))
+      ? 'Waiting for credential vault unlock; finish startup in the launcher' : undefined,
+  });
   service.attachRunner(runner);
   // Docker explicitly binds to all container interfaces; Compose exposes only host loopback.
   const host = process.env.DEVAGENTS_HOST ?? '127.0.0.1';
@@ -153,6 +159,7 @@ teams.command('archive <id>').requiredOption('--revision <revision>').action(asy
 teams.command('restore <id>').requiredOption('--revision <revision>').action(async (id: string, opts: { revision: string }) => print(await request(`/teams/${id}/archive`, 'POST', { expectedRevision: Number(opts.revision), archived: false })));
 teams.command('duplicate <id> <name>').action(async (id: string, name: string) => print(await request(`/teams/${id}/duplicate`, 'POST', { name })));
 cli.command('agents').option('--project <id>').action(async (opts: { project?: string }) => print(await request(`/agents${opts.project ? `?projectId=${encodeURIComponent(opts.project)}` : ''}`)));
+cli.command('scheduler').description('Show task capacity, queued work and recovery attention').action(async () => print(await request('/scheduler')));
 const tasks = cli.command('tasks');
 tasks.command('list').description('Summaries of all tasks; use tasks show for the full record').action(async () => print(await request('/tasks')));
 tasks.command('submit <project> <request>').option('--mode <mode>').option('--team <id>', 'Saved team to freeze for this task (default: the project default, else the legacy registry)').option('--key <key>', 'Retry key; reuse it to avoid duplicate submissions').action(async (projectId: string, text: string, opts: { mode?: string; team?: string; key?: string }) => {
@@ -188,6 +195,8 @@ auth.command('unlock').description('Unlock the memory-backed runtime using a key
   }
   await vault.unlock(input.trim());
   await (await configuredVault(dataDirectory(), 'claude'))!.unlock(input.trim());
+  // Admission opens only after both vaults have restored their private runtime files.
+  await writeFile(join(process.env.DEVAGENTS_CREDENTIAL_RUNTIME!, 'unlocked'), 'ready\n', { mode: 0o600 });
   console.log('Encrypted credential vault unlocked.');
 });
 auth.command('setup').description('Choose ChatGPT, an API key, or a saved login; optionally test model access')

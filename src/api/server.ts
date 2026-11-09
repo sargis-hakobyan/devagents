@@ -185,22 +185,27 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
         }
         if (req.method === 'POST' && action === 'duplicate') return send(res, 201, service.duplicateTeam(id, z.strictObject({ name: z.unknown() }).parse(await body(req)).name));
       }
-      if (req.method === 'GET' && path === '/overview') return send(res, 200, service.store.overview());
+      if (req.method === 'GET' && path === '/overview') {
+        const scheduler = service.scheduling(); const overview = service.store.overview(scheduler.active);
+        return send(res, 200, { ...overview, scheduler, active: overview.active.map(task => ({ ...task, scheduling: service.taskScheduling(task.id) })) });
+      }
+      if (req.method === 'GET' && path === '/scheduler') return send(res, 200, service.scheduling());
       if (req.method === 'GET' && path === '/status') {
         if (!options.status) throw new AppError('not_found', 'Status reporting is not configured', 404);
-        return send(res, 200, await options.status());
+        return send(res, 200, { ...await options.status() as object, scheduler: service.scheduling() });
       }
       if (req.method === 'GET' && path === '/storage') return send(res, 200, await service.storageStatus());
       if (req.method === 'GET' && path === '/tasks') {
         const states = z.array(State).max(State.options.length).parse(url.searchParams.getAll('state'));
         const project = url.searchParams.get('projectId'); const projectId = project ? Id.parse(project) : undefined;
         const before = url.searchParams.get('before');
-        return send(res, 200, { ...service.store.summaries({
+        const page = service.store.summaries({
           limit: integer(url.searchParams.get('limit'), 50),
           ...(before ? { before: integer(before, 0) } : {}),
           ...(projectId ? { projectId } : {}),
           ...(states.length ? { states } : {}),
-        }), counts: service.store.stateCounts(projectId) });
+        });
+        return send(res, 200, { ...page, tasks: page.tasks.map(task => ({ ...task, scheduling: service.taskScheduling(task.id) })), counts: service.store.stateCounts(projectId) });
       }
       if (req.method === 'POST' && path === '/tasks') {
         const key = z.string().min(1).max(200).parse(req.headers['idempotency-key']);
@@ -217,7 +222,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
           return send(res, 200, await service.diff(id));
         }
         if (req.method === 'GET' && action === 'compaction-preview' && !sub) return send(res, 200, await service.compactionPreview(id));
-        if (req.method === 'GET' && !action) return send(res, 200, { ...service.store.task(id), approval: service.store.planApproval(id) });
+        if (req.method === 'GET' && !action) return send(res, 200, { ...service.store.task(id), approval: service.store.planApproval(id), scheduling: service.taskScheduling(id) });
         if (req.method === 'GET' && action === 'events') return send(res, 200, service.store.events(id, integer(url.searchParams.get('after'), 0), Math.min(integer(url.searchParams.get('limit'), 500), 1000)));
         if (req.method === 'GET' && action === 'evidence' && sub) return send(res, 200, boundEvidence(service.store.evidenceEntry(id, Number(sub)), EVIDENCE_ENTRY_BYTES));
         if (req.method === 'GET' && action === 'evidence') return send(res, 200, service.store.evidence(id, integer(url.searchParams.get('after'), 0), Math.min(integer(url.searchParams.get('limit'), 200), 1000)).map(e => boundEvidence(e, EVIDENCE_PREVIEW_BYTES)));

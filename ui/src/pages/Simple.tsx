@@ -79,12 +79,12 @@ export function SettingsPage() {
         <dt>Providers</dt><dd>{status.defaults.providers.map(p => <div key={p.id} class="mono">{p.id} · {p.kind} · {p.auth}{p.apiKeyConfigured !== null ? ` · key ${p.apiKeyConfigured ? 'configured' : 'missing'}` : ''}{p.executable ? '' : ' · configuration only'}</div>)}</dd>
       </dl><div class="muted" style={{ fontSize: '12.5px', marginTop: '8px' }}>Per-agent overrides resolve against these defaults.</div></div></Card>
       <Card title="Execution limits"><div style={{ padding: '14px 16px' }}><dl class="kv" style={{ gridTemplateColumns: '170px minmax(0, 1fr)' }}>
-        <dt>Global concurrency</dt><dd>{status.limits.concurrency} work items per wave</dd>
+        <dt>Work-item concurrency</dt><dd>{status.limits.concurrency} work items per wave</dd>
         <dt>Repair cycles</dt><dd>{status.limits.maxRepairCycles} per item · {status.limits.maxRepairCycles} shared for integration</dd>
         <dt>Execution timeout</dt><dd>{status.limits.executionTimeoutMs / 1000} s per engine run</dd>
         <dt>Validation timeout</dt><dd>{status.limits.validationTimeoutMs / 1000} s per command · output capped at 1 MiB</dd>
         <dt>Workspace scan limit</dt><dd>{status.limits.workspaceScanLimit.toLocaleString()} entries</dd>
-        <dt>Scheduling</dt><dd>One top-level request at a time; deterministic waves</dd>
+        <dt>Scheduling</dt><dd>{status.scheduler?.enabled ? `Up to ${status.scheduler.maxConcurrentTasks} tasks and ${status.scheduler.maxConcurrentOperations} operations concurrently; FIFO task dispatch` : 'Execution scheduler unavailable'}</dd>
       </dl></div></Card>
     </div>
     <Card title="Service and browser session"><div style={{ padding: '14px 16px' }}><dl class="kv">

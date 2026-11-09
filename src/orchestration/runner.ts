@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { DispatchClaim } from '../domain/dispatch.js';
+import type { DispatchClaim, SchedulerStatus, TaskScheduling } from '../domain/dispatch.js';
 import type { CodingEngine, Validator } from '../domain/engine.js';
 import { AppError } from '../domain/errors.js';
 import { terminalStates } from '../domain/lifecycle.js';
@@ -29,7 +29,8 @@ export class TaskRunner {
   executionFailure: { taskId: string; message: string } | undefined;
   readonly workflows: TaskWorkflows;
   constructor(private readonly service: TaskService, engine: CodingEngine | EngineRegistry,
-    private readonly validator: Validator, private readonly environment?: EnvironmentPreparer, options: { startPaused?: boolean } = {}) {
+    private readonly validator: Validator, private readonly environment?: EnvironmentPreparer,
+    private readonly options: { startPaused?: boolean; admission?: () => string | undefined } = {}) {
     this.recovering = options.startPaused ?? false;
     this.engines = engine instanceof EngineRegistry ? engine : new EngineRegistry([engine]);
     this.resources = new ExecutionResources(service.dataDir, service.config.maxConcurrentOperations, service.config.minFreeDiskBytes);
@@ -77,6 +78,23 @@ export class TaskRunner {
     return (!this.active.has(id) || this.active.get(id)!.drained) && !this.service.store.pendingDispatches().includes(id) && this.workflows.isDrained(id);
   }
   get busy(): boolean { return Boolean(this.active.size || this.service.store.pendingDispatches().length); }
+  get scheduling(): SchedulerStatus {
+    const blockers = this.service.store.recoveryBlockers();
+    return { enabled: true, maxConcurrentTasks: this.service.config.maxConcurrentTasks,
+      maxConcurrentOperations: this.service.config.maxConcurrentOperations, active: [...this.active.keys()],
+      queued: this.service.store.pendingDispatches().length, runningOperations: this.resources.operations.running,
+      waitingOperations: this.resources.operations.waiting, held: blockers.length, attention: blockers.slice(0, 50) };
+  }
+  taskScheduling(id: string): TaskScheduling {
+    const task = this.service.store.task(id); const queue = this.service.store.dispatch(id);
+    if (queue?.blocker) return { status: 'held', reason: queue.blocker };
+    const active = this.active.get(id);
+    if (active?.drained || active?.execution.abort.signal.aborted) return { status: 'draining', reason: 'Waiting for task workers and resource cleanup to finish' };
+    if (terminalStates.includes(task.state)) return { status: 'finished', reason: 'Task finished' };
+    if (task.state === 'awaiting_mode' || task.state === 'awaiting_plan_approval') return { status: 'waiting', reason: task.state === 'awaiting_mode' ? 'Waiting for your autonomy choice' : 'Waiting for your plan approval' };
+    if (active) return { status: 'running', reason: this.resources.waiting.has(id) ? 'Execution is waiting for shared operation or preparation capacity' : 'Task execution is active' };
+    return { status: 'queued', reason: this.executionFailure ? 'Execution halted; recover storage and restart the service' : this.recovering ? 'Startup reconciliation is in progress' : this.options.admission?.() ?? 'Waiting for an available task slot' };
+  }
   async idle(): Promise<void> {
     this.drain();
     while (this.active.size) await Promise.all([...this.active.values()].map(a => a.promise));
@@ -103,6 +121,8 @@ export class TaskRunner {
         else if (['awaiting_mode', 'awaiting_plan_approval'].includes(task.state)) this.service.store.requestDispatch(task.id, true);
         else if (['planning', 'ready'].includes(task.state)) this.service.store.requestDispatch(task.id, true);
       }
+    } catch (error) {
+      this.halt('recovery', error); throw error;
     } finally {
       this.recovering = false;
     }
@@ -112,7 +132,13 @@ export class TaskRunner {
     if (this.stopping || this.executionFailure || this.recovering) return;
     while (this.active.size < this.service.config.maxConcurrentTasks) {
       let claim: DispatchClaim | undefined;
-      try { claim = this.service.store.claimDispatch(this.owner, new Set(this.active.keys())); }
+      try {
+        const excluded = new Set(this.active.keys());
+        if (this.options.admission?.()) for (const id of this.service.store.pendingDispatches()) {
+          if (['planning', 'ready'].includes(this.service.store.task(id).state)) excluded.add(id);
+        }
+        claim = this.service.store.claimDispatch(this.owner, excluded);
+      }
       catch (error) { this.halt('scheduler', error); return; }
       if (!claim) return;
       const id = claim.taskId;
@@ -135,7 +161,7 @@ export class TaskRunner {
               this.service.store.finishDispatch(active.claim);
             }
           } catch (error) { this.halt(id, error); }
-          finally { this.active.delete(id); this.drain(); }
+          finally { this.resources.waiting.delete(id); this.active.delete(id); this.drain(); }
         });
     }
   }

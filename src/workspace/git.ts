@@ -1,3 +1,4 @@
+import { withRepositoryLock } from './repository-lock.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { lstat, mkdir, realpath, stat } from 'node:fs/promises';
@@ -47,11 +48,22 @@ export async function inspectProject(input: unknown): Promise<Project> {
   const baseSha = await mainCommit(path);
   return { ...project, path, baseSha, registeredAt: new Date().toISOString() };
 }
-const creating = new Map<string, Promise<unknown>>();
+function lockRepository<T>(path: string, work: () => Promise<T>): Promise<T> {
+  // Preserve call order for this checkout while resolving the shared repository identity.
+  // All callers take the checkout lock before the common-metadata lock, never in reverse.
+  return withRepositoryLock(`checkout:${path}`, async () => {
+    const common = await realpath(resolve(path, await git(path, ['rev-parse', '--git-common-dir'])));
+    return withRepositoryLock(common, work);
+  });
+}
 export class WorkspaceManager {
   constructor(private readonly dataDir: string) {}
   /** Automatic retention never forces removal or deletes a branch. Unknown ignored files also keep a checkout alive. */
   async removeCleanCompleted(project: Project, taskId: string, workspaces: { path: string; branch: string }[], result: { branch: string; commit: string },
+    beforeRemoval: (workspace: { path: string; branch: string }) => void, record: (workspace: { path: string; branch: string }) => void): Promise<void> {
+    return lockRepository(project.path, () => this.removeCleanCompletedNow(project, taskId, workspaces, result, beforeRemoval, record));
+  }
+  private async removeCleanCompletedNow(project: Project, taskId: string, workspaces: { path: string; branch: string }[], result: { branch: string; commit: string },
     beforeRemoval: (workspace: { path: string; branch: string }) => void, record: (workspace: { path: string; branch: string }) => void): Promise<void> {
     if (!/^[a-f0-9-]{36}$/.test(taskId) || !isOwnedBranch(result.branch, taskId) || !/^[a-f0-9]{40}$/.test(result.commit)) throw new AppError('cleanup_ownership', 'Invalid completed result');
     if (await realpath(project.path) !== project.path) throw new AppError('cleanup_ownership', 'Registered project path changed');
@@ -102,6 +114,9 @@ export class WorkspaceManager {
    * name and branch carry the task ID. Anything else is refused rather than skipped.
    */
   async cleanup(project: Project, taskId: string, workspaces: { path: string; branch: string }[], keepBranches: ReadonlySet<string> = new Set()): Promise<{ removedWorktrees: string[]; removedBranches: string[]; keptBranches: string[] }> {
+    return lockRepository(project.path, () => this.cleanupNow(project, taskId, workspaces, keepBranches));
+  }
+  private async cleanupNow(project: Project, taskId: string, workspaces: { path: string; branch: string }[], keepBranches: ReadonlySet<string>): Promise<{ removedWorktrees: string[]; removedBranches: string[]; keptBranches: string[] }> {
     if (!/^[a-f0-9-]{36}$/.test(taskId)) throw new AppError('invalid_task_id', 'Invalid worktree owner ID');
     if (await realpath(project.path) !== project.path) throw new AppError('path_denied', 'Registered project path changed');
     const parent = await realpath(resolve(this.dataDir, 'worktrees')).catch(() => undefined);
@@ -125,10 +140,7 @@ export class WorkspaceManager {
   }
   /** Worktree creation is serialized per repository: parallel `git worktree add` calls contend on ref and metadata locks. */
   private async createOwned(project: Project, taskId: string, branch: string, itemId?: string, source?: string): Promise<Workspace> {
-    const previous = creating.get(project.path) ?? Promise.resolve();
-    const run = previous.catch(() => undefined).then(() => this.createNow(project, taskId, branch, itemId, source));
-    creating.set(project.path, run);
-    try { return await run; } finally { if (creating.get(project.path) === run) creating.delete(project.path); }
+    return lockRepository(project.path, () => this.createNow(project, taskId, branch, itemId, source));
   }
   private async createNow(project: Project, taskId: string, branch: string, itemId?: string, source?: string): Promise<Workspace> {
     if (!/^[a-f0-9-]{36}$/.test(taskId)) throw new AppError('invalid_task_id', 'Invalid worktree owner ID');

@@ -84,7 +84,7 @@ npm run cli -- tasks items TASK_ID
 
 Authenticate Codex before selecting a mode. Approve the version you actually reviewed. `tasks cancel TASK_ID` also rejects a pending plan. Submission with `--mode autonomous` skips the mode prompt and plan approval. Task mode overrides project default (`projects add ... --mode ...`), which overrides the global default. With no default the wait is persisted exactly once.
 
-Reuse `--key` with identical input to retry submission without duplication. Use `tasks show` to find the managed branch, worktree path and final commit. The managed branch is named after the request and the task: `devagents/<slug>-<first eight characters of the task id>`, for example `devagents/fix-my-orders-12b1ca2d`; work items use `<task branch>-<item id>`. Branches created by earlier versions (`codex/devagents-<task id>`) stay recognised for diffs and cleanup. The final commit's subject is the first line of the request. One top-level request runs at a time. Within it, ready items run in deterministic waves bounded by global `concurrency` and each role’s `concurrency`. Integration is serial and dependent items start only after prior waves are integrated. Nothing is pushed or merged into the original checkout automatically.
+Reuse `--key` with identical input to retry submission without duplication. Use `tasks show` to find the managed branch, worktree path and final commit. The managed branch is named after the request and the task: `devagents/<slug>-<first eight characters of the task id>`, for example `devagents/fix-my-orders-12b1ca2d`; work items use `<task branch>-<item id>`. Branches created by earlier versions (`codex/devagents-<task id>`) stay recognised for diffs and cleanup. The final commit's subject is the first line of the request. Top-level requests run up to `maxConcurrentTasks` (default 1). Within each task, ready items run in deterministic waves bounded by `concurrency` and each role’s `concurrency`. Integration is serial and dependent items start only after prior waves are integrated. Nothing is pushed or merged into the original checkout automatically.
 
 ## Browser UI
 
@@ -177,7 +177,7 @@ The recorded `workspace.baseSha` is the immutable task starting commit. `workspa
 
 The Tech Lead chooses up to 30 work items with assigned agents, dependencies, validation commands, managed branches and `ownedPaths`. Its built-in instructions favor targeted inspection, the smallest useful plan and concise structured output; required verification blockers cannot be waived as optional limitations. Each item needs a writable implementer with the required capabilities, and review must be independent of all implementers and the integrator. Multi-item plans need combined validation; single-item plans use item validation and `integration: null`. Planning and execution use the task's frozen policy. With extra rules off (the default), owned paths describe the planned scope; the engine can write elsewhere within its isolated worktree. With extra rules on, owned paths are enforced, may only narrow role permissions, and Linux write grants must be directory subtrees such as `project:/src/component/**`. Unsupported plans are refused before approval.
 
-Use `tasks show TASK_ID` to inspect and approve the plan, `tasks items TASK_ID` for each item’s progress/worktree/commit, and `tasks evidence TASK_ID` for runs, validation, checkpoints and integration decisions. A plan-approval wait stops all implementation workers. For parallel work by one role, set that role’s `concurrency` above 1; different roles can run concurrently at their existing limits.
+Use `tasks show TASK_ID` to inspect and approve the plan, `tasks items TASK_ID` for each item’s progress/worktree/commit, and `tasks evidence TASK_ID` for runs, validation, checkpoints and integration decisions. A plan-approval wait stops that task’s implementation and releases its task slot; unrelated tasks can continue. For parallel work by one role, set that role’s `concurrency` above 1; different roles can run concurrently at their existing limits.
 
 Each worker branches from a private snapshot of results already integrated into the task worktree. Successful item validation and independent review produce a private work-item commit. These commits and dependency checkpoints are intermediate evidence, not final task approval. Changes are combined with three-way patch application in the task worktree. Conflicts become an explicit integration-agent repair bounded by `maxRepairCycles`. A repair counts as resolved only when the file content is clean: any `<<<<<<<`, `|||||||` or `>>>>>>>` line fails it, and a bare `=======` line fails it when the file has more of them than either side had before the merge, so Markdown heading underlines are allowed while leftover dividers are not; Git must also report no unmerged entry. Unresolved conflicts stop the task; terminal cleanup preserves unfinished work in recovery snapshots. Repository-defined filters and custom merge drivers are refused.
 
@@ -267,7 +267,7 @@ Git helpers disable hooks/fsmonitor and global/system attributes; worktree creat
 
 The container is non-root, has a read-only root filesystem, dropped capabilities, resource limits, temporary `/tmp` and a data volume. These service controls alone are not a worker sandbox.
 
-The default two-worker configuration has a 512-process/thread cap, 4 CPUs and 4 GiB of memory. Override these with `DEVAGENTS_PIDS`, `DEVAGENTS_CPUS` and `DEVAGENTS_MEMORY` in `.env`; Docker must have enough resources allocated. The Docker suite runs two Codex protocol workers concurrently under these limits. Raising agent concurrency requires checking container capacity as well as role permissions.
+The default two-operation configuration has a 512-process/thread cap, 4 CPUs and 4 GiB of memory. Override these with `DEVAGENTS_PIDS`, `DEVAGENTS_CPUS` and `DEVAGENTS_MEMORY` in `.env`; Docker must have enough resources allocated. The Docker suite runs two Codex protocol workers concurrently under these limits. Raising agent concurrency requires checking container capacity as well as role permissions.
 
 ## Validation and contribution
 
@@ -277,8 +277,9 @@ npm run spike:mastra
 node scripts/sandbox-spike.mjs  # Requires Codex; no credentials
 npm run test:m2                # Single-item fixture with real sandboxed tests/Git
 npm run test:m3                # Three-item DAG, dependencies and combined review
+node scripts/parallel-smoke.mjs # After build, two top-level tasks with real sandbox validation
 npm run test:codex-protocol    # Real runtime/tools against a local model-protocol fixture
-npm run test:docker            # Requires Docker; includes M2/M3, Codex/Claude sandbox fixtures and browser sessions
+npm run test:docker            # Requires Docker; includes M2/M3, parallel tasks, Codex/Claude sandbox fixtures and browser sessions
 npm run test:ui                # Browser workflow tests against the labelled development fixture (Playwright, Chromium)
 # Only after authenticating the dedicated native profile:
 npm run test:codex-live        # Single-item live model fixture
@@ -326,6 +327,12 @@ QA runs after successful validation, on the combined worktree for multi-item tas
 Failed checks use the existing bounded implementation/integration repair budget and require fresh validation and QA. A blocked required criterion stops execution without a final task commit, with the missing prerequisite in the error and evidence; it does not spend code-repair cycles trying to fix the environment. Optional manual checks remain advisory limitations. Cancellation still drains the active run. Historical tasks are never rerun or retroactively marked QA-verified.
 
 ### Execution persistence
+
+Run `npm run cli -- scheduler` (or `docker compose exec devagents node dist/cli/main.js scheduler`) to inspect task slots, queued requests, operation counts and recovery attention. The authenticated `GET /scheduler` endpoint returns the same projection. Status/Overview also include scheduler facts; task detail/list responses carry task-specific scheduling reasons. Overview shows all active executions and links to queued history.
+
+`maxConcurrentTasks` defaults to 1 and accepts 1–8; `maxConcurrentOperations` defaults to 2 and accepts 1–16. Both work in native YAML and through `DEVAGENTS_MAX_CONCURRENT_TASKS` / `DEVAGENTS_MAX_CONCURRENT_OPERATIONS` overrides (restart required). The latter bounds actual engine/validation/preparation operations, not whole parent workflows. Per-task work-item and member limits remain in effect. Preparation headroom is reserved across tasks, and Git creation/removal coordinates by the shared repository metadata directory, including registered linked checkouts.
+
+The scheduler preserves one local service owner. Each execution's claim generation is checked in the transaction accepting its task state and evidence. Heartbeats do not authorize automatic takeover. Startup reconciles before admission and does not replay uncertain external effects. Unverified prior worker termination leaves a visible recovery blocker and retains that task's environment; compaction and explicit run requests are refused. General failure resume and distributed workers remain future work.
 
 Task submission and user scheduling decisions also write a SQLite dispatch request in the same transaction. The service claims requests atomically and keeps a newer approval request pending while an older workflow run suspends. The queue survives restart; it does not authorize replaying an interrupted command or commit. One service still owns the local data directory.
 

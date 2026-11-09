@@ -10,6 +10,7 @@ import type { Project } from '../domain/schemas.js';
 import { isOwnedBranch } from './branches.js';
 import { git } from './git.js';
 import { assertDiskSpace, DATABASE_HEADROOM } from './disk-space.js';
+import { withRepositoryLock } from './repository-lock.js';
 
 const exec = promisify(execFile);
 type Workspace = { path: string; branch: string };
@@ -96,9 +97,12 @@ export async function cleanupTerminalWorktrees(dataDir: string, project: Project
       if (recoveryPath) await rm(recoveryPath, { recursive: true, force: true });
       throw error;
     }
-    if (await verify() !== head || (await inventory(path, initial.dev)).digest !== before.digest || await git(path, ['ls-files', '--stage', '-z'], false, 32 * 1024 ** 2) !== index || await git(path, ['ls-files', '-v', '-z'], false, 32 * 1024 ** 2) !== flags) throw refused('Worktree changed during cleanup; keeping the checkout and recovery snapshot');
-    await git(project.path, ['worktree', 'remove', ...(dirty ? ['--force'] : []), path], true, 2 * 1024 ** 2, { timeoutMs: 120000 });
-    completed(record); // All branches remain; only the disposable checkout is removed.
+    // Archive creation is outside the shared lock; only final verification/removal owns Git metadata.
+    await withRepositoryLock(common, async () => {
+      if (await verify() !== head || (await inventory(path, initial.dev)).digest !== before.digest || await git(path, ['ls-files', '--stage', '-z'], false, 32 * 1024 ** 2) !== index || await git(path, ['ls-files', '-v', '-z'], false, 32 * 1024 ** 2) !== flags) throw refused('Worktree changed during cleanup; keeping the checkout and recovery snapshot');
+      await git(project.path, ['worktree', 'remove', ...(dirty ? ['--force'] : []), path], true, 2 * 1024 ** 2, { timeoutMs: 120000 });
+      completed(record); // All branches remain; only the disposable checkout is removed.
+    });
   }
 }
 

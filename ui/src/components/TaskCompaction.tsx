@@ -25,7 +25,8 @@ export function TaskCompaction({ task }: { task: Task }) {
     finally { setPreview(undefined); setBusy(false); }
   };
   return <div class="stack" style={{ padding: '12px 16px' }}>
-    <div><button type="button" class="btn" disabled={busy || !online} onClick={() => void load()}>Preview task compaction</button></div>
+    <div><button type="button" class="btn" disabled={busy || !online || task.scheduling?.status === 'held'} onClick={() => void load()}>Preview task compaction</button></div>
+    {task.scheduling?.status === 'held' && <div class="note warn">{task.scheduling.reason}</div>}
     {busy && <span role="status">Inspecting or compacting task resources…</span>}
     {error && <div class="note warn" role="alert">{error} Request a fresh preview before trying again.</div>}
     {result && <div class="note info" role="status">{result}</div>}

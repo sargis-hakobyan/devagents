@@ -95,7 +95,7 @@ Ownership clarified by the owner on 2026-10-30: Codex handles implementation fix
 U1 is the first integrated UI increment before M4. Keep U2/U3 and M4 as separately reviewed work; a team editor must not claim unavailable engines or capabilities work.
 
 ## Later
-- [ ] Parallel top-level tasks on native/Docker installations: independent execution contexts, durable dispatch, duplicate prevention, resource limits and per-task cancellation. Follow [the implementation plan](PARALLEL_TASK_EXECUTION_PLAN.md); this remains planned after the baseline at `8c96ec3`.
+- [x] Parallel top-level tasks on native/Docker installations: independent execution contexts, durable dispatch, duplicate prevention, resource limits and per-task cancellation. See [the architecture and delivery plan](PARALLEL_TASK_EXECUTION_PLAN.md) and the step-by-step verification entries below. Distributed AWS workers remain separate work.
 - [x] M4 implementation: Claude adapter, per-member routing and deterministic engine fixtures (see the 2026-11-03 update below).
 - [ ] M4 authenticated acceptance: Claude model access and a paid end-to-end fixture remain unverified.
 - [ ] M5: authorized GitHub integration, recovery hardening, multi-arch CI/release.
@@ -347,3 +347,11 @@ Verification: backend typecheck and 37 focused tests passed, including two top-l
 Execution contexts now carry dispatch claims through asynchronous workflow callbacks. Task transitions, checkpoints and accepted evidence validate their task identity and generation inside the SQLite write transaction. Stale claims cannot complete or overwrite a newer execution. Claim heartbeats report liveness without TTL takeover. Startup pauses scheduling while reconciling queued work, approval waits and interrupted runs; uncertain worker termination leaves a durable recovery blocker and refuses automatic compaction/removal. The local service lock remains mandatory. No general failed-task replay or distributed ownership is introduced.
 
 Verification: typecheck and 25 focused tests passed, including stale/cross-task writes, duplicate dispatch/completion, restart before effects, interrupted-work quarantine, actual fixture-process death, approval races and terminal cleanup.
+
+## Parallel tasks step 4 — cancellation, cleanup and scheduler visibility — 2026-11-09
+
+Completed task-specific cancellation/drain and serialized Git metadata creation/removal across registered checkouts of the same repository, preserving per-checkout request order. The scheduler API/CLI and existing browser screens now report actual task/operation capacity, queued reasons, active tasks and recovery blockers. Overview retains all active executions even beyond its queued-history preview. Interrupted environments cannot be compacted through the browser. Startup reconciliation failures keep admission halted, and queued Docker compute waits for both credential vaults to unlock.
+
+Added deterministic coverage for cancellation without interrupting siblings, cleanup alongside active work, approval slot release, simultaneous DAG tasks, shared-repository metadata, startup admission and a real browser flow with three active tasks plus queued/recovery states. The Docker suite now includes `parallel-smoke.mjs`, which proves two top-level tasks overlap and independently validate/commit/clean up while preserving the original checkout.
+
+Final verification: `npm run check` passed 305 tests (four optional checks skipped), both typechecks and production builds; all 50 browser workflows passed; the full isolated Docker suite passed. Narrow-screen layout inspected. No authenticated model calls, live service restart or deployment. Defaults remain one task and two operations; parallelism is explicitly configurable. AWS workers, external queues, Jira intake, automatic GitHub merging and general failed-task resume remain future work.

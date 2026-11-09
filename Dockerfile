@@ -17,7 +17,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 COPY agents ./agents
-COPY scripts/m2-smoke.mjs scripts/m3-smoke.mjs scripts/environment-smoke.mjs scripts/pnpm-cache-smoke.mjs scripts/proc-sandbox-smoke.mjs scripts/claude-sandbox-smoke.mjs ./scripts/
+COPY scripts/m2-smoke.mjs scripts/m3-smoke.mjs scripts/parallel-smoke.mjs scripts/environment-smoke.mjs scripts/pnpm-cache-smoke.mjs scripts/proc-sandbox-smoke.mjs scripts/claude-sandbox-smoke.mjs ./scripts/
 USER node
 ENV NODE_ENV=production DEVAGENTS_DATA_DIR=/data DEVAGENTS_HOST=0.0.0.0
 EXPOSE 4310

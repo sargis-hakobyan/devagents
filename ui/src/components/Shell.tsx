@@ -50,7 +50,7 @@ export function Shell({ children, context }: { children: ComponentChildren; cont
     <div class="body">
       <nav class="nav" aria-label="Main">
         {nav.map(([href, label, d]) => <a key={href} href={href} aria-current={current(href) ? 'page' : undefined}><Icon d={d} />{label}{label === 'Tasks' && attention > 0 && <span class="badge" aria-label={`${attention} need attention`}>{attention}</span>}</a>)}
-        <div class="nav-note">One top-level request runs at a time; items inside it run in bounded waves.</div>
+        <div class="nav-note">{status?.scheduler?.enabled ? `Up to ${status.scheduler.maxConcurrentTasks} tasks run concurrently; work items use bounded waves.` : 'Tasks run in isolated worktrees with bounded concurrency.'}</div>
       </nav>
       <main class="main">{children}</main>
     </div>

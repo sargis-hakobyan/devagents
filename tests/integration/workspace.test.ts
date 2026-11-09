@@ -8,6 +8,30 @@ import { scopedPath } from '../../src/workspace/paths.js';
 import { changes, commitChanges } from '../../src/workspace/changes.js';
 import { fixture } from '../helpers.js';
 
+test('creation and cleanup coordinate across registered checkouts sharing Git metadata', async () => {
+  const f = await fixture();
+  try {
+    const secondary = join(f.root, 'secondary');
+    await git(f.project, ['worktree', 'add', '-b', 'secondary', secondary, 'main']);
+    const other = await inspectProject({ id: 'secondary', path: secondary });
+    const manager = new WorkspaceManager(f.dataDir); const primary = f.store.project('fixture');
+    let id = randomUUID(); let current = await manager.create(primary, id, 'First');
+    for (let i = 0; i < 4; i++) {
+      const nextId = randomUUID(); const project = i % 2 ? primary : other;
+      const previous = current;
+      const [, next] = await Promise.all([
+        manager.cleanup(i % 2 ? other : primary, id, [previous], new Set([previous.branch])),
+        manager.create(project, nextId, 'Next'),
+      ]);
+      await assert.rejects(access(previous.path), { code: 'ENOENT' });
+      await access(next.path); assert.equal(await git(next.path, ['branch', '--show-current']), next.branch);
+      id = nextId; current = next;
+    }
+    assert.equal(await git(f.project, ['status', '--porcelain']), '');
+    assert.equal(await git(secondary, ['status', '--porcelain']), '');
+  } finally { await f.cleanup(); }
+});
+
 test('every task starts clean from current local main, ignoring other branches and prior task work', async () => {
   const f = await fixture();
   try {

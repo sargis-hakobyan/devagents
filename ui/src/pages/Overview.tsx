@@ -13,11 +13,18 @@ export function OverviewPage() {
   if (!overview && error) return <ErrorNote message={error} />;
   if (!overview) return <><Skeleton rows={2} label="Loading overview" /><Skeleton rows={4} /></>;
   const counts = overview.counts; const n = (...states: string[]) => states.reduce((sum, s) => sum + (counts[s] ?? 0), 0);
-  const running = overview.active.filter(t => t.state !== 'planning' && t.state !== 'ready'); const queued = overview.active.filter(t => t.state === 'ready' || t.state === 'planning');
+  const scheduler = overview.scheduler ?? status?.scheduler;
+  const running = overview.active.filter(t => t.scheduling ? t.scheduling.status === 'running' || t.scheduling.status === 'draining' : t.state !== 'planning' && t.state !== 'ready');
+  const queued = overview.active.filter(t => t.scheduling ? t.scheduling.status === 'queued' : t.state === 'ready' || t.state === 'planning');
   const attentionCount = n('awaiting_mode', 'awaiting_plan_approval');
   const headline = attentionCount ? `${attentionCount} task${attentionCount > 1 ? 's' : ''} waiting for you` : running.length ? 'Work is running' : queued.length ? 'Work is queued' : 'Nothing is running';
   return <>
-    {storage?.executionFailure && <div class="note warn" role="alert"><b>Execution halted.</b> {storage.executionFailure.message} Recover storage and restart the service before running more work. <a href={`/ui/tasks/${storage.executionFailure.taskId}`}>Inspect the affected task</a>.</div>}
+    {!!scheduler?.held && <Card title={`Recovery needs inspection · ${scheduler.held}`} tone="warn"><div class="form-stack">
+      <p>Interrupted tasks are retained until prior workers and their results can be inspected. They are not restarted or cleaned up automatically.</p>
+      {scheduler.attention.map(item => <div key={item.taskId} class="wrap-anywhere"><a href={`/ui/tasks/${item.taskId}`}>Inspect task {item.taskId.slice(0, 8)}</a> · {item.message}</div>)}
+      {scheduler.held > scheduler.attention.length && <a href="/ui/tasks">Showing {scheduler.attention.length} of {scheduler.held}; open task history for more.</a>}
+    </div></Card>}
+    {storage?.executionFailure && <div class="note warn" role="alert"><b>Execution halted.</b> {storage.executionFailure.message} Recover storage and restart the service before running more work. {/^[a-f0-9-]{36}$/.test(storage.executionFailure.taskId) && <a href={`/ui/tasks/${storage.executionFailure.taskId}`}>Inspect the affected task</a>}</div>}
     {storage?.measured && storage.availableBytes! < storage.minimumStartBytes && <div class="note warn" role="alert"><b>Low disk space:</b> {(storage.availableBytes! / 1024 ** 3).toFixed(2)} GiB available. Preparation requires {(storage.minimumStartBytes / 1024 ** 3).toFixed(1)} GiB of headroom. Inspect finished tasks for deferred cleanup, or reclaim unused Docker images and build cache.</div>}
     {((status && (!status.codex.installed || !status.codex.signedIn || status.codex.vaultLocked)) || projects?.length === 0) && <div class="note info"><a href="/ui/settings/setup">Finish setup</a> · Check connection availability, register a project and choose a team.</div>}
     <div class="page-head">
@@ -37,14 +44,15 @@ export function OverviewPage() {
           </div>)}
           {attentionCount > overview.attention.length && <div class="card-foot">Showing {overview.attention.length} of {attentionCount}. <a href="/ui/tasks?group=attention">View all tasks needing attention</a></div>}
         </Card>}
-        {running.length === 0 && queued.length === 0 ? <Card title="Currently running"><Empty title="Nothing is running">{status?.codex.signedIn ? 'Submit work to start a task.' : 'Sign in to Codex and register a project to start.'}</Empty></Card> : running.concat(queued).slice(0, 2).map(t => <Card key={t.id} title={<span style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}><StateChip task={t} />{truncate(t.request, 80)}<span class="muted" style={{ fontSize: '12.5px', fontWeight: 500 }}><span class="mono">{t.projectId}</span> · {teamLabel(t.team)}</span></span>} right={<a href={`/ui/tasks/${t.id}`} style={{ fontWeight: 700 }}>Open task →</a>}
+        {running.length === 0 && queued.length === 0 ? <Card title="Currently running"><Empty title="Nothing is running">{status?.codex.signedIn ? 'Submit work to start a task.' : 'Sign in to Codex and register a project to start.'}</Empty></Card> : running.concat(queued.slice(0, 4)).map(t => <Card key={t.id} title={<span style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}><StateChip task={t} />{truncate(t.request, 80)}<span class="muted" style={{ fontSize: '12.5px', fontWeight: 500 }}><span class="mono">{t.projectId}</span> · {teamLabel(t.team)}</span></span>} right={<a href={`/ui/tasks/${t.id}`} style={{ fontWeight: 700 }}>Open task →</a>}
           foot={t.workItems.length ? `Measured: ${t.workItems.filter(i => i.state === 'completed').length} of ${t.workItems.length} items integrated · updated ${relative(t.updatedAt, now)}. Combined validation, independent review and one local commit follow.` : `No work items yet · updated ${relative(t.updatedAt, now)}`}>
           {t.workItems.length > 0 ? <div class="scroll-x"><table>
             <thead><tr><th>Item</th><th>Agent</th><th>Depends</th><th>Stage</th><th>Repairs</th><th>Updated</th></tr></thead>
             <tbody>{t.workItems.map(i => <tr key={i.itemId} class={['running', 'validating', 'reviewing', 'repairing', 'creating', 'checkpointing', 'integrating'].includes(i.state) ? 'current' : ''}>
               <td class="mono"><b>{i.itemId}</b></td><td>{i.agentId ?? '—'}</td><td class="mono">{i.dependsOn?.length ? i.dependsOn.join(', ') : '—'}</td><td><ItemChip state={i.state} /></td><td class="mono">{i.repairCycles ?? 0}</td><td class="muted">{i.updatedAt ? relative(i.updatedAt, now) : '—'}</td>
-            </tr>)}</tbody></table></div> : <div class="muted" style={{ padding: '12px 14px' }}>{t.state === 'planning' ? 'The Tech Lead is planning; items appear when the plan is stored.' : 'Queued behind the current request.'}</div>}
+            </tr>)}</tbody></table></div> : <div class="muted" style={{ padding: '12px 14px' }}>{t.scheduling?.reason ?? (t.state === 'planning' ? 'The Tech Lead is planning; items appear when the plan is stored.' : 'Waiting for task capacity.')}</div>}
         </Card>)}
+        {queued.length > 4 && <a href="/ui/tasks?group=active">View all queued tasks</a>}
         <Card title="Recent outcomes" right={<a href="/ui/tasks" style={{ fontWeight: 700 }}>All tasks</a>}>
           {overview.recent.length === 0 ? <Empty title="No finished tasks yet" /> : <div class="scroll-x"><table>
             <thead><tr><th>Finished</th><th>Task</th><th>Project</th><th>Outcome</th><th>Result</th></tr></thead>
@@ -75,7 +83,7 @@ export function OverviewPage() {
         </div></Card>
         <Card title="Scheduler"><div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
           <div class="mono">{status ? `concurrency ${status.limits.concurrency} · repairs ${status.limits.maxRepairCycles} · wave scheduling` : '…'}</div>
-          <div class="muted" style={{ fontSize: '12px' }}>The next request starts after the current one finishes.</div>
+          <div class="muted" style={{ fontSize: '12px' }}>{scheduler?.enabled ? `${scheduler.active.length} / ${scheduler.maxConcurrentTasks} task slots in use · ${scheduler.queued} queued · ${scheduler.runningOperations} / ${scheduler.maxConcurrentOperations} operations running` : 'Execution scheduler is unavailable.'}</div><div class="muted" style={{ fontSize: '12px' }}>Approval waits release capacity. Each task has its own worktree and cancellation.</div>
           <div class="muted" style={{ fontSize: '12px' }}>{storage?.measured ? `${(storage.availableBytes! / 1024 ** 3).toFixed(2)} GiB available on the task-data filesystem` : 'Storage availability not measured'}</div>
         </div></Card>
       </aside>

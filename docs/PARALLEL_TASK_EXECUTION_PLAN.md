@@ -1,15 +1,15 @@
 # Parallel task execution plan
 
-Status: implementation in progress. Direction agreed on 2026-11-09. Baseline: `8c96ec3`. The sections below describe the target; delivery status is recorded here as each step lands.
+Status: the four requested local implementation steps are implemented and verified. Direction agreed on 2026-11-09. Baseline: `8c96ec3`. The sections below record the delivered local design and the separate future AWS scope.
 
 - Step 1: SQLite dispatch storage and serial scheduling implemented. Submission, user mode/approval decisions and cancellation persist dispatch atomically; claims coalesce duplicate requests and retain later continuations.
 - Step 2: independent task executions, bounded global operations and preparation reservations implemented; two tasks were verified overlapping in the same repository with separate repair budgets and results.
 - Step 3: execution-scoped generation checks, claim heartbeats and conservative startup reconciliation implemented. Uncertain prior workers block automatic cleanup/replay; safe queued work can start after restart.
-- Step 4: cancellation/cleanup/UI integration remains in progress.
+- Step 4: per-task cancellation/drain, shared Git metadata coordination, scheduler API/CLI/UI visibility and recovery attention implemented. Deterministic tests cover concurrent single-item and DAG tasks, including cancellation and isolated cleanup.
 
 Enable separate tasks to execute concurrently in native and Docker installations, with their own state, worktrees, cancellation and results. Use a durable queue to schedule work and Mastra to execute each task's workflow. Local parallelism must work without AWS. The same execution boundary will support a later distributed AWS deployment.
 
-This is the next implementation milestone. It retains DevAgents and the Mastra framework; adopting Mastra Factory is not part of this plan.
+This local milestone retains DevAgents and the Mastra framework; adopting Mastra Factory is not part of this plan.
 
 ## Scope and expected behavior
 
@@ -28,7 +28,7 @@ The first release includes:
 
 Later increments cover separate AWS worker containers, distributed storage and ownership, ticket-system connectors, GitHub publication and automatic merging, general hold/resume after failures, and qualification at 100 concurrent tickets. Those capabilities must not be described as delivered by this local concurrency milestone.
 
-## Current implementation constraints
+## Baseline constraints at 8c96ec3
 
 | Current component | Constraint to address |
 | --- | --- |
@@ -63,7 +63,7 @@ The queue determines eligibility and ownership. The scheduler fills available sl
 
 ### Independent task executions
 
-Extract a per-task execution object from `TaskRunner`. It owns the abort controller, repair count, limitation ledger, attempt counters, prepared roster, setup/recovery tracking and evidence buffers. Restore durable facts from the task and evidence when continuing a suspended workflow; never borrow state from another task or silently reset a previously consumed repair budget.
+The per-task `TaskExecution` object owns the abort controller, repair count, limitation ledger, attempt counters, prepared roster, setup/recovery tracking and evidence buffers. Restore durable facts from the task and evidence when continuing a suspended workflow; never borrow state from another task or silently reset a previously consumed repair budget.
 
 The scheduler keeps an active map keyed by task ID. All workflow callbacks, progress writes, cancellation, drain and finalization resolve through that identity. Share stateless adapters only after auditing their reentrancy; mutable preparers and caches must be task-scoped or explicitly synchronized. Existing run-specific scratch directories and worktree-specific tool homes remain isolated.
 
@@ -71,17 +71,17 @@ Initially these are logical workers in one Node service. Engine and validation c
 
 ### Durable queue
 
-Use a small queue table in the existing application database. No external broker is required for local parallelism. Database state is authoritative; in-memory wake-ups only reduce dispatch latency. A periodic scan and startup reconciliation discover eligible work if a wake-up is missed.
+A small queue table in the existing application database stores dispatch requests. No external broker is required for local parallelism. Database state is authoritative; in-memory wake-ups only reduce dispatch latency. A periodic scan and startup reconciliation discover eligible work if a wake-up is missed.
 
-The proposed queue record has one row per task and contains:
+The queue record has one row per task and contains:
 
 - Task ID and dispatch status, separate from the domain task state.
 - A monotonically increasing requested sequence and the sequence claimed by the current execution.
-- Queue order, request reason and optional next eligible time.
+- Queue order and the last requested task version for coalescing. Scheduling reasons are derived from task and admission state; delayed retries are not implemented.
 - Service-instance owner ID and monotonically increasing claim generation.
 - Claim/start/heartbeat timestamps and any recorded recovery blocker.
 
-Final field names and migration version are implementation details. Preserve existing schema-4 databases and their optional QA table when adding the queue.
+Schema 5 adds `dispatch_queue` while preserving existing tasks, events, teams and optional schema-4 QA settings.
 
 Create a task and its initial dispatch request in the same transaction. Persist mode selection or version-checked approval and its continuation request atomically as well. Preserve existing submission idempotency: identical retries return the original task and cannot create an additional execution. Coalesce redundant scheduling requests for the same actionable state.
 
@@ -97,7 +97,7 @@ Configuration implemented in step 2 (restart required):
 
 | Setting | Proposed behavior |
 | --- | --- |
-| `maxConcurrentTasks` | Default 1 for compatibility; configure 2 for the first parallel acceptance run |
+| `maxConcurrentTasks` | Default 1 for compatibility; configure 2 to admit two tasks |
 | Existing `concurrency` | Retain its work-item-per-task meaning and default 2 |
 | `maxConcurrentOperations` | Default 2; service-wide bound on active engine calls, validation commands and dependency-preparation operations |
 | Existing member concurrency | Retain per-task frozen member limits; identical role IDs in separate tasks do not accidentally share a member identity |
@@ -136,13 +136,13 @@ No architecture here promises that an external model call or command can never r
 | Restart with a mode/approval wait | Preserve the wait; continue only when the persisted domain decision permits it |
 | Restart with work started or an uncertain commit | Inspect task/workflow state and Git evidence; retain conservative interruption/failure behavior, never replay blindly |
 
-The first milestone does not add a general resume action for failed tasks. Existing failed-task inspection/resubmission remains available. A queue recovery blocker must be visible as needing attention even if no new domain lifecycle state is introduced. Full product-level “on hold, user resolves, resume” remains a later workflow increment.
+The first milestone does not add a general resume action for failed tasks. Existing failed-task inspection/resubmission remains available. Docker compute admission waits for the launcher to restore both encrypted vaults; a failed startup reconciliation halts admission instead of releasing pending work. A queue recovery blocker must be visible as needing attention even if no new domain lifecycle state is introduced. Full product-level “on hold, user resolves, resume” remains a later workflow increment.
 
 Cleanup retains its task maintenance lease and ownership checks. It runs only after that task is drained, without touching another task's worktree, branches, caches, scratch or history. Serialize conflicting Git metadata operations per repository with short locks; never hold those locks throughout model calls or validation. Preserve dirty original checkouts and final result branches.
 
 ## API and browser behavior
 
-Expose configured task capacity, actual active count, queued count and scheduling reasons. Distinguish waiting for capacity, waiting for approval and requiring recovery attention. Replace the one-top-level-task wording in the shell, task details, settings and reference docs only when implementation lands.
+Expose configured task capacity, actual active count, queued count and scheduling reasons. Distinguish waiting for capacity, waiting for approval and requiring recovery attention. The shell, task details, settings and reference docs describe task and operation capacity.
 
 Show all active tasks through bounded/paginated projections, not just the first one. Existing task actions continue to carry task identity and version. Cancellation, compaction, progress, usage and evidence remain task-scoped. Do not estimate progress percentages or claim model access from queue admission.
 
@@ -189,3 +189,7 @@ Before distributed automatic recovery, verify the installed Mastra version's own
 Future GitHub publication must use controlled finalization and expected-revision checks; uncertain PR/merge outcomes are reconciled before retry. Protect the factory branch with required checks on the proposed integration. Those actions require their own product policy and verification before enabling automatic publication.
 
 Local development must continue to exercise the same task lifecycle with small limits. Qualifying 100 concurrent tickets additionally requires distributed load/failure tests, model quotas, CI capacity and measured worker resources. Local parallel execution is a prerequisite, not evidence of that capacity.
+
+## Final local acceptance
+
+On 2026-11-09, `npm run check` passed 305 tests with four optional checks skipped, backend/UI typechecks and production builds. All 50 browser workflows passed. The isolated Docker suite passed, including two top-level tasks overlapping with actual sandboxed validation, separate commits and drained cleanup, M2/M3, private process/cache checks, Claude tools with mocked inference, and concurrent Codex protocol fixtures. The narrow parallel-task overview was inspected. No authenticated model calls were made.

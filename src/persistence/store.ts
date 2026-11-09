@@ -299,12 +299,17 @@ export class Store {
     return counts;
   }
   /** Query each category before limiting it; queued submissions must never hide execution. */
-  overview(): { counts: Record<string, number>; attention: TaskSummary[]; active: (TaskSummary & { workItems: Record<string, unknown>[] })[]; recent: TaskSummary[] } {
+  overview(executingIds: readonly string[] = []): { counts: Record<string, number>; attention: TaskSummary[]; active: (TaskSummary & { workItems: Record<string, unknown>[] })[]; recent: TaskSummary[] } {
     const counts = this.stateCounts();
     const attention = this.summaries({ states: ['awaiting_mode', 'awaiting_plan_approval'], limit: 50 }).tasks;
     const executing = this.summaries({ states: ['running', 'validating', 'reviewing', 'committing', 'repairing'], limit: 50 }).tasks;
     const queued = this.summaries({ states: ['planning', 'ready'], limit: 50 }).tasks;
-    const active = [...executing, ...queued].sort((a, b) => b.sequence - a.sequence).map(t => ({ ...t, workItems: this.workItems(t.id) }));
+    const actual = executingIds.flatMap(id => {
+      const task = this.task(id); if (['completed', 'failed', 'cancelled', 'awaiting_mode', 'awaiting_plan_approval'].includes(task.state)) return [];
+      const row = this.db.prepare('SELECT rowid FROM tasks WHERE id=?').get(id)!;
+      return [this.summarize(task, Number(row.rowid))];
+    });
+    const active = [...new Map([...executing, ...queued, ...actual].map(task => [task.id, task])).values()].sort((a, b) => b.sequence - a.sequence).map(t => ({ ...t, workItems: this.workItems(t.id) }));
     const recent = this.summaries({ states: ['completed', 'failed', 'cancelled'], limit: 8 }).tasks;
     return { counts, attention, active, recent };
   }

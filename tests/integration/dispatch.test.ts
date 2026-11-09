@@ -88,8 +88,40 @@ test('startup recovers queued work and claims without effects but quarantines in
     assert.match(f.store.dispatch(interrupted.id)!.blocker!, /termination is unverified/);
     assert.equal(engine.calls.some(c => c.cwd.endsWith(interrupted.id)), false);
     await assert.rejects(f.service.compactionPreview(interrupted.id), /prior workers/);
+    assert.throws(() => f.service.run(interrupted.id), /interrupted execution/);
     for (let i = 0; i < 20; i++) runner.enqueue(queued.id);
     await runner.idle();
     assert.equal(f.store.evidence(queued.id).filter(e => e.kind === 'commit-created').length, 1);
+  } finally { await runner.stop(); await f.cleanup(); }
+});
+
+test('failed startup reconciliation cannot release queued work into execution', async () => {
+  const f = await fixture(); const engine = new FakeEngine();
+  const queued = f.service.submit({ projectId: 'fixture', request: 'Retain queued work', mode: 'autonomous' }, 'recovery-failure');
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator(), undefined, { startPaused: true }); f.service.attachRunner(runner);
+  runner.workflows.state = async () => { throw new Error('Fixture workflow storage unavailable'); };
+  try {
+    await assert.rejects(runner.recover(), /storage unavailable/); await runner.idle();
+    assert.ok(runner.executionFailure); assert.equal(engine.calls.length, 0);
+    assert.deepEqual(f.store.pendingDispatches(), [queued.id]);
+    assert.equal(f.store.dispatch(queued.id)!.owner, null);
+    assert.throws(() => runner.enqueue(queued.id), /Execution halted/);
+  } finally { await runner.stop(); await f.cleanup(); }
+});
+
+test('startup admission keeps compute queued until credentials are ready while mode waits still persist', async () => {
+  const f = await fixture(); const engine = new FakeEngine(); let ready = false;
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator(), undefined, { admission: () => ready ? undefined : 'Waiting for vault unlock' });
+  f.service.attachRunner(runner);
+  try {
+    const compute = f.service.submit({ projectId: 'fixture', request: 'Queued until ready', mode: 'autonomous' }, 'compute');
+    const waiting = f.service.submit({ projectId: 'fixture', request: 'Choose mode' }, 'mode');
+    await runner.idle();
+    assert.equal(engine.calls.length, 0); assert.equal(f.store.dispatch(compute.id)!.owner, null);
+    assert.equal((await runner.workflows.state(waiting.id))?.status, 'suspended');
+    assert.equal(runner.taskScheduling(compute.id).reason, 'Waiting for vault unlock');
+    ready = true; runner.enqueue(compute.id); await runner.idle();
+    assert.equal(f.store.task(compute.id).state, 'completed');
+    assert.equal(f.store.evidence(compute.id).filter(e => e.kind === 'commit-created').length, 1);
   } finally { await runner.stop(); await f.cleanup(); }
 });

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { configuredVault } from '../dist/security/credential-vault.js';
 import { setupCodexAuth } from '../dist/engines/codex/setup.js';
 import { CodexValidator } from '../dist/engines/codex/validator.js';
+import { execFileSync } from 'node:child_process';
 const data = process.env.DEVAGENTS_DATA_DIR;
 const vault = await configuredVault(data);
 assert.ok(vault, 'Expected a verified tmpfs credential runtime');
@@ -29,7 +30,8 @@ if (process.argv[2] === 'create') {
   console.log('PASS: browser-saved synthetic credentials are encrypted and reusable.');
 } else {
   await assert.rejects(vault.assertUnlocked(), /locked/);
-  await vault.unlock('3'.repeat(64));
+  execFileSync(process.execPath, ['dist/cli/main.js', 'auth', 'unlock'], { input: `${'3'.repeat(64)}\n`, timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] });
+  assert.equal(await readFile(join(process.env.DEVAGENTS_CREDENTIAL_RUNTIME, 'unlocked'), 'utf8'), 'ready\n');
   assert.equal(await setupCodexAuth(data, { readKey: async () => { throw new Error('Unexpected key prompt'); } }), 'reused');
   console.log('PASS: restart clears the decrypted runtime; unlocking restores saved credentials without prompting.');
 }

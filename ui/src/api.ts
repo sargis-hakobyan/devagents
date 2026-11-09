@@ -1,3 +1,4 @@
+import type { SchedulerStatus, TaskScheduling } from '../../src/domain/dispatch';
 /** Same-origin API client. Cookie auth only; the CLI bearer token never exists in the browser. */
 export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
@@ -32,7 +33,7 @@ export async function logout(): Promise<void> {
 }
 
 export type TaskState = 'draft' | 'awaiting_mode' | 'planning' | 'awaiting_plan_approval' | 'ready' | 'running' | 'validating' | 'reviewing' | 'committing' | 'repairing' | 'awaiting_external_approval' | 'completed' | 'failed' | 'cancelled';
-export type TaskSummary = { id: string; projectId: string; state: TaskState; version: number; createdAt: string; updatedAt: string; sequence: number; request: string; mode?: 'autonomous' | 'plan-approval'; branch?: string; items?: number; commit?: string; error?: string; team?: TeamRef; limitations?: number; limitationOverflow?: number };
+export type TaskSummary = { scheduling?: TaskScheduling; id: string; projectId: string; state: TaskState; version: number; createdAt: string; updatedAt: string; sequence: number; request: string; mode?: 'autonomous' | 'plan-approval'; branch?: string; items?: number; commit?: string; error?: string; team?: TeamRef; limitations?: number; limitationOverflow?: number };
 export type TeamRef = { id: string; revision: number; name: string };
 export type Command = { executable: string; args: string[] };
 export type WorkItem = { id: string; title: string; description: string; acceptanceCriteria: string[]; dependsOn: string[]; requiredCapabilities: string[]; projectId: string; branch: string; validation: Command[]; assignedAgent?: string; ownedPaths?: string[] };
@@ -44,7 +45,7 @@ export type Evidence = { sequence: number; kind: string; at: string; data: unkno
 export type ItemProgress = { itemId: string; state: string; agentId?: string; branch?: string; dependsOn?: string[]; ownedPaths?: string[]; updatedAt?: string; commit?: string; repairCycles?: number; error?: string; reason?: string; workspace?: { path: string; branch: string } };
 export type StorageStatus = { measured: boolean; availableBytes?: number; minimumStartBytes: number; databaseHeadroomBytes: number; cleanupTerminalTasks?: boolean; executionFailure?: { taskId: string; message: string } };
 export type CompactionPreview = { taskId: string; digest: string; computedAt: string; expiresAt: string; reclaimableBytes: number; candidates: { worktree: string; path: string; bytes: number; entries: number; kind?: 'dependencies' | 'tool-cache' | 'run-scratch' }[]; kept: string[] };
-export type Overview = { counts: Record<string, number>; attention: TaskSummary[]; active: (TaskSummary & { workItems: ItemProgress[] })[]; recent: TaskSummary[] };
+export type Overview = { scheduler?: SchedulerStatus; counts: Record<string, number>; attention: TaskSummary[]; active: (TaskSummary & { workItems: ItemProgress[] })[]; recent: TaskSummary[] };
 export type Project = { id: string; path: string; defaultMode?: 'autonomous' | 'plan-approval'; baseSha: string; registeredAt: string; defaultTeamId?: string; version: number };
 export type TeamMember = { id: string; name: string; description: string; enabled: boolean; engine: string; provider: string; model: string; capabilities: string[]; instructions: string; delegation: { canReceiveTasks: boolean; canDelegate: boolean }; permissions: { readPaths: string[]; writePaths: string[]; allowCommands: boolean; allowPush: false }; concurrency: number; origin: 'template' | 'custom'; templateId?: string };
 export type TeamDraft = { name: string; description: string; members: TeamMember[] };
@@ -54,6 +55,7 @@ export type TeamSummary = { id: string; name: string; description: string; revis
 export type TeamDetail = TeamDraft & { id: string; revision: number; archived: boolean; createdAt: string; updatedAt: string; readiness: Readiness; revisions: { revision: number; createdAt: string; reason: string }[] };
 export type TeamOptions = { platform: string; defaults: { devagentsRules: boolean; engine: string; provider: string; model: string | null }; capabilities: string[]; engines: { id: string; executable: boolean; reason: string | null }[]; providers: { id: string; kind: string; auth: string; engines?: string[]; executable: boolean; reason: string | null }[]; limits: { members: number; instructions: number; instructionBytes: number; capabilities: number } };
 export type Status = {
+  scheduler?: SchedulerStatus;
   service: { version: string; host: string; port: number; platform: string; node: string; dataDir: string; executionEnabled: boolean; startedAt: string; checkedAt: string };
   codex: { installed: boolean; version?: string; signedIn: boolean; credentialStore: 'keyring' | 'file'; vaultLocked: boolean; modelAccessVerified: false };
   claude: { installed: boolean; version?: string; enabled: boolean; signedIn?: boolean; note: string };

@@ -20,8 +20,9 @@ import { cleanupTerminalWorktrees } from '../workspace/terminal-cleanup.js';
 import { WorktreeCompactor } from '../workspace/compaction.js';
 import { STARTER_TEAM_ID, STARTER_TEAM_NAME, STARTER_ROLES } from '../domain/starter-team.js';
 import { log, redact } from '../telemetry/redact.js';
+import type { SchedulerStatus, TaskScheduling } from '../domain/dispatch.js';
 
-type Runner = { enqueue(id: string): void; cancel(id: string): void; isDrained?(id: string): boolean; readonly executionFailure?: { taskId: string; message: string } | undefined };
+type Runner = { enqueue(id: string): void; cancel(id: string): void; isDrained?(id: string): boolean; readonly executionFailure?: { taskId: string; message: string } | undefined; readonly scheduling?: SchedulerStatus; taskScheduling?(id: string): TaskScheduling };
 export class TaskService {
   private runner?: Runner;
   private readonly maintaining = new Set<string>();
@@ -34,6 +35,12 @@ export class TaskService {
   attachRunner(runner: Runner): void { this.runner = runner; }
   get executionEnabled(): boolean { return Boolean(this.runner); }
   get executionFailure() { return this.runner?.executionFailure; }
+  scheduling(): SchedulerStatus {
+    return this.runner?.scheduling ?? { enabled: false, maxConcurrentTasks: this.config.maxConcurrentTasks,
+      maxConcurrentOperations: this.config.maxConcurrentOperations, active: [], queued: 0,
+      runningOperations: 0, waitingOperations: 0, held: 0, attention: [] };
+  }
+  taskScheduling(id: string): TaskScheduling | undefined { return this.runner?.taskScheduling?.(id); }
   private assertExecutionAvailable(): void {
     if (this.executionFailure) throw new AppError('execution_halted', 'Execution halted; recover storage and restart the service before submitting more work', 503);
   }
@@ -130,6 +137,7 @@ export class TaskService {
   run(id: string): Task {
     this.assertExecutionAvailable();
     this.assertNotMaintaining(id);
+    if (this.store.dispatch(id)?.blocker) throw new AppError('recovery_required', 'Inspect the interrupted execution before requesting more work', 409);
     if (!this.runner) throw new AppError('execution_unavailable', 'No execution runtime attached', 503);
     this.runner.enqueue(id); return this.store.task(id);
   }
