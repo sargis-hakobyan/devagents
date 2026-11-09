@@ -119,3 +119,15 @@ test('seals through separate vault instances on the same files are serialized an
     assert.equal(await readFile(f.vault.auth, 'utf8'), JSON.stringify({ tokens: { access_token: 'fixture-instance-3' } }));
   } finally { await f.cleanup(); }
 });
+
+test('Claude and Codex share the master key but cannot exchange credential envelopes', async () => {
+  const f = await fixture(); const claude = new CredentialVault(f.data, f.runtime, 'claude');
+  try {
+    await f.vault.unlock(master); await claude.unlock(master);
+    for (const vault of [f.vault, claude]) { await mkdir(join(f.runtime, vault.engine), { recursive: true }); await writeFile(vault.auth, JSON.stringify({ value: `fixture-${vault.engine}` })); await vault.seal(); }
+    await rm(f.runtime, { recursive: true }); await f.vault.unlock(master); await claude.unlock(master);
+    assert.match(await readFile(claude.auth, 'utf8'), /fixture-claude/); assert.match(await readFile(f.vault.auth, 'utf8'), /fixture-codex/);
+    await writeFile(claude.encrypted, await readFile(f.vault.encrypted)); await rm(f.runtime, { recursive: true });
+    await assert.rejects(claude.unlock(master), { code: 'vault_integrity' });
+  } finally { await f.cleanup(); }
+});

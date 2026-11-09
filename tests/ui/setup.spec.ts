@@ -31,7 +31,7 @@ test('browser connects through a session-owned device flow, saves a key without 
   try {
     await signIn(page);
     await expect(page).toHaveURL(origin + '/ui/settings/setup');
-    await expect(page.getByRole('button', { name: 'Claude · coming later' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Use my Claude subscription' })).toBeDisabled();
     await page.getByRole('button', { name: 'Sign in with ChatGPT', exact: true }).evaluate((button: HTMLButtonElement) => { button.click(); button.click(); });
     await expect(page.getByRole('link', { name: 'Open ChatGPT sign-in' })).toHaveAttribute('href', 'https://auth.openai.com/codex/device');
     await expect(page.getByText('ABCD-12345', { exact: true })).toBeVisible(); expect(calls).toBe(1);

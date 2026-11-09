@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { api, ApiError, resources, type Diagnostic, type Readiness, type TeamDetail, type TeamDraft, type TeamMember, type TeamOptions } from '../api';
 import { Card, Chip, Empty, ErrorNote, Skeleton } from '../components/ui';
+import { ModelSelect } from '../components/ModelSelect';
 import { EngineBadge } from '../components/EngineBadge';
 import { RoleGlyph } from '../components/TeamBoard';
 import { roleOf } from '../team-board';
@@ -194,7 +195,9 @@ function MemberForm({ member, others, options, diagnostics, readOnly, onChange, 
   const idTaken = others.some(m => m.id === member.id); const idOk = ID.test(member.id) && !idTaken;
   const engine = member.engine === 'default' ? options.defaults.engine : member.engine; const providerId = member.provider === 'default' ? options.defaults.provider : member.provider;
   const provider = options.providers.find(p => p.id === providerId);
-  const model = member.model === 'default' ? (options.defaults.model ? `${options.defaults.model} (configured default)` : 'runtime default model, not pinned') : member.model;
+  const connections = options.providers.filter(p => p.executable && (p.engines?.includes(engine) ?? (engine === 'codex' && p.kind === 'openai')));
+  const connectionValid = connections.some(p => p.id === providerId);
+  const model = member.model === 'default' ? (options.defaults.model && engine === options.defaults.engine ? `${options.defaults.model} (configured default)` : 'runtime default model, not pinned') : member.model;
   const lines = (value: string[]) => value.join('\n'); const parse = (text: string) => text.split('\n').map(s => s.trim()).filter(Boolean);
   // Scope fields keep the raw text while typing (an empty line is how a second grant starts) and
   // normalize into the member on every change; a discard or reload that changes the member resets them.
@@ -215,19 +218,20 @@ function MemberForm({ member, others, options, diagnostics, readOnly, onChange, 
       <div class="form-grid">
         <label class="field"><span>Role</span><select value={member.delegation.canDelegate ? 'planner' : 'worker'} onChange={e => onChange({ delegation: (e.target as HTMLSelectElement).value === 'planner' ? { canReceiveTasks: false, canDelegate: true } : { canReceiveTasks: true, canDelegate: false } })}>
           <option value="worker">Worker · receives tasks</option><option value="planner">Planner · delegates, never receives tasks</option></select></label>
-        <label class="field"><span>Engine</span><select value={member.engine} onChange={e => onChange({ engine: (e.target as HTMLSelectElement).value })}>
+        <label class="field"><span>Engine</span><select value={member.engine} onChange={e => { const selected = e.currentTarget.value; const resolved = selected === 'default' ? options.defaults.engine : selected; const compatible = options.providers.find(p => p.executable && (p.engines?.includes(resolved) ?? (resolved === 'codex' && p.kind === 'openai'))); onChange({ engine: selected, provider: compatible?.id ?? 'default', model: 'default' }); }}>
           <option value="default">Inherit ({options.defaults.engine})</option>
-          {options.engines.filter(e => e.id !== options.defaults.engine || member.engine === e.id).map(e => <option key={e.id} value={e.id} disabled={!e.executable}>{e.id}{e.executable ? '' : ` — ${e.reason}`}</option>)}
+          {options.engines.map(e => <option key={e.id} value={e.id} disabled={!e.executable}>{e.id}{e.executable ? '' : ` — ${e.reason}`}</option>)}
         </select><span class="hint">Resolved: {engine}{options.engines.find(e => e.id === engine)?.executable ? '' : ' (not executable in this build)'}</span></label>
-        <label class="field"><span>Provider</span><select value={member.provider} onChange={e => onChange({ provider: (e.target as HTMLSelectElement).value })}>
-          <option value="default">Inherit ({options.defaults.provider})</option>
-          {options.providers.filter(p => p.id !== options.defaults.provider || member.provider === p.id).map(p => <option key={p.id} value={p.id} disabled={!p.executable}>{p.id} · {p.kind}{p.executable ? '' : ` — ${p.reason}`}</option>)}
-        </select><span class="hint">Resolved: {providerId}{provider ? ` (${provider.kind}, ${provider.auth})` : ' · not configured'}</span></label>
-        <label class="field"><span>Model <span class="hint">optional override</span></span><input value={member.model === 'default' ? '' : member.model} maxLength={200} placeholder="default" onInput={e => onChange({ model: (e.target as HTMLInputElement).value.trim() || 'default' })} /><span class="hint">Resolved: {model}. Model access is not verified here.</span></label>
+        <ModelSelect key={`${member.id}:${engine}`} engine={engine} value={member.model} resolved={model} onChange={model => onChange({ model })} />
       </div>
       <label class="check"><input type="checkbox" checked={member.enabled} onChange={e => onChange({ enabled: (e.target as HTMLInputElement).checked })} /><span><b>Enabled</b> · eligible for selection by the planner (does not start a process)</span></label>
       <details class="advanced"><summary>Advanced · capabilities, scope, commands, concurrency</summary>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', paddingTop: '12px' }}>
+          {(connections.length > 1 || !connectionValid) && <label class="field"><span>Connection</span><select value={member.provider} onChange={e => onChange({ provider: e.currentTarget.value })}>
+            <option value="default" disabled={!connections.some(p => p.id === options.defaults.provider)}>Inherit ({options.defaults.provider})</option>
+            {!connectionValid && member.provider !== 'default' && <option value={member.provider} disabled>{member.provider} · unavailable for this engine</option>}
+            {connections.map(p => <option key={p.id} value={p.id}>{p.id} · {p.auth}</option>)}
+          </select><span class="hint">Resolved: {providerId}{provider ? ` (${provider.kind}, ${provider.auth})` : ' · not configured'}. Select a configured connection for this engine.</span></label>}
           <div class="field"><span id={`caps-${member.id}`}>Capabilities</span>
             <div class="caps" role="group" aria-labelledby={`caps-${member.id}`}>
               {options.capabilities.map(c => <button key={c} type="button" class="cap" aria-pressed={member.capabilities.includes(c)} onClick={() => toggleCapability(c)}>{member.capabilities.includes(c) ? '✓ ' : ''}{c}</button>)}

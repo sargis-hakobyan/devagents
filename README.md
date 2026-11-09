@@ -1,48 +1,104 @@
-# DevAgents
+<h1 align="center">✦ DevAgents</h1>
 
-DevAgents uses Mastra workflows to run AI development teams on your local Git projects. Agents plan changes, write code, run tests and independently review the result. Follow progress and approve work in your browser.
+<p align="center"><strong>An AI development team for your local Git projects.</strong></p>
 
-Each task’s **Usage** tab shows reported input, cached input and output tokens by step and attempt. Costs are labelled estimates; subscription and unknown billing runs use a separate API-equivalent estimate. Unknown models or missing usage remain unavailable. USD is the default; EUR uses an explicitly dated exchange rate. See [usage and cost estimates](docs/REFERENCE.md#usage-and-cost-estimates).
+<p align="center">
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#features">Features</a> ·
+  <a href="docs/SETUP.md">Setup</a> ·
+  <a href="docs/REFERENCE.md">Documentation</a> ·
+  <a href="docs/MILESTONES.md">Roadmap</a>
+</p>
 
-Completed tasks include a read-only diff with GitHub-style green additions, red deletions, blue hunk headers and coloured file counts.
+DevAgents coordinates agents that plan changes, write code, run checks, and independently review the result. Give a team a task, follow its work in your browser, and inspect the final diff and local commit.
 
-Original-checkout safety scans allow two minutes per attempt and retry a timeout once; failures report the timeout explicitly.
+Choose each member's role, coding engine, and model. DevAgents handles delegation, isolated worktrees, integration, and bounded repair loops while keeping the plan, execution history, and validation evidence together.
 
-Each new task starts from the current local `main` commit in a clean, isolated Git worktree on its own `devagents/<request>-<id>` branch. Other branches and uncommitted files are not copied. Results are local commits; DevAgents does not automatically merge or push them.
+## Quickstart
 
-Separate agent QA is disabled by default (`qaEnabled: false`); use your CI pipeline for QA verification. Developer validation and independent code review remain enabled. If explicitly enabled with `qaEnabled: true`, an independent QA engineer is assigned from the task's frozen team. After validation (and integration for multi-item tasks), QA verifies each required acceptance criterion before final code review and commit. QA defects use the existing bounded repair loop; every repaired result is checked again. Teams without an enabled QA agent record an explicit skip. Historical tasks are not retroactively marked QA-verified.
-
-Optional checks that cannot run inside the sandbox (a browser, a GUI, network services, manual QA) are reported with the result as "not run in this environment" instead of being retried; repair cycles are spent only on failing tests and code defects. A required acceptance criterion that QA cannot verify stops the task without a final commit and reports the missing prerequisite. Typecheck and lint are not proof that visual or interactive behavior works. See [the decision record](docs/DECISIONS.md#environment-limitations-are-reported-not-repaired--2026-11-02).
-
-By default, the coding agent prepares project tools, dependencies and setup scripts before coding. Optional extra rules enable restricted preparation. See [environment preparation and limits](docs/SETUP.md#project-environment-preparation).
-
-## Get started
-
-Install and start **Docker with Compose**, clone this repository, then run from its folder:
+**Requires:** Git and Docker with Compose on macOS or desktop Linux. Linux also needs `openssl`, `secret-tool`, and an unlocked desktop keyring. No host Node.js installation is needed for Docker.
 
 ```sh
+git clone https://github.com/sargis-hakobyan/devagents.git
+cd devagents
 ./devagents start
 ```
 
-Choose **Browser** (recommended), **Terminal**, or **Later**. Connect Codex with your ChatGPT account or an OpenAI API key, and add a project. A ready-made starter team is selected automatically; customize it anytime in Teams. Saved connections are reused on later starts.
+Choose **Browser** for guided setup, or **Terminal** to configure from the command line. The first start builds the local image; later starts reuse it or rebuild when the source changes.
 
-New starter teams contain a **Tech Lead**, **Frontend Developer**, **Backend Developer** and **Code Reviewer**. The lead defines contracts and assigns independent frontend/backend items to run in parallel (the default worker limit is two); backend also handles tooling and integration. On a task's **Work** tab, the team board shows both developers working, their assigned items and separate activity links. Genuine dependencies still wait. Existing saved teams keep their revisions; add the specialists in Teams to update an older roster. Already submitted tasks retain their original team snapshot.
+1. **Connect an engine.** Sign in to Codex with ChatGPT or an OpenAI API key. For Claude, follow [Claude setup](docs/SETUP.md#claude).
+2. **Add a project.** Choose an existing local Git repository. In Docker, the browser prepares a command for mounting and registering the folder through the local launcher.
+3. **Submit work.** Use the starter team, describe the change and expected outcome in the task description. Choose plan approval to review the proposed change, planned checks, and risks in plain language before implementation begins. File paths and commands are available under **Technical details**.
 
-The **Execution workflow** on each task's Work tab shows actual agent runs in start order, including repeated reviews and developer repairs. It displays reviewer findings, links the next repair to earlier feedback for the same work item, marks parallel runs, and refreshes every three seconds. Only agent runs receive numbered cards. Consecutive automated checks collapse into one expandable pass/fail summary; the final commit is a compact confirmation. A completed repair is separate from passing validation and review. Planned responsibilities remain available in a separate expandable section.
+Saved connections are reused. Run `./devagents setup` to change setup later. See [setup and troubleshooting](docs/SETUP.md) or the [native installation guide](docs/REFERENCE.md#native-quickstart) for other options.
 
-The first run builds the local image. Later starts reuse it unless the source changed. macOS uses Keychain; Linux requires `openssl`, `secret-tool` and an unlocked desktop keyring.
+## Your team, from request to reviewed code
 
-To change setup later:
+The starter team includes a **Tech Lead**, **Frontend Developer**, **Backend Developer**, and **Code Reviewer**. Customize their instructions, engines, and models in Teams.
+
+| Step | What happens |
+| --- | --- |
+| **Plan** | The Tech Lead inspects the project, defines contracts, and assigns focused tasks to available specialists. |
+| **Build** | Developers work in isolated worktrees. Independent items can run in parallel; genuine dependencies wait. |
+| **Verify and review** | Changes are integrated, project checks run, and an independent reviewer reports defects. Assigned developers repair them before fresh validation and review. |
+| **Inspect the result** | Open the diff, check the evidence and limitations, and take the resulting local commit into your own workflow. |
+
+<p align="center">
+  <img src="docs/assets/team-workflow.png" alt="DevAgents team board showing assigned developers, review, integration, and a completed local commit" width="1000" />
+</p>
+<p align="center"><sub>Deterministic demo with optional QA enabled. Separate agent QA is off by default.</sub></p>
+
+## Features
+
+| | What you get |
+| --- | --- |
+| **Configurable teams** | Reusable roles, instructions, permissions, and per-member engine/model choices. Each submitted task keeps a frozen team snapshot. |
+| **Parallel development** | Dependency-aware work assignment, isolated Git worktrees, and an explicitly assigned integration owner. |
+| **Visible execution** | A browser timeline of agent runs, parallel work, automated checks, reviewer findings, and repair attempts. |
+| **Quality gates** | Developer validation and independent, read-only code review. Optional QA verifies acceptance criteria. |
+| **Usage tracking** | Reported tokens by step and attempt. Available cost estimates are labelled; missing data stays unavailable. |
+| **Local results** | Read-only diffs, local branches and commits, persistent task history, and automatic cleanup with recovery snapshots for unfinished work. |
+
+## Coding engines
+
+| Engine | Current status |
+| --- | --- |
+| **Codex** | Implemented; authenticated execution has been verified. Connect through ChatGPT sign-in or an OpenAI API key. |
+| **Claude** | Implemented with deterministic adapter and UI checks. Authenticated execution and account model access remain unverified. See [connection options and limits](docs/SETUP.md#claude). |
+| **Local models** | Planned; no execution adapter yet. |
+
+Model choices do not guarantee account access or quota. DevAgents stores task state locally; configured coding engines communicate with their model providers.
+
+## Execution boundaries
+
+- **Work starts from local `main`.** Each task gets a clean worktree and its own branch. Uncommitted changes and other branches are not copied. DevAgents never automatically merges into your checkout or pushes results.
+- **The engine sandbox stays active.** Optional extra DevAgents rules are off by default. Docker credentials are encrypted using your OS keychain; project access is explicitly mounted.
+- **QA is opt-in.** `qaEnabled: false` keeps separate agent QA disabled. Developer validation and independent review still run. Read the [QA contract](docs/REFERENCE.md#optional-qa-gate) before enabling it.
+- **Verification has evidence.** Unavailable optional checks are reported as limitations. A required acceptance criterion blocked at the QA gate prevents a final task commit.
+
+DevAgents currently runs one top-level task at a time, with bounded parallel workers inside it. It is a local, single-user application.
+
+## Documentation
+
+| Guide | Start here for |
+| --- | --- |
+| [Setup](docs/SETUP.md) | Installation, credentials, projects, environment preparation, and troubleshooting |
+| [Technical reference](docs/REFERENCE.md) | CLI commands, configuration, security, usage estimates, and storage recovery |
+| [Decisions](docs/DECISIONS.md) | Architectural choices and their rationale |
+| [Milestones](docs/MILESTONES.md) | Implemented capabilities, verification history, and planned work |
+| [Contributor instructions](AGENTS.md) | Repository conventions and development rules |
+
+## Development
+
+Uses TypeScript, Mastra workflows, SQLite, and a Preact/Vite UI. Requires **Node.js 24.x** and **npm**.
 
 ```sh
-./devagents setup
+npm ci
+npm run check
 ```
 
-Extra DevAgents restrictions are off by default; [enable them in setup](docs/SETUP.md#optional-devagents-rules) when needed. The engine sandbox remains active.
+The standard checks cover backend/UI types, tests, and builds. Browser tests run separately with `npm run test:ui` and require Playwright Chromium. Default tests use deterministic fixtures; live model tests consume account allowance or API credits. See [validation commands](docs/REFERENCE.md#validation-and-contribution).
 
-**Available now:** Codex execution. Claude and local-model execution are planned.
+## License
 
-[Setup and troubleshooting](docs/SETUP.md) · [Technical reference](docs/REFERENCE.md) · [Roadmap](docs/MILESTONES.md)
-
-
-Successfully completed tasks automatically release ignored dependencies, private tool caches and owned run scratch after workers stop, and again during startup recovery. Clean completed worktrees are then removed; reviewed result branches, commits and history remain available. Worktrees with local edits or extra files are retained. Set `DEVAGENTS_COMPACT_COMPLETED_TASKS=false` to opt out. For failed or cancelled tasks, use **Preview task compaction** to reclaim regenerable resources while keeping unfinished work. Dependencies and tools must be prepared again before running checks in a compacted worktree. See [storage recovery](docs/REFERENCE.md#storage-recovery-and-task-compaction).
+[Apache License 2.0](LICENSE).

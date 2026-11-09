@@ -62,6 +62,11 @@ test('execution updates live from reviewer findings to developer repair and re-r
     const feedback = testRepair.getByRole('link', { name: 'From automated checks' });
     await expect(feedback).toHaveAttribute('href', `#${await groups.nth(1).getAttribute('id')}`);
     end('test-repair', { summary: 'Fixed the failing test' });
+    record('validation-started', { validationId: 'live-check', executable: 'npm', args: ['test'], timeoutMs: 600000 });
+    await expect(timeline.getByRole('status')).toContainText('npm test', { timeout: 10000 });
+    await expect(groups.last()).toContainText('elapsed');
+    await expect(groups.last().locator('summary')).toContainText('0 passed · running');
+    record('validation', { validationId: 'live-check', executable: 'npm', args: ['test'], exitCode: 0 });
     checks();
     start('review2', 'review', 'Code Reviewer'); end('review2', { approved: true, findings: [], summary: 'Verified the SSO fix' });
     await expect(timeline.locator('[data-execution-id="run-review2"]')).toContainText('Verified the SSO fix', { timeout: 10000 });

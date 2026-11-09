@@ -3,7 +3,7 @@ import { describeLimitations, implementationLimitationInstructions, LimitationLe
 import { taskRules } from '../domain/execution-policy.js';
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
-import type { CodingEngine, EnginePhase, Validator, ValidationResult } from '../domain/engine.js';
+import type { EnginePhase, Validator, ValidationResult } from '../domain/engine.js';
 import type { AgentDefinition, AppConfig, Task, WorkItem } from '../domain/schemas.js';
 import { AppError } from '../domain/errors.js';
 import { PolicyEngine } from '../domain/policy.js';
@@ -11,6 +11,7 @@ import { scopeAgent } from '../domain/ownership.js';
 import type { TaskService } from './service.js';
 import { ImplementationOutput, ReviewOutput } from './outputs.js';
 import type { TaskWorkflows } from './workflows.js';
+import { admittedWorkers } from '../workspace/disk-space.js';
 import { readyWave, AgentSlots } from './dag-scheduler.js';
 import { WorkspaceManager, git } from '../workspace/git.js';
 import { originalCheckoutStatus } from '../workspace/status.js';
@@ -28,7 +29,7 @@ type Item = z.infer<typeof WorkItem>;
 type Context = { cwd: string; workItemId: string };
 type Hooks = {
   ledger: LimitationLedger;
-  service: TaskService; engine: CodingEngine; validator: Validator; task: Task; agents: AgentDefinition[]; signal: AbortSignal;
+  service: TaskService; preflight(agent: AgentDefinition): Promise<void>; validator: Validator; task: Task; agents: AgentDefinition[]; signal: AbortSignal;
   active(): Task;
   move(state: Task['state'], reason: string, patch?: Partial<Pick<Task, 'outcome'>>): Task;
   provider(agent: AgentDefinition): AppConfig['providers'][number];
@@ -67,7 +68,7 @@ export async function runDag(h: Hooks): Promise<void> {
   const reviewer = independentReviewer(agents, implementers);
   if (!reviewer) throw new AppError('missing_agent', 'Multi-item execution needs a reviewer independent of every implementer and integrator');
   const readOnlyReviewer = { ...reviewer, permissions: { ...reviewer.permissions, writePaths: [], allowCommands: !rules } };
-  for (const agent of [...new Map([...developers.values(), integrator, reviewer].map(a => [a.id, a])).values()]) await h.engine.preflight(h.provider(agent));
+  for (const agent of [...new Map([...developers.values(), integrator, reviewer].map(a => [a.id, a])).values()]) await h.preflight(agent);
   await assertIntegrationConfig(workspace.path);
   h.active(); h.move('running', 'Scheduling approved work items in isolated worktrees');
   for (const item of plan.items) state(item.id, 'pending', { agentId: item.assignedAgent, dependsOn: item.dependsOn, branch: item.branch, ownedPaths: item.ownedPaths });
@@ -100,6 +101,8 @@ export async function runDag(h: Hooks): Promise<void> {
         return h.validator.execute(cwd, command, workerSignal, service.config.validationTimeoutMs, rules);
       },
       record: result => { record('validation', { workItemId: itemId, ...result }); },
+      started: (command, validationId) => { record('validation-started', { ...command, validationId, workItemId: itemId, timeoutMs: service.config.validationTimeoutMs }); },
+      failed: (command, validationId, error) => { record('validation-failed', { ...command, validationId, workItemId: itemId, error }); },
       recover: feedback => prepare(cwd, commands, workerSignal, itemId, feedback),
     });
   };
@@ -177,6 +180,11 @@ export async function runDag(h: Hooks): Promise<void> {
     await h.workflows.repeat(task.id, 'dependency-waves', async () => {
       h.active();
       const nodes = readyWave(plan.items.map(item => ({ ...item, agentId: developers.get(item.id)!.id, agentConcurrency: developers.get(item.id)!.concurrency })), done, service.config.concurrency);
+      const admitted = await admittedWorkers(service.dataDir, nodes.length, service.config.minFreeDiskBytes);
+      if (admitted < nodes.length) {
+        record('storage-admission', { requestedWorkers: nodes.length, admittedWorkers: admitted, message: 'Reduced parallelism to keep one preparation allowance per new checkout' });
+        nodes.splice(admitted);
+      }
       const baseSha = await integrationSnapshot(workspace, integrator);
       record('dependency-checkpoint', { baseSha, completed: [...done] });
       const abort = new AbortController(); const cancel = () => abort.abort(); signal.addEventListener('abort', cancel, { once: true });
@@ -202,7 +210,7 @@ export async function runDag(h: Hooks): Promise<void> {
           let resolved = false;
           await h.workflows.repeat(task.id, `conflict:${completed.item.id}`, async () => {
             h.active();
-            if (integrationRepairs >= service.config.maxRepairCycles) throw new AppError('integration_conflict', 'Integration conflict exhausted the repair budget; inspect preserved worktrees and evidence.');
+            if (integrationRepairs >= service.config.maxRepairCycles) throw new AppError('integration_conflict', 'Integration conflict exhausted the repair budget; inspect task evidence and any recovery snapshots.');
             integrationRepairs++; repair();
             for (const file of conflicts) await new PolicyEngine().file(integrator, workspace.path, file, 'write');
             await implement(integrator, `Resolve this explicit integration conflict. Preserve all work-item requirements. Edit project files only; do not use Git or commit.${rules ? ' Do not touch ignored files.' : ''} Remove conflict markers.\nUser request: ${task.request}\nPlan: ${JSON.stringify(plan)}\nConflicting files: ${JSON.stringify(conflicts)}`, signal, { cwd: workspace.path, workItemId: '@integration' });

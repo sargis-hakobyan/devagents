@@ -10,8 +10,12 @@ const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
 /** Supply bundled pnpm; only extra-rules mode suppresses project hooks/version switching. */
 export async function nodeToolPath(temp: string, rules = true, runtime?: string): Promise<string> {
   const bin = join(temp, 'tools'); await mkdir(bin, { recursive: true, mode: 0o700 });
-  await writeFile(join(bin, 'pnpm'), `#!/bin/sh\nexec ${rules ? quote(process.execPath) : 'node'} ${quote(pnpmCli)} --config.package-import-method=copy ${rules ? '--config.manage-package-manager-versions=false --ignore-pnpmfile ' : ''}"$@"\n`, { mode: 0o700 });
-  return [...(runtime ? [join(runtime, 'bin'), join(runtime, '.local/bin')] : []), bin, process.env.PATH ?? ''].join(':');
+  const cache = join(runtime ?? temp, 'package-cache');
+  await mkdir(cache, { recursive: true, mode: 0o700 });
+  // pnpm's automatic hardlink/mount detection can choose cwd/.pnpm-store in a sandbox.
+  // Pin an absolute store outside the checkout; retain it across calls in default mode.
+  await writeFile(join(bin, 'pnpm'), `#!/bin/sh\nexec ${rules ? quote(process.execPath) : 'node'} ${quote(pnpmCli)} --config.package-import-method=copy --config.store-dir=${quote(join(cache, 'pnpm-store'))} --config.cache-dir=${quote(join(cache, 'pnpm-cache'))} ${rules ? '--config.manage-package-manager-versions=false --config.ignore-pnpmfile=true ' : ''}"$@"\n`, { mode: 0o700 });
+  return [bin, ...(runtime ? [join(runtime, 'bin'), join(runtime, '.local/bin')] : []), process.env.PATH ?? ''].join(':');
 }
 
 /** Secret-free, per-worktree HOME. Setup-installed tooling survives later engine/validation calls.

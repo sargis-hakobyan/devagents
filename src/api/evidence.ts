@@ -2,10 +2,12 @@
 export function evidenceMetadata(data: unknown): Record<string, unknown> {
   if (!data || typeof data !== 'object') return {};
   const source = data as Record<string, unknown>; const metadata: Record<string, unknown> = {};
-  for (const key of ['workItemId', 'itemId', 'agentId', 'engine', 'runId', 'phase', 'state', 'kind', 'commit', 'executable']) {
+  for (const key of ['workItemId', 'itemId', 'agentId', 'engine', 'runId', 'validationId', 'phase', 'state', 'kind', 'commit', 'executable']) {
     if (typeof source[key] === 'string') metadata[key] = source[key].slice(0, 256);
   }
   if (typeof source.exitCode === 'number' && Number.isFinite(source.exitCode)) metadata.exitCode = source.exitCode;
+  if (typeof source.timedOut === 'boolean') metadata.timedOut = source.timedOut;
+  if (typeof source.timeoutMs === 'number') metadata.timeoutMs = source.timeoutMs;
   if (typeof source.truncated === 'boolean') metadata.truncated = source.truncated;
   if (typeof source.summary === 'string') metadata.summary = source.summary.slice(0, 512);
   if (Array.isArray(source.args)) metadata.args = source.args.slice(0, 16).filter((v): v is string => typeof v === 'string').map(v => v.slice(0, 128));

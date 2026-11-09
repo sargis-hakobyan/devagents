@@ -10,6 +10,7 @@ import { NodeEnvironmentPreparer } from '../dist/workspace/environment.js';
 import { CodexDependencyInstaller } from '../dist/engines/codex/preparation.js';
 import { CodexValidator } from '../dist/engines/codex/validator.js';
 import { git } from '../dist/workspace/git.js';
+import { workspaceRuntime } from '../dist/engines/node-tools.js';
 
 // Real package managers and sandbox, deterministic loopback tarball, no model/login or public registry.
 const root = await mkdtemp(join(tmpdir(), 'devagents-environment-'));
@@ -84,6 +85,13 @@ try {
     console.log(`Checking ${manager} rules-off install with lifecycle scripts…`);
     const install = await validator.execute(project, { executable: manager, args: manager === 'npm' ? ['ci', '--no-audit', '--no-fund'] : ['install', '--no-frozen-lockfile', '--config.package-import-method=copy'] }, signal, 60000, false);
     assert.equal(install.exitCode, 0, install.output);
+    if (manager === 'pnpm') {
+      await assert.rejects(access(join(project, '.pnpm-store')), 'install must not create an untracked cache in the source tree');
+      const store = await validator.execute(project, { executable: 'pnpm', args: ['store', 'path'] }, signal, 10000, false);
+      assert.equal(store.exitCode, 0, store.output);
+      assert.ok(store.output.trim().startsWith(join(await workspaceRuntime(data, project), 'package-cache/pnpm-store/')), store.output);
+      await access(store.output.trim());
+    }
     assert.equal(await readFile(join(project, 'node_modules/generated.txt'), 'utf8'), 'source-dependent build');
     if (manager === 'npm') assert.equal(await readFile(join(project, 'node_modules/fixture-dep/built.txt'), 'utf8'), 'built');
     else assert.equal(await readFile(join(project, 'hook-ran.txt'), 'utf8'), 'yes');

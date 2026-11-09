@@ -345,3 +345,62 @@ Replace the Work tab's fixed-stage Execution workflow with separate chronologica
 Use a compact authenticated execution projection over all run boundaries so Activity pagination and large outputs cannot hide later attempts. Keep raw tool output out of the timeline response. Reuse the existing three-second poller and reconnect behavior; no new event transport, orchestration routing, or automatic task replay is needed.
 
 Execution detail refinement: number only real agent runs. Group adjacent validation results into a compact disclosure and show commit as a confirmation, so internal command execution does not masquerade as repeated DevAgents handoffs. Preserve failed-check counts, chronology, raw evidence and repair links.
+
+
+## Per-member Claude execution — 2026-11-03
+
+The runner resolves every planning, setup, implementation, QA, review and DAG invocation through an engine registry. Team readiness checks engine/provider compatibility; snapshots preserve selections. Model defaults belong only to the configured default engine. More providers or local LLMs require explicit adapters and compatibility rules; configuring a URL alone never enables execution.
+
+Claude uses the pinned Anthropic Agent SDK with built-in tools disabled. DevAgents supplies MCP workspace and command tools, each executed through the existing Codex OS sandbox with role and phase grants. Model-transport credentials are absent from tool environments; structured reports, cancellation and usage feed the existing orchestration contracts. The Codex CLI remains an infrastructure dependency. Claude usage normalizes cache tokens but leaves costs unavailable rather than applying OpenAI pricing or understating cache-creation charges.
+
+Claude credentials use their own encrypted envelope and authentication context, sharing only the OS-keychain master key with Codex. Both vaults unlock on startup. Local subscription tokens are explicitly supplied through the official CLI's setup-token flow, never extracted from the user's host profile. There is no automatic refresh. Subscription-based product distribution requires Anthropic approval; API keys remain the supported deployment path without that approval. No authenticated model request ran during implementation.
+
+The current source accepts existing SQLite version 4 databases while retaining their optional QA settings table; stashing the QA feature must not downgrade or erase saved settings.
+
+## Model dropdowns use documented IDs — 2026-11-03
+
+Teams offers a model dropdown for each engine using a small built-in catalog from [OpenAI](https://learn.chatgpt.com/docs/models) and [Anthropic](https://platform.claude.com/docs/en/models/overview), checked on 2026-11-03. Display names save exact IDs; Default preserves existing inheritance and Custom model ID keeps unknown/older IDs editable. This replaces the design boards' free-text model field. The list is not an account entitlement check or automatic model discovery, and opening Teams sends no provider requests. No task snapshot, credential or execution contract changes.
+
+The member editor hides the redundant Provider dropdown when the current engine has one compatible connection. Multiple compatible connections, or an unavailable saved selection requiring repair, expose a Connection selector under Advanced. Provider configuration and frozen task snapshots remain intact; simply opening a team never rewrites its connection.
+
+
+## 2026-11-03 — Reclaim terminal task environments with recovery snapshots
+
+Repeated disk exhaustion came from retained failed worktrees and dependency installations. All terminal states now use drained-worker maintenance: compact known generated resources, archive unfinished checkout files and staged changes privately, then remove owned worktrees while retaining all branches and task history. Recovery archives are not Git commits because ignored files may contain private material. No automatic archive expiry is introduced. Refused ownership, archive failure and unsafe filesystem contents defer removal visibly.
+
+Startup recovery now fails interrupted Ready/setup tasks rather than leaving them stranded. Parallel DAG admission budgets free space per new checkout, runtime pressure aborts below 2 GiB, and a physically allocated 64 MiB reserve is released before failure reporting. These measures reduce exhaustion and improve recoverability; they do not provide filesystem quotas. Docker image/build-cache maintenance remains outside the worker sandbox; the Docker socket is never mounted into agents.
+
+### Host-folder-first Docker registration (2026-11-03)
+
+The browser registration screen defaults to the user's absolute host folder and prepares a shell-quoted launcher command with `--name` and `--path`. The host launcher keeps folder validation, mount confirmation, readiness gating and restart/registration; the browser does not create mounts. Already-mounted container registration remains an explicit advanced choice. This replaces the container-path-first U3 registration design: preparing a command is visibly distinct from completing registration, and existing project cards label container paths. No Docker socket or host filesystem browser is added.
+
+### Private process information and validation timeouts
+
+Docker Compose uses `security_opt: systempaths=unconfined` so the engine can
+mount fresh procfs inside its private PID/user namespace. Without it, Node
+`process.memoryUsage()` fails and Vitest workers can hang after tests pass.
+The engine sandbox remains enforced; do not grant filesystem access to the
+outer container's `/proc`. Read-only root, dropped capabilities and
+no-new-privileges remain enabled. Recreate existing containers after updating.
+
+Execution workflow shows each running validation command, elapsed time and its
+timeout limit. Timed-out checks retain bounded partial output in Activity and
+stop with an explicit validation timeout instead of spending a repair attempt.
+The deterministic `scripts/proc-sandbox-smoke.mjs` checks worker completion and
+isolation from outer process environment and root.
+
+
+## 2026-11-04 — Compact role instructions and runtime-owned repair routing
+
+Built-in roles use a short responsibility statement and focused rules. Planning belongs to the Tech Lead; implementation and repairs belong to assigned developers; integration requires explicit assignment. Code Reviewer stays independent and read-only. QA, when enabled, independently verifies behavior and acceptance criteria without modifying project files.
+
+Routine review findings follow the existing bounded runtime repair loop to the assigned developer or integrator, followed by fresh validation and review. No additional Tech Lead call is introduced per repair. Shared-contract or ownership changes must be reported; automatic replanning is not implemented. The runtime enforces completion gates. Optional unavailable checks do not trigger repair, and required verification cannot be reported as passed without evidence.
+
+Separate agent QA remains disabled by default. Parallel QA/review and early QA test-authoring are future workflow changes, not behavior enabled by these prompts. Saved teams remain explicit template copies and submitted task snapshots remain immutable; adopting new instructions requires an explicit team edit, not a startup overwrite.
+
+
+## Plain-language plan approval — 2026-11-05
+
+The Plan tab presents the proposed outcome, assigned member names, planned checks and user-relevant risks before implementation details. The Tech Lead writes this prose in its existing planning response; no translation call or additional agent is introduced. Runtime instructions and model schema descriptions apply the audience split even when a saved team uses older role instructions.
+
+Plans gain a bounded `verification` prose list, defaulting to empty when parsing older inputs and optional on persisted records. It describes the actual declared validation or inspection and is redacted like other report prose. It is not execution evidence, an acceptance criterion or a new completion gate. Technical item descriptions, ownership, commands and branches remain available in a collapsed disclosure. Approval remains bound to the complete task version. Existing plans are not rewritten or silently reapproved; missing prose is disclosed rather than invented.

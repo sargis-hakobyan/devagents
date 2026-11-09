@@ -30,6 +30,7 @@
     "test:m3-live": "npm run build && node scripts/m3-smoke.mjs --live"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.317",
     "@mastra/core": "1.80.0",
     "@mastra/libsql": "1.27.1",
     "commander": "15.0.0",

@@ -121,7 +121,7 @@ export class TaskWorkflows {
     }
     if (previous && previous.status !== 'suspended') {
       // Never restart a possibly executed command/commit from a stale framework snapshot.
-      throw new AppError('workflow_interrupted', 'Workflow interrupted or already finished; inspect preserved worktrees and evidence before submitting a new task');
+      throw new AppError('workflow_interrupted', 'Workflow interrupted or already finished; inspect task evidence and any recovery snapshots before submitting a new task');
     }
     const run = await this.workflow.createRun({ runId: id });
     let result;

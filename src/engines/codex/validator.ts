@@ -12,9 +12,9 @@ export class CodexValidator implements Validator {
   constructor(private readonly dataDir: string, private readonly binary = 'codex', private readonly options: { scanLimit?: number } = {}) {}
   async preflight(cwd: string, commands: { executable: string; args: string[] }[], signal: AbortSignal, rules: boolean): Promise<void> {
     const names = [...new Set(commands.map(c => c.executable).filter(e => !e.includes('/')))];
-    const code = `const fs=require('node:fs'),path=require('node:path');const missing=${JSON.stringify(names)}.filter(name=>!process.env.PATH.split(path.delimiter).some(dir=>{try{fs.accessSync(path.join(dir,name),fs.constants.X_OK);return fs.statSync(path.join(dir,name)).isFile()}catch{return false}}));if(missing.length){console.error('Missing validation executables: '+missing.join(', '));process.exitCode=1}`;
+    const code = `try{process.memoryUsage()}catch{console.error('Sandbox process information unavailable. Docker requires security_opt systempaths=unconfined so the engine can mount private procfs. Recreate the service with the current compose configuration.');process.exit(1)}const fs=require('node:fs'),path=require('node:path');const missing=${JSON.stringify(names)}.filter(name=>!process.env.PATH.split(path.delimiter).some(dir=>{try{fs.accessSync(path.join(dir,name),fs.constants.X_OK);return fs.statSync(path.join(dir,name)).isFile()}catch{return false}}));if(missing.length){console.error('Missing validation executables: '+missing.join(', '));process.exitCode=1}`;
     const result = await this.run(cwd, { executable: 'node', args: ['-e', code] }, signal, 10000, rules);
-    if (result.exitCode !== 0) throw new AppError('environment_blocked', `Environment blocked: ${result.output.slice(-2000)}. Required tools are not available on the task environment PATH.`);
+    if (result.exitCode !== 0) throw new AppError('environment_blocked', `Environment blocked: ${result.output.slice(-2000)}. Required tools or sandbox runtime capabilities are unavailable.`);
   }
   async execute(cwd: string, command: { executable: string; args: string[] }, signal: AbortSignal, timeoutMs: number, devagentsRules = true): Promise<ValidationResult> {
     assertValidationCommand(command, devagentsRules);
@@ -41,8 +41,8 @@ export class CodexValidator implements Validator {
       if (runtime) env.HOME = runtime;
       // The validation child has no access to credentials or the original checkout.
       // Oversized output is truncated (head and tail kept) and recorded as evidence rather than failing the task outright.
-      const result = await runProcess(this.binary, args, { cwd, env, signal, timeoutMs, maxBytes: 1024 * 1024, overflow: 'truncate' });
-      const validation = { ...command, exitCode: result.exitCode, output: `${result.stdout}${result.stderr}`, truncated: result.truncated };
+      const result = await runProcess(this.binary, args, { cwd, env, signal, timeoutMs, maxBytes: 1024 * 1024, overflow: 'truncate', timeoutResult: true });
+      const validation = { ...command, exitCode: result.exitCode, output: `${result.stdout}${result.stderr}`, truncated: result.truncated, ...(result.timedOut ? { timedOut: true } : {}) };
       return validation;
     } finally { await rm(home, { recursive: true, force: true }); }
   }

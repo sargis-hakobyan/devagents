@@ -20,7 +20,7 @@ export function redactReportProse<T>(output: T, secrets: readonly string[]): T {
   if (!output || typeof output !== 'object' || Array.isArray(output)) return output;
   const safe = { ...output } as Record<string, unknown>;
   for (const key of ['summary', 'error']) if (typeof safe[key] === 'string') safe[key] = redact(safe[key], secrets);
-  for (const key of ['risks', 'manualChecks', 'limitations']) {
+  for (const key of ['risks', 'manualChecks', 'verification', 'limitations']) {
     if (Array.isArray(safe[key])) safe[key] = (safe[key] as unknown[]).map(value => typeof value === 'string' ? String(redact(value, secrets)).slice(0, key === 'risks' ? undefined : 1000) : value);
   }
   return safe as T;

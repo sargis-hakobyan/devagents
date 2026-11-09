@@ -56,8 +56,9 @@ repository rules; `CLAUDE.md` is the companion entry point for Claude Code.
 
 DevAgents is a local-first AI development-team orchestrator. It uses TypeScript,
 Mastra workflows, Zod validation and SQLite persistence. The browser UI uses
-Preact, Vite and local CSS. Codex execution is implemented; other engines must
-not be presented as working until implemented and verified.
+Preact, Vite and local CSS. Codex and Claude adapters are implemented; Claude
+account/model access still requires authenticated verification. Additional engines
+must not be presented as working until implemented and verified.
 
 | Location | Responsibility |
 | --- | --- |

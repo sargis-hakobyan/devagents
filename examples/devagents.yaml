@@ -1,4 +1,5 @@
 schemaVersion: 1
+qaEnabled: false # separate agent QA is opt-in; developer validation and independent review remain required
 devagentsRules: false # true adds role scopes, command allowlist and read-only validation
 defaultEngine: codex
 defaultProvider: openai
@@ -7,8 +8,11 @@ concurrency: 1
 maxRepairCycles: 3
 executionTimeoutMs: 1800000
 validationTimeoutMs: 600000
-# Release completed-task caches and clean worktrees; retain branches, commits and history.
+# Archive unfinished files, then release completed/failed/cancelled task worktrees and caches.
+cleanupTerminalTasks: true
+# Legacy successful-task policy when cleanupTerminalTasks is disabled. Disable both to retain environments.
 compactCompletedTasks: true
+minFreeDiskBytes: 5368709120 # per parallel new checkout (5 GiB)
 # Optional strict-mode entry limit. Rules-off scans still check links/secrets without this count gate.
 workspaceScanLimit: 200000
 providers:
@@ -17,8 +21,8 @@ providers:
     auth: login
   - id: anthropic
     kind: anthropic
-    auth: api-key
-    apiKeyEnv: ANTHROPIC_API_KEY
+    auth: login # dedicated saved API key or personal subscription token
+    # For an explicit environment-only API key, use auth: api-key and apiKeyEnv: ANTHROPIC_API_KEY
   # Configuration seam only: local execution is a follow-up milestone.
   - id: local
     kind: ollama

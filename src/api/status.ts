@@ -1,3 +1,5 @@
+import { claudeCredential } from '../engines/claude/credentials.js';
+import { providerExecutable } from '../domain/readiness.js';
 import { engineHealth } from '../engines/health.js';
 import { configuredVault, credentialStore } from '../security/credential-vault.js';
 import type { AppConfig } from '../domain/schemas.js';
@@ -5,7 +7,7 @@ import type { AppConfig } from '../domain/schemas.js';
 export type ServiceStatus = {
   service: { version: string; host: string; port: number; platform: string; node: string; dataDir: string; executionEnabled: boolean; startedAt: string; checkedAt: string };
   codex: { installed: boolean; version?: string; signedIn: boolean; credentialStore: 'keyring' | 'file'; vaultLocked: boolean; modelAccessVerified: false };
-  claude: { installed: boolean; version?: string; enabled: false; note: string };
+  claude: { installed: boolean; version?: string; enabled: boolean; signedIn?: boolean; note: string };
   defaults: { devagentsRules: boolean; engine: string; provider: string; model: string | null; providers: { id: string; kind: string; auth: string; apiKeyConfigured: boolean | null; executable: boolean }[] };
   limits: { concurrency: number; maxRepairCycles: number; executionTimeoutMs: number; validationTimeoutMs: number; workspaceScanLimit: number };
 };
@@ -30,10 +32,10 @@ export function statusReporter(input: { dataDir: string; config: AppConfig; vers
     const value: ServiceStatus = {
       service: { version: input.version, host: input.host, port: input.port(), platform: `${process.platform}/${process.arch}`, node: process.version, dataDir: input.dataDir, executionEnabled: input.executionEnabled, startedAt, checkedAt: new Date().toISOString() },
       codex: { installed: Boolean(codex?.installed), ...(codex?.version ? { version: codex.version } : {}), signedIn: health.codexAuthenticated && !vaultLocked, credentialStore: credentialStore(), vaultLocked, modelAccessVerified: false },
-      claude: { installed: Boolean(claude?.installed), ...(claude?.version ? { version: claude.version } : {}), enabled: false, note: 'Adapter planned for M4; not available for execution' },
+      claude: { installed: Boolean(claude?.installed), ...(claude?.version ? { version: claude.version } : {}), enabled: true, signedIn: Boolean(await claudeCredential(input.dataDir).catch(() => undefined)), note: 'API key or personal subscription token; model access unverified' },
       defaults: {
         devagentsRules: input.config.devagentsRules, engine: input.config.defaultEngine, provider: input.config.defaultProvider, model: input.config.defaultModel ?? null,
-        providers: input.config.providers.map(p => ({ id: p.id, kind: p.kind, auth: p.auth, apiKeyConfigured: p.apiKeyEnv ? Boolean(process.env[p.apiKeyEnv]) : null, executable: p.kind === 'openai' && !p.baseUrl })),
+        providers: input.config.providers.map(p => ({ id: p.id, kind: p.kind, auth: p.auth, apiKeyConfigured: p.apiKeyEnv ? Boolean(process.env[p.apiKeyEnv]) : null, executable: providerExecutable(p) })),
       },
       limits: statusLimits(input.config),
     };

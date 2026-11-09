@@ -7,14 +7,14 @@ export type RuntimeSupport = {
   config: AppConfig;
   /** DevAgents capabilities with a real backend. */
   capabilities: ReadonlySet<string>;
-  /** Engines with an implemented adapter in this build (M4 adds the second one). */
+  /** Engines with an implemented adapter in this build. */
   executableEngines: ReadonlySet<string>;
   platform: NodeJS.Platform;
 };
 export const resolveEngine = (member: Pick<TeamMember, 'engine'>, config: AppConfig) => member.engine === 'default' ? config.defaultEngine : member.engine;
 export const resolveProviderId = (member: Pick<TeamMember, 'provider'>, config: AppConfig) => member.provider === 'default' ? config.defaultProvider : member.provider;
-/** A provider is executable today only through the official OpenAI path of the Codex runtime. */
-export const providerExecutable = (provider: AppConfig['providers'][number]) => provider.kind === 'openai' && !provider.baseUrl;
+/** Official provider compatibility is explicit; arbitrary URLs never imply an executable adapter. */
+export const providerExecutable = (provider: AppConfig['providers'][number], engine?: string) => !provider.baseUrl && (provider.kind === 'openai' && (!engine || engine === 'codex') || provider.kind === 'anthropic' && (!engine || engine === 'claude-code'));
 
 /**
  * Validity versus readiness, as the brief distinguishes them: malformed or forbidden members throw
@@ -34,12 +34,12 @@ export function teamReadiness(members: TeamMember[], support: RuntimeSupport): T
     if (m.permissions.allowPush) throw new AppError('invalid_team', `Member ${m.id}: push permission is never granted`);
     for (const capability of m.capabilities) if (!support.capabilities.has(capability)) add('error', 'capability_unavailable', `${m.name}: capability "${capability}" has no backend in this build and cannot be fulfilled`, m.id);
     const engine = resolveEngine(m, support.config);
-    if (!support.executableEngines.has(engine)) add('error', 'engine_unavailable', `${m.name}: engine "${engine}" is not available for execution (the Claude adapter arrives in M4)`, m.id);
+    if (!support.executableEngines.has(engine)) add('error', 'engine_unavailable', `${m.name}: engine "${engine}" is not available for execution`, m.id);
     const providerId = resolveProviderId(m, support.config); const provider = support.config.providers.find(p => p.id === providerId);
     if (!provider) add('error', 'provider_unknown', `${m.name}: provider "${providerId}" is not configured`, m.id);
-    else if (!providerExecutable(provider)) add('error', 'provider_unavailable', `${m.name}: provider "${providerId}" (${provider.kind}) is configuration only; execution needs the official OpenAI provider`, m.id);
+    else if (!providerExecutable(provider, engine)) add('error', 'provider_unavailable', `${m.name}: provider "${providerId}" (${provider.kind}) is not compatible with the selected engine`, m.id);
     if (support.config.devagentsRules) for (const grant of m.permissions.writePaths) { try { assertSupportedWriteGrant(grant, support.platform); } catch (error) { add('error', 'write_grant_unsupported', `${m.name}: ${error instanceof Error ? error.message : String(error)}`, m.id); } }
-    if (m.enabled && m.model === 'default' && !support.config.defaultModel) add('warning', 'model_not_pinned', `${m.name}: no model is pinned; the runtime default is chosen at execution and recorded as such`, m.id);
+    if (m.enabled && m.model === 'default' && (engine !== support.config.defaultEngine || !support.config.defaultModel)) add('warning', 'model_not_pinned', `${m.name}: no model is pinned; the runtime default is chosen at execution and recorded as such`, m.id);
     if (!m.enabled) add('warning', 'member_disabled', `${m.name} is disabled and will not be selected`, m.id);
   }
   // Role coverage uses the same selection rules as plan validation and execution: an implementer is

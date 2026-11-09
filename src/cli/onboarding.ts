@@ -3,7 +3,7 @@ import type { ChoiceOption } from './choice-prompt.js';
 
 import type { AuthMethod, AuthChoice, AuthSetup } from '../domain/auth.js';
 export type SetupUI = { interactive: boolean; write(message: string): void; select<T extends string>(question: string, choices: readonly ChoiceOption<T>[], defaultValue: T): Promise<T> };
-const label = (method: AuthMethod) => ({ chatgpt: 'ChatGPT account', 'api-key': 'OpenAI API key', unknown: 'Codex login (method not recognized)' })[method];
+const label = (method: AuthMethod) => ({ chatgpt: 'ChatGPT account', 'api-key': 'OpenAI API key', subscription: 'Claude subscription', unknown: 'Codex login (method not recognized)' })[method];
 
 export async function onboard(auth: AuthSetup, ui: SetupUI, options: { auth?: AuthChoice; testConnection?: boolean } = {}): Promise<boolean> {
   let status = await auth.status();

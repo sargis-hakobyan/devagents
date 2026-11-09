@@ -19,7 +19,7 @@ export async function fixture(devagentsRules = true) {
   const dataDir = join(root, 'data');
   const store = new Store(join(dataDir, 'test.db'), ['fixture-secret-value']);
   // Most workflow fixtures inspect their final checkout. Retention tests explicitly enable cleanup.
-  const service = new TaskService(store, Config.parse({ schemaVersion: 1, devagentsRules, qaEnabled: true, compactCompletedTasks: false }), dataDir);
+  const service = new TaskService(store, Config.parse({ schemaVersion: 1, devagentsRules, qaEnabled: true, compactCompletedTasks: false, cleanupTerminalTasks: false }), dataDir);
   await service.registerProject({ id: 'fixture', path: project });
   return { root, project, dataDir, store, service, cleanup: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
 }

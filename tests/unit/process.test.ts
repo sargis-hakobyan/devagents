@@ -84,3 +84,11 @@ test('streaming callbacks receive whole lines in order and unfinished lines are 
   const many = await runProcess(process.execPath, ['-e', "for (let i = 0; i < 2000; i++) process.stdout.write('line-' + i + '\\n')"], { cwd: process.cwd(), env: { PATH: process.env.PATH }, timeoutMs: 10000, maxBytes: 1000, overflow: 'truncate', onLine: line => seen.push(line) });
   assert.equal(seen.length, 2000); assert.equal(seen[1999], 'line-1999'); assert.equal(many.truncated, true); assert.ok(Buffer.byteLength(many.stdout) <= 1000);
 });
+
+test('validation timeout preserves partial output but cancellation still rejects', async () => {
+  const options = { cwd: process.cwd(), env: {}, timeoutMs: 300, timeoutResult: true };
+  const result = await runProcess(process.execPath, ['-e', 'console.log("partial evidence");setInterval(()=>{},1000)'], options);
+  assert.equal(result.timedOut, true); assert.equal(result.exitCode, 124); assert.match(result.stdout, /partial evidence/);
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(runProcess(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { ...options, signal: controller.signal }), /cancelled/);
+});

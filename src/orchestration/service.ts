@@ -14,6 +14,9 @@ import { validatePlan } from '../domain/plan.js';
 import { taskRules } from '../domain/execution-policy.js';
 import { isWithin } from '../workspace/paths.js';
 import { availableDiskBytes, DATABASE_HEADROOM } from '../workspace/disk-space.js';
+import { DiskReserve } from '../workspace/disk-reserve.js';
+import { taskBranch } from '../workspace/branches.js';
+import { cleanupTerminalWorktrees } from '../workspace/terminal-cleanup.js';
 import { WorktreeCompactor } from '../workspace/compaction.js';
 import { STARTER_TEAM_ID, STARTER_TEAM_NAME, STARTER_ROLES } from '../domain/starter-team.js';
 import { log, redact } from '../telemetry/redact.js';
@@ -23,6 +26,7 @@ export class TaskService {
   private runner?: Runner;
   private readonly maintaining = new Set<string>();
   private compactor: WorktreeCompactor | undefined;
+  get diskReserve(): DiskReserve { return new DiskReserve(this.dataDir); }
   /** `executableEngines` is what this build can actually run; the schema accepts more engines than that. */
   constructor(readonly store: Store, readonly config: AppConfig, readonly dataDir: string, readonly platform: NodeJS.Platform = process.platform, readonly executableEngines: ReadonlySet<string> = new Set(['codex'])) {}
   get support(): RuntimeSupport { return { config: this.config, capabilities: builtinCapabilities, executableEngines: this.executableEngines, platform: this.platform }; }
@@ -36,7 +40,7 @@ export class TaskService {
     const availableBytes = await availableDiskBytes(this.dataDir).catch(() => undefined);
     return { measured: availableBytes !== undefined, ...(availableBytes !== undefined ? { availableBytes } : {}),
       minimumStartBytes: this.config.minFreeDiskBytes, databaseHeadroomBytes: DATABASE_HEADROOM,
-      compactCompletedTasks: this.config.compactCompletedTasks,
+      compactCompletedTasks: this.config.compactCompletedTasks, cleanupTerminalTasks: this.config.cleanupTerminalTasks,
       ...(this.executionFailure ? { executionFailure: this.executionFailure } : {}) };
   }
   assertNotMaintaining(id: string): void {
@@ -52,7 +56,8 @@ export class TaskService {
     this.maintaining.add(id);
     try { return await action(task); } finally { this.maintaining.delete(id); }
   }
-  private taskWorkspaces(task: Task): { path: string; branch: string }[] {
+  private async taskWorkspaces(task: Task): Promise<{ path: string; branch: string }[]> {
+    const dataRoot = await realpath(this.dataDir);
     const workspaces = new Map<string, { path: string; branch: string }>();
     const add = (value: unknown) => {
       const w = value as { path?: unknown; branch?: unknown } | undefined;
@@ -64,7 +69,15 @@ export class TaskService {
       }
     };
     add(task.workspace);
-    for (const e of this.store.evidence(task.id)) if (e.kind === 'work-item') add((e.data as { workspace?: unknown }).workspace);
+    for (const e of this.store.evidence(task.id)) {
+      if (e.kind === 'work-item') add((e.data as { workspace?: unknown }).workspace);
+      if (e.kind === 'worktree-intent') {
+        const d = e.data as { owner?: string; workItemId?: string; branch?: string };
+        if (d.owner !== task.id) continue;
+        if (d.workItemId && /^[a-z][a-z0-9-]{0,63}$/.test(d.workItemId) && d.branch) add({ path: join(dataRoot, 'worktrees', `${task.id}-${d.workItemId}`), branch: d.branch });
+        else if (!d.workItemId && !task.workspace) add({ path: join(dataRoot, 'worktrees', task.id), branch: taskBranch(task.id, task.request) });
+      }
+    }
     return [...workspaces.values()];
   }
   private taskRunIds(id: string): string[] {
@@ -75,26 +88,32 @@ export class TaskService {
     });
   }
   compactionPreview(id: string) {
-    return this.maintenance(id, task => (this.compactor ??= new WorktreeCompactor(this.dataDir)).preview(this.store.project(task.projectId), id, this.taskWorkspaces(task), this.taskRunIds(id)));
+    return this.maintenance(id, async task => (this.compactor ??= new WorktreeCompactor(this.dataDir)).preview(this.store.project(task.projectId), id, await this.taskWorkspaces(task), this.taskRunIds(id)));
   }
   compact(id: string, digest: string) {
-    return this.maintenance(id, task => (this.compactor ??= new WorktreeCompactor(this.dataDir)).compact(this.store.project(task.projectId), id, this.taskWorkspaces(task), digest,
+    return this.maintenance(id, async task => (this.compactor ??= new WorktreeCompactor(this.dataDir)).compact(this.store.project(task.projectId), id, await this.taskWorkspaces(task), digest,
       preview => this.store.record(id, 'compaction-intent', preview),
       result => this.store.record(id, 'compaction', { digest, ...result }), this.taskRunIds(id)));
   }
-  /** Reclaim generated resources, then clean checkouts; never use forceful cleanup or delete result branches. */
-  async compactCompletedTask(id: string): Promise<void> {
-    if (!this.config.compactCompletedTasks || this.store.task(id).state !== 'completed') return;
+  /** Reclaim terminal task resources after drain, preserving branches and unfinished work. */
+  async cleanupTerminalTask(id: string): Promise<void> {
+    const state = this.store.task(id).state;
+    if (!terminalStates.includes(state) || (!this.config.cleanupTerminalTasks && !(this.config.compactCompletedTasks && state === 'completed'))) return;
     try {
       await this.maintenance(id, async task => {
         const compactor = this.compactor ??= new WorktreeCompactor(this.dataDir);
-        const project = this.store.project(task.projectId); const workspaces = this.taskWorkspaces(task);
+        const project = this.store.project(task.projectId); const workspaces = await this.taskWorkspaces(task);
         const runIds = this.taskRunIds(id);
         const preview = await compactor.preview(project, id, workspaces, runIds);
         if (preview.candidates.length) await compactor.compact(project, id, workspaces, preview.digest,
           intent => this.store.record(id, 'compaction-intent', { ...intent, automatic: true }),
           result => this.store.record(id, 'compaction', { digest: preview.digest, automatic: true, ...result }), runIds);
-        if (task.workspace && task.outcome?.commit) await new WorkspaceManager(this.dataDir).removeCleanCompleted(project, id, workspaces,
+        if (this.config.cleanupTerminalTasks) {
+          await cleanupTerminalWorktrees(this.dataDir, project, id, workspaces,
+            workspace => this.store.record(id, 'worktree-cleanup-intent', { automatic: true, ...workspace }),
+            workspace => this.store.record(id, 'worktree-cleanup', { automatic: true, ...workspace }));
+          if (this.store.evidence(id).filter(e => ['terminal-cleanup', 'compaction-deferred'].includes(e.kind)).at(-1)?.kind !== 'terminal-cleanup') this.store.record(id, 'terminal-cleanup', { automatic: true, status: 'completed', workspaces: workspaces.map(w => w.path) });
+        } else if (task.workspace && task.outcome?.commit) await new WorkspaceManager(this.dataDir).removeCleanCompleted(project, id, workspaces,
           { branch: task.workspace.branch, commit: task.outcome.commit },
           workspace => this.store.record(id, 'worktree-cleanup-intent', { automatic: true, ...workspace }),
           workspace => this.store.record(id, 'worktree-cleanup', { automatic: true, ...workspace }));
@@ -153,8 +172,8 @@ export class TaskService {
       platform: this.platform,
       defaults: { devagentsRules: this.config.devagentsRules, engine: this.config.defaultEngine, provider: this.config.defaultProvider, model: this.config.defaultModel ?? null },
       capabilities: [...builtinCapabilities].sort(),
-      engines: ['codex', 'claude-code'].map(id => ({ id, executable: executable(id), reason: executable(id) ? null : 'not available until M4 (no adapter in this build)' })),
-      providers: this.config.providers.map(p => ({ id: p.id, kind: p.kind, auth: p.auth, executable: providerExecutable(p), reason: providerExecutable(p) ? null : 'configuration only; execution needs the official OpenAI provider' })),
+      engines: [...new Set(['codex', 'claude-code', ...this.executableEngines])].map(id => ({ id, executable: executable(id), reason: executable(id) ? null : 'no adapter registered in this build' })),
+      providers: this.config.providers.map(p => ({ id: p.id, kind: p.kind, auth: p.auth, engines: [...this.executableEngines].filter(id => providerExecutable(p, id)), executable: providerExecutable(p), reason: providerExecutable(p) ? null : 'no compatible provider adapter' })),
       limits: { members: 12, instructions: 64000, instructionBytes: TEAM_INSTRUCTION_BYTES, capabilities: 20 },
     };
   }
@@ -185,7 +204,7 @@ export class TaskService {
     if (team.archived) throw new AppError('team_archived', explicitTeamId ? `Team "${team.name}" is archived; restore it or choose another team` : `The default team "${team.name}" of project ${projectId} is archived; choose a team explicitly or change the project default`, 409);
     const readiness = teamReadiness(team.members, this.support);
     if (!readiness.ready) throw new AppError('team_not_ready', `Team "${team.name}" is a draft and cannot receive work: ${readiness.diagnostics.filter(d => d.level === 'error').map(d => d.message).join('; ')}`, 409);
-    const members = team.members.map(m => ({ ...m, engine: resolveEngine(m, this.config), provider: resolveProviderId(m, this.config), model: m.model === 'default' && this.config.defaultModel ? this.config.defaultModel : m.model }));
+    const members = team.members.map(m => ({ ...m, engine: resolveEngine(m, this.config), provider: resolveProviderId(m, this.config), model: m.model === 'default' && resolveEngine(m, this.config) === this.config.defaultEngine && this.config.defaultModel ? this.config.defaultModel : m.model }));
     const used = new Set(members.map(m => m.provider));
     const providers = this.config.providers.filter(p => used.has(p.id)).map(p => ({ id: p.id, kind: p.kind, auth: p.auth, ...(p.apiKeyEnv ? { apiKeyEnv: p.apiKeyEnv } : {}), ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}) }));
     return { id: team.id, revision: team.revision, name: team.name, snapshotAt: new Date().toISOString(), members, providers, ...(this.config.defaultModel ? { defaultModel: this.config.defaultModel } : {}), modelPinned: members.filter(m => m.enabled).every(m => m.model !== 'default') };

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { Command, Id, ScopedPath } from '../../src/domain/schemas.js';
+import { Command, Id, ScopedPath, Plan } from '../../src/domain/schemas.js';
 import { outputJsonSchema, modelSchemas, PlanningOutput, ReviewOutput } from '../../src/orchestration/outputs.js';
 
 test('model schema omits the incompatible path regex without weakening local path validation', () => {
@@ -60,6 +60,9 @@ test('every registered model schema lists all properties as required, as strict 
   for (const [name, schema] of Object.entries(inventory)) assertStrict(schema, name);
   const planning = outputJsonSchema(PlanningOutput) as z.core.JSONSchema.ObjectSchema;
   assert.ok((planning.required as string[]).includes('manualChecks'));
+  assert.ok((planning.required as string[]).includes('verification'));
+  assert.deepEqual(Plan.shape.verification.parse(undefined), [], 'older plans remain readable without verification prose');
+  assert.throws(() => Plan.shape.verification.parse(['']));
   assert.ok((inventory.setup!.required as string[]).includes('limitations'), 'setup reports must also use strict structured output');
   // The walker itself catches an optional property hidden behind a definition.
   assert.throws(() => assertStrict({ type: 'object', properties: { a: { $ref: '#/$defs/inner' } }, required: ['a'], additionalProperties: false, $defs: { inner: { type: 'object', properties: { x: { type: 'string' } }, required: [], additionalProperties: false } } }), /must be required/);

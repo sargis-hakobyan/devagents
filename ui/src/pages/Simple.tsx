@@ -18,7 +18,7 @@ function DefaultTeam({ project, teams, onChanged }: { project: Project; teams: T
   return <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
     <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
       <label class="sr-only" for={id}>Default team for {project.id}</label>
-      <select id={id} value={project.defaultTeamId ?? ''} disabled={busy || !teams} onChange={e => { const v = (e.target as HTMLSelectElement).value; void choose(v || null); }} style={{ minHeight: '34px', borderRadius: '8px', border: '1px solid var(--btn-border)', background: '#fff', font: 'inherit', padding: '0 10px', maxWidth: '100%' }}>
+      <select id={id} value={project.defaultTeamId ?? ''} disabled={busy || !teams} onChange={e => { const v = (e.target as HTMLSelectElement).value; void choose(v || null); }} style={{ minHeight: '34px', borderRadius: '8px', border: '1px solid var(--btn-border)', backgroundColor: '#fff', font: 'inherit', paddingBlock: '0', paddingLeft: '10px', maxWidth: '100%' }}>
         <option value="">None · legacy agent configuration</option>
         {(teams ?? []).filter(t => !t.archived || t.id === project.defaultTeamId).map(t => <option key={t.id} value={t.id} disabled={t.archived}>{t.name} · revision {t.revision}{t.archived ? ' · archived' : t.readiness.ready ? '' : ' · draft'}</option>)}
       </select>
@@ -37,9 +37,9 @@ export function ProjectsPage() {
   return <>
     <div class="page-head"><div><div class="h">Projects</div><h1>Registered repositories</h1><p>Existing Git checkouts registered by absolute path. Work happens in managed worktrees; the original checkout is never modified.</p></div><a class="btn primary" href="/ui/projects/new">Register repository</a></div>
     {projects.error && !projects.data && <ErrorNote message={projects.error} />}
-    {!projects.data ? <Skeleton rows={3} label="Loading projects" /> : projects.data.length === 0 ? <Card><Empty title="No projects yet"><span>Register an existing Git checkout by its absolute path. DevAgents never clones or imports.</span><Code>devagents projects add my-project /absolute/path</Code></Empty></Card> : <div class="items" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))' }}>{projects.data.map(p => <article key={p.id} class="card item" style={{ padding: '18px 20px' }}>
+    {!projects.data ? <Skeleton rows={3} label="Loading projects" /> : projects.data.length === 0 ? <Card><Empty title="No projects yet"><span>Add an existing Git checkout from your computer. DevAgents never clones or imports.</span><a class="btn" href="/ui/projects/new">Add your repository</a></Empty></Card> : <div class="items" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))' }}>{projects.data.map(p => <article key={p.id} class="card item" style={{ padding: '18px 20px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}><b style={{ fontSize: '17px' }}>{p.id}</b><Chip tone="ok">✓ Registered Git root</Chip></div>
-      <div class="mono wrap-anywhere">{p.path}</div>
+      <div><span class="hint">{docker ? 'Repository path inside Docker' : 'Repository folder'}</span><div class="mono wrap-anywhere">{p.path}</div>{docker && <span class="hint">This is the shared folder’s internal address, not a folder you need to create on your computer.</span>}</div>
       <dl class="kv" style={{ gridTemplateColumns: '150px minmax(0, 1fr)' }}>
         <dt>Registered</dt><dd>{formatTime(p.registeredAt)} · base <span class="mono">{p.baseSha.slice(0, 7)}</span></dd>
         <dt>Default mode</dt><dd>{p.defaultMode ?? <span class="muted">None · each task asks once</span>}</dd>
@@ -50,7 +50,7 @@ export function ProjectsPage() {
     </article>)}</div>}
     <Card title="How registration works"><div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}><b>Native</b><span class="muted" style={{ fontSize: '13.5px' }}>Register the absolute path of an existing checkout. The service validates that it is a Git root with at least one commit and that the path has not moved.</span><Code>devagents projects add website /absolute/path/to/website</Code></div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}><b>Docker{docker ? ' (this service)' : ''}</b><span class="muted" style={{ fontSize: '13.5px' }}>Mount the checkout explicitly in <span class="mono">compose.override.yaml</span>, then register its <b>container</b> path. Home directories and the Docker socket are never mounted; there is no filesystem browser.</span><Code>docker compose exec devagents node dist/cli/main.js projects add website /projects/website</Code></div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}><b>Docker{docker ? ' (this service)' : ''}</b><span class="muted" style={{ fontSize: '13.5px' }}>Enter your computer’s absolute folder path on the registration page, then run the prepared command. The launcher shares the folder and handles its internal Docker address.</span><Code>./devagents project add</Code></div>
     </div></Card>
   </>;
 }
@@ -67,7 +67,7 @@ export function SettingsPage() {
         <dt>Runtime</dt><dd>{c.installed ? `${c.version ?? 'Codex'} · installed · dedicated profile` : 'Codex CLI not found on PATH'}</dd>
         <dt>Credential store</dt><dd>{c.credentialStore === 'keyring' ? 'OS keychain (native).' : 'Encrypted vault in the data volume, unlocked by ./devagents start.'} Secrets are never shown here; a replacement is write-only.</dd>
         <dt>Model access</dt><dd>A saved sign-in does not establish quota or access to every model. The optional connection test sends one small request on your allowance; it never runs automatically.</dd>
-        <dt>Claude Code</dt><dd>{status.claude.installed ? `Installed ${status.claude.version ?? ''}` : 'Not installed'} · <Chip tone="neutral">Not enabled · {status.claude.note}</Chip></dd>
+        <dt>Claude</dt><dd>{status.claude.installed ? `Installed ${status.claude.version ?? ''}` : 'Not installed'} · <Chip tone="neutral">{status.claude.enabled ? status.claude.signedIn ? 'Connection saved' : 'Not connected' : 'Not enabled'} · {status.claude.note}</Chip></dd>
       </dl></div>
     </Card>
     <div class="items" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))' }}>

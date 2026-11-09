@@ -28,6 +28,85 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await rm(root, { recursive: true, force: true }); });
 
+test('registration validation explains disabled submit and offers an explicit ID correction', async ({ page }) => {
+  await page.route(/\/status$/, async route => {
+    const response = await route.fetch(); const status = await response.json();
+    await route.fulfill({ response, json: { ...status, service: { ...status.service, dataDir: '/data' } } });
+  });
+  await signIn(page); await page.goto(`${base}/ui/projects/new`);
+  const id = page.getByLabel('Project ID', { exact: true });
+  await page.getByRole('radio', { name: 'Already mounted in Docker (advanced)' }).check();
+  const path = page.getByLabel('Repository path inside Docker');
+  const submit = page.getByRole('button', { name: 'Register project', exact: true });
+  await expect(submit).toBeDisabled();
+  await expect(submit).toHaveAccessibleDescription('Enter a Project ID and an absolute path to enable registration.');
+  await id.focus(); await id.press('Tab');
+  await expect(id).toHaveAttribute('aria-invalid', 'true');
+  await expect(id).toHaveAccessibleDescription(/Enter a project ID/);
+  await id.fill('My Project'); await path.fill('~/Projects/my-project');
+  await expect(id).toHaveAccessibleDescription(/lowercase letters, digits and dashes/);
+  await expect(path).toHaveAccessibleDescription(/Expand ~/);
+  await expect(submit).toBeDisabled();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: join(shots, 'registration-validation-mobile.png'), fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await id.fill('A'.repeat(64));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await id.fill('My Project');
+  await page.getByRole('button', { name: 'Use “my-project”' }).click();
+  await expect(id).toHaveValue('my-project'); await expect(id).not.toHaveAttribute('aria-invalid', 'true');
+  await path.fill('projects/my-project'); await expect(path).toHaveAccessibleDescription(/must start with/);
+  await path.fill('/projects/../my-project'); await expect(path).toHaveAccessibleDescription(/without \.\. segments/);
+  await path.fill('/'); await expect(path).toHaveAccessibleDescription(/not the filesystem root/);
+  await path.fill('/Users/example/Projects/my-project');
+  await expect(path).toHaveAccessibleDescription(/Docker can only use it if it is mounted/);
+  await expect(page.getByRole('radio', { name: 'Folder on my computer (recommended)' })).toBeVisible();
+  // Host-looking paths are a contextual hint, not a claim that the mount was checked.
+  await expect(submit).toBeEnabled();
+  await path.fill('/projects/my project'); await expect(submit).toBeEnabled();
+  await expect(submit).toHaveAccessibleDescription(/service will check the folder/);
+  await path.fill(''); await expect(submit).toBeDisabled();
+  await expect(submit).toHaveAccessibleDescription('Enter an absolute path to enable registration.');
+});
+
+test('Docker registration accepts a host folder and prepares a literal launcher command without registering early', async ({ page }) => {
+  await page.route(/\/status$/, async route => {
+    const response = await route.fetch(); const status = await response.json();
+    await route.fulfill({ response, json: { ...status, service: { ...status.service, dataDir: '/data' } } });
+  });
+  let posts = 0;
+  page.on('request', r => { if (r.method() === 'POST' && r.url() === `${base}/projects`) posts++; });
+  await signIn(page); await page.goto(`${base}/ui/projects/new`);
+  await expect(page.getByRole('radio', { name: 'Folder on my computer (recommended)' })).toBeChecked();
+  await expect(page.getByLabel('Repository path inside Docker')).toHaveCount(0);
+  const path = page.getByLabel('Repository folder on your computer');
+  const prepare = page.getByRole('button', { name: 'Prepare setup command' });
+  await expect(prepare).toBeDisabled();
+  await page.getByLabel('Project ID', { exact: true }).fill('my-project');
+  await path.fill('/Users/example/folder,with-comma');
+  await expect(prepare).toBeDisabled();
+  await expect(path).toHaveAccessibleDescription(/does not support commas/);
+  const hostPath = "/Users/example/Project's folder/$(printf INJECTED)`printf INJECTED`";
+  await path.fill(hostPath); await prepare.click();
+  await expect(page.getByRole('status').filter({ hasText: 'project not registered yet' })).toBeVisible();
+  const command = (await page.locator('.command pre').textContent())!;
+  // Evaluate only the argument quoting using printf, never launch Docker or touch this synthetic folder.
+  const args = execFileSync('/bin/sh', ['-c', command.replace('./devagents', "printf '%s\\n'")], { encoding: 'utf8' }).trimEnd().split('\n');
+  expect(args).toEqual(['project', 'add', '--name', 'my-project', '--path', hostPath]);
+  expect(posts).toBe(0);
+  await page.getByText('How the folder will be connected', { exact: true }).click();
+  await expect(page.getByText('/projects/my-project', { exact: true })).toBeVisible();
+  await path.fill('/Users/example/Projects/my-project'); await prepare.click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: join(shots, 'registration-host-path-mobile.png'), fullPage: true });
+  await path.fill('/Users/example/other');
+  await expect(page.locator('.command pre')).toHaveCount(0);
+  await page.getByRole('radio', { name: 'Already mounted in Docker (advanced)' }).check();
+  await expect(page.getByLabel('Repository path inside Docker')).toHaveValue('');
+  await expect(page.getByRole('button', { name: 'Register project', exact: true })).toBeDisabled();
+});
+
 test('registration preserves input on backend refusal and registers an existing checkout', async ({ page }) => {
   await signIn(page); await page.goto(`${base}/ui/projects/new`);
   await page.getByLabel('Project ID', { exact: true }).fill('browser-project');
@@ -53,8 +132,8 @@ test('submission uses effective defaults, disables unavailable teams and shows t
   await expect(page.getByLabel('Team', { exact: true }).locator('option').first()).toContainText('Project default · Website team');
   await page.getByLabel('Project', { exact: true }).selectOption('fixture');
   await page.getByLabel('What should the team do?').fill('Browser submission with frozen team');
-  await page.getByRole('button', { name: 'Add criterion' }).click();
-  await page.getByLabel('Criterion 1', { exact: true }).fill('Keep existing tests');
+  await expect(page.getByRole('button', { name: 'Add criterion' })).toHaveCount(0);
+  await expect(page.getByText('Acceptance criteria', { exact: true })).toHaveCount(0);
   const teams = await (await call('/teams')).json(); const team = teams.find((t: { name: string }) => t.name === 'Website team');
   await page.getByLabel('Team', { exact: true }).selectOption(team.id);
   await page.screenshot({ path: join(shots, 'u3-submit.png'), fullPage: true });
@@ -67,7 +146,7 @@ test('submission uses effective defaults, disables unavailable teams and shows t
   await expect(page.getByText(`Website team · revision ${team.revision}`, { exact: true })).toBeVisible();
   const href = await page.getByRole('link', { name: 'Open task' }).getAttribute('href');
   const task = await (await call(href!.replace('/ui', ''))).json();
-  expect(task.state).toBe('awaiting_mode'); expect(task.acceptanceCriteria).toEqual(['Keep existing tests']);
+  expect(task.state).toBe('awaiting_mode'); expect(task.acceptanceCriteria).toEqual([]);
   await page.screenshot({ path: join(shots, 'u3-accepted.png'), fullPage: true });
 });
 
@@ -156,7 +235,27 @@ test('browser workflow registers, submits, rejects stale approval, approves and 
   const id = page.url().split('/').pop()!;
   const approve = page.getByRole('button', { name: /^Approve version/ }).first();
   await expect(approve).toBeEnabled();
+  await page.getByRole('tab', { name: 'Plan', exact: true }).click();
+  await expect(page.locator('.plan-lead')).toHaveText('Show the expected greeting to the user');
+  await expect(page.getByText('Use automated tests to check that the greeting shows the expected message.')).toBeVisible();
+  await expect(page.locator('.plan-facts').first()).toContainText('Developer');
+  const technical = page.locator('.plan-details');
+  await expect(technical).not.toHaveAttribute('open', '');
+  await expect(technical.getByText('Return hello from greeting.cjs')).not.toBeVisible();
   await page.screenshot({ path: join(shots, 'u3-approval.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  const planBounds = await page.locator('.stack.plan').boundingBox();
+  const actionBounds = await page.locator('.plan-decision-bar').boundingBox();
+  expect(actionBounds!.y).toBeGreaterThanOrEqual(planBounds!.y + planBounds!.height);
+  await page.screenshot({ path: join(shots, 'u3-approval-narrow.png'), fullPage: true });
+  await technical.locator('summary').click();
+  await expect(technical.getByText('Return hello from greeting.cjs')).toBeVisible();
+  await expect(technical.getByText('node --test greeting.test.cjs', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await technical.locator('summary').click();
+  await page.setViewportSize({ width: 1360, height: 900 });
+  await page.getByRole('tab', { name: /^Work/ }).click();
   // A second writer changes the durable version after the page rendered, before POST arrives.
   await page.route(`${base}/tasks/${id}/approve`, async route => {
     const store = new Store(join(fixtureDir, 'devagents.db'), []);
@@ -201,7 +300,7 @@ test('mode choice has no preselection, rejection cancels, and resubmission prefi
   await expect(page.getByRole('button', { name: /Clean up worktrees/ })).toBeDisabled();
   await page.getByRole('link', { name: 'Submit a new task from this request' }).click();
   await expect(page.getByLabel('What should the team do?')).toHaveValue('Choose then reject');
-  await expect(page.getByLabel('Criterion 1', { exact: true })).toHaveValue('Keep history');
+  await expect(page.getByLabel('Criterion 1', { exact: true })).toHaveCount(0);
   await expect(page.getByLabel('Project', { exact: true })).toHaveValue('');
   expect(await page.evaluate(() => sessionStorage.getItem('devagents.submission.v1'))).toBeNull();
 });
@@ -369,4 +468,23 @@ test('settings and task details show the default-off policy and its frozen task 
   await expect(page.getByText('Extra DevAgents rules: off · engine sandbox · frozen at submission', { exact: true })).toBeVisible();
   await page.screenshot({ path: join(shots, 'execution-policy-task.png'), fullPage: true });
   await call(`/tasks/${task.id}/cancel`, 'POST', {});
+});
+
+
+test('older plans remain readable without a verification summary', async ({ page }) => {
+  await signIn(page);
+  const tasks = (await (await call('/tasks?state=cancelled')).json()).tasks;
+  const task = await (await call(`/tasks/${tasks[0].id}`)).json();
+  const summary = task.plan.summary;
+  await page.route(`${base}/tasks/${task.id}`, async route => {
+    const response = await route.fetch(); const body = await response.json();
+    delete body.plan.verification;
+    await route.fulfill({ response, json: body });
+  });
+  await page.goto(`${base}/ui/tasks/${task.id}`);
+  await page.getByRole('tab', { name: 'Plan', exact: true }).click();
+  await expect(page.locator('.plan-lead')).toHaveText(summary);
+  await expect(page.getByText(/This plan has no plain-language verification summary/)).toBeVisible();
+  await page.locator('.plan-details > summary').click();
+  await expect(page.locator('.plan-items')).toBeVisible();
 });

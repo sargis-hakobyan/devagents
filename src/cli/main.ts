@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { SetupAuth, codexSetupDriver, type AuthJob } from '../setup/auth.js';
+import { SetupAuth, codexSetupDriver, claudeSetupDriver, assertSignInIdle, type AuthJob } from '../setup/auth.js';
 import { readHiddenKey } from './secret-prompt.js';
 import { Command, Option } from 'commander';
 import { randomUUID } from 'node:crypto';
@@ -20,9 +20,12 @@ import { fileURLToPath } from 'node:url';
 import { engineHealth } from '../engines/health.js';
 import { environmentSecrets, log, redactValues } from '../telemetry/redact.js';
 import { AppError } from '../domain/errors.js';
+import { EngineRegistry } from '../engines/registry.js';
+import { ClaudeAdapter } from '../engines/claude/adapter.js';
 import { CodexAdapter } from '../engines/codex/adapter.js';
 import { CodexValidator } from '../engines/codex/validator.js';
 import { TaskRunner } from '../orchestration/runner.js';
+import { DiskReserve } from '../workspace/disk-reserve.js';
 import { lockService } from '../persistence/service-lock.js';
 import { codexAuthStatus } from '../engines/codex/setup.js';
 import { testCodexConnection } from '../engines/codex/connection-test.js';
@@ -46,11 +49,14 @@ const cli = new Command().name('devagents').description('Local-first configurabl
 cli.command('serve').description('Start the local API').action(async () => {
   const dataDir = dataDirectory(); const config = await loadConfig();
   const unlock = lockService(dataDir);
+  // Recover database writes even when a prior process stopped on a full filesystem.
+  await new DiskReserve(dataDir).release();
   const configuredSecrets = config.providers.flatMap(p => p.apiKeyEnv && process.env[p.apiKeyEnv] ? [process.env[p.apiKeyEnv]!] : []);
   const store = new Store(join(dataDir, 'devagents.db'), [...environmentSecrets(), ...configuredSecrets]);
-  const service = new TaskService(store, config, dataDir);
   const sandbox = { scanLimit: config.workspaceScanLimit };
-  const runner = new TaskRunner(service, new CodexAdapter(dataDir, 'codex', sandbox), new CodexValidator(dataDir, 'codex', sandbox));
+  const engines = new EngineRegistry([new CodexAdapter(dataDir, 'codex', sandbox), new ClaudeAdapter(dataDir, sandbox)]);
+  const service = new TaskService(store, config, dataDir, process.platform, engines.ids());
+  const runner = new TaskRunner(service, engines, new CodexValidator(dataDir, 'codex', sandbox));
   service.attachRunner(runner);
   // Docker explicitly binds to all container interfaces; Compose exposes only host loopback.
   const host = process.env.DEVAGENTS_HOST ?? '127.0.0.1';
@@ -62,10 +68,11 @@ cli.command('serve').description('Start the local API').action(async () => {
   const assertSetupIdle = () => {
     if (runner.busy || store.summaries({ states: ['planning', 'ready', 'running', 'validating', 'reviewing', 'repairing', 'committing'], limit: 1 }).tasks.length) throw new AppError('work_active', 'Finish or cancel active work before changing sign-in.', 409);
   };
-  const setupAuth = new SetupAuth(codexSetupDriver(dataDir), assertSetupIdle);
+  const setupAuth = new SetupAuth(codexSetupDriver(dataDir), () => assertSignInIdle(store, runner));
+  const claudeAuth = new SetupAuth(claudeSetupDriver(dataDir), () => assertSignInIdle(store, runner));
   const server = createApi(service, await accessToken(dataDir), {
-    sessions: new BrowserSessions(), uiRoot, publicPort, setupAuth, assertSetupIdle,
-    status: statusReporter({ dataDir, config, version: '0.1.0', host, port: () => publicPort, executionEnabled: true, revision: () => setupAuth.revision }),
+    sessions: new BrowserSessions(), uiRoot, publicPort, setupAuth, claudeAuth, assertSetupIdle,
+    status: statusReporter({ dataDir, config, version: '0.1.0', host, port: () => publicPort, executionEnabled: true, revision: () => setupAuth.revision + claudeAuth.revision }),
   });
   await service.agents();
   await service.initializeStarterTeam();
@@ -73,13 +80,14 @@ cli.command('serve').description('Start the local API').action(async () => {
   // Only the process which owns the listening socket may reconcile this service's tasks.
   const recovered = store.recover();
   await runner.recover();
+  await service.diskReserve.replenish();
   log('service_started', { host, port: port(), publicPort, recovered, projects: store.projects().length, executionEnabled: true, ui: uiRoot ? `http://127.0.0.1:${publicPort}/ui/` : 'not built' });
   log('setup', { message: 'Register an existing checkout and authenticate Codex. Use tasks submit, show and evidence to follow work. Open the browser UI with a one-time link from: devagents ui' });
   let closing = false;
   const shutdown = () => {
     if (closing) return; closing = true;
-    void setupAuth.close(); void runner.stop();
-    server.close(() => { void Promise.all([runner.stop(), setupAuth.close()]).then(() => { store.close(); unlock(); process.exitCode = 0; }); });
+    void claudeAuth.close(); void setupAuth.close(); void runner.stop();
+    server.close(() => { void Promise.all([runner.stop(), setupAuth.close(), claudeAuth.close()]).then(() => { store.close(); unlock(); process.exitCode = 0; }); });
     server.closeIdleConnections();
   };
   process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
@@ -96,8 +104,9 @@ cli.command('ui').description('Create a one-time sign-in link for the browser UI
 });
 cli.command('setup-status').action(async () => {
   const status = await request('/setup/auth') as { connection: { saved: boolean }; locked?: boolean };
+  const claude = await request('/setup/claude-auth') as { connection: { saved: boolean }; locked?: boolean };
   const projects = await request('/projects') as unknown[];
-  console.log(status.connection.saved && !status.locked && projects.length ? 'ready' : 'needed');
+  console.log(((status.connection.saved && !status.locked) || (claude.connection.saved && !claude.locked)) && projects.length ? 'ready' : 'needed');
 });
 cli.command('mount-done').action(async () => { await request('/setup/maintenance/release', 'POST', {}); });
 cli.command('mount-ready').action(async () => { await request('/setup/maintenance', 'POST', {}); });
@@ -167,7 +176,7 @@ const auth = cli.command('auth');
 auth.command('vault-exists').description('Report whether encrypted credentials exist').action(async () => {
   const vault = await configuredVault(dataDirectory());
   if (!vault) throw new AppError('vault_unconfigured', 'Use the Compose launcher for encrypted container storage');
-  console.log(await vault.exists() ? 'yes' : 'no');
+  console.log(await vault.exists() || await (await configuredVault(dataDirectory(), 'claude'))!.exists() ? 'yes' : 'no');
 });
 auth.command('unlock').description('Unlock the memory-backed runtime using a key from stdin').action(async () => {
   const vault = await configuredVault(dataDirectory());
@@ -178,6 +187,7 @@ auth.command('unlock').description('Unlock the memory-backed runtime using a key
     if (input.length > 128) throw new AppError('invalid_master_key', 'Invalid OS credential-store input');
   }
   await vault.unlock(input.trim());
+  await (await configuredVault(dataDirectory(), 'claude'))!.unlock(input.trim());
   console.log('Encrypted credential vault unlocked.');
 });
 auth.command('setup').description('Choose ChatGPT, an API key, or a saved login; optionally test model access')
@@ -211,5 +221,22 @@ auth.command('codex').description('Sign in to DevAgents’ dedicated Codex profi
   await sharedLogin('api-key', key);
   console.log('API key saved securely. Model access has not been checked.');
 });
+auth.command('claude').description('Save a Claude API key or personal subscription token in the running service')
+  .addOption(new Option('--method <method>', 'Credential type').choices(['api-key', 'subscription']).default('api-key'))
+  .action(async (opts: { method: 'api-key' | 'subscription' }) => {
+    if (opts.method === 'subscription') console.log('Generate your personal token with the official Claude CLI: claude setup-token. Do not share it.');
+    const credential = await readHiddenKey();
+    const id = randomUUID();
+    await request('/setup/claude-auth', 'POST', { attemptId: id, method: opts.method, apiKey: credential });
+    for (let n = 0; n < 30; n++) {
+      const status = await request('/setup/claude-auth') as { job?: AuthJob };
+      if (status.job?.attemptId === id && status.job.state !== 'running') {
+        if (status.job.state !== 'completed') throw new AppError('login_failed', status.job.message);
+        console.log(status.job.message); return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    throw new AppError('login_pending', 'Check the Claude connection in Settings');
+  });
 try { await cli.parseAsync(); }
 catch (error) { log('error', { message: error instanceof Error ? error.message : String(error) }); process.exitCode = 1; }

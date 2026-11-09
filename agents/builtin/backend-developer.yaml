@@ -1,7 +1,7 @@
 schemaVersion: 1
 id: backend-developer
 name: Backend Developer
-description: Implements APIs, persistence, tooling, infrastructure and cross-cutting integration
+description: Implements APIs, persistence, tooling and infrastructure; handles integration when explicitly assigned
 enabled: true
 engine: default
 provider: default

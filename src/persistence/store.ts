@@ -17,7 +17,8 @@ export class Store {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    if (version > 3) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
+    // Version 4 added optional QA settings. Preserve that table when the QA feature is stashed.
+    if (version > 4) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
     if (version === 0) this.db.exec(`
       BEGIN IMMEDIATE;
       CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, data TEXT NOT NULL);
@@ -301,8 +302,10 @@ export class Store {
         'state', json_extract(data, '$.data.state'), 'executable', json_extract(data, '$.data.executable'),
         'args', json_extract(data, '$.data.args'), 'exitCode', json_extract(data, '$.data.exitCode'),
         'truncated', json_extract(data, '$.data.truncated'),
+        'validationId', json_extract(data, '$.data.validationId'), 'timeoutMs', json_extract(data, '$.data.timeoutMs'),
+        'timedOut', json_extract(data, '$.data.timedOut'),
         'commit', json_extract(data, '$.data.commit')) AS facts
-      FROM evidence WHERE task_id=? AND kind IN ('run-started','run-completed','run-failed','validation','qa-result','commit-created')
+      FROM evidence WHERE task_id=? AND kind IN ('run-started','run-completed','run-failed','validation-started','validation-failed','validation','qa-result','commit-created')
       ORDER BY sequence`).all(id).map(r => ({ sequence: Number(r.sequence), kind: String(r.kind), at: String(r.at), data: JSON.parse(String(r.facts)) }));
   }
   /** Select only usage facts; large model output and command logs never enter the rollup. */
@@ -362,8 +365,14 @@ export class Store {
   }
   recover(): string[] {
     // Never replay a worker or external effect after restart. Approval waits survive intact.
-    const interrupted = this.tasks().filter(t => ['running', 'validating', 'reviewing', 'committing', 'repairing'].includes(t.state) || (t.state === 'planning' && (t.workspace || this.evidence(t.id).some(e => e.kind === 'worktree-intent'))));
-    for (const task of interrupted) this.transition(task.id, task.version, 'failed', 'recovery', 'Process interrupted; inspect preserved worktrees and evidence before submitting a new task');
+    const interrupted = this.tasks().filter(t => ['running', 'validating', 'reviewing', 'committing', 'repairing'].includes(t.state)
+      || (t.state === 'planning' && (t.workspace || this.evidence(t.id).some(e => e.kind === 'worktree-intent')))
+      || (t.state === 'ready' && this.evidence(t.id).some(e => ['environment', 'run-started', 'run-failed'].includes(e.kind)
+        && (e.kind === 'environment' || (e.data as { phase?: string }).phase !== 'planning'))));
+    for (const task of interrupted) {
+      const reason = 'Process interrupted; inspect task evidence and any recovery snapshot before submitting a new task';
+      this.transition(task.id, task.version, 'failed', 'recovery', reason, { outcome: { ...task.outcome, error: reason, repairCycles: task.outcome?.repairCycles ?? 0 } });
+    }
     return interrupted.map(t => t.id);
   }
 }

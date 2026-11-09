@@ -44,7 +44,12 @@ export const ReviewOutput = z.strictObject({
 });
 
 /** The planner's response: items must name an agent and owned paths; integration is explicit. */
-export const PlanningOutput = Plan.extend({ items: z.array(WorkItem.extend({ assignedAgent: z.string(), ownedPaths: z.array(ScopedPath).min(1) })).min(1).max(30), integration: Integration.nullable() });
+export const PlanningOutput = Plan.extend({
+  summary: Plan.shape.summary.describe('For the person approving the plan: briefly explain the user-visible change and expected outcome in everyday language. No file paths, code identifiers, CSS selectors, commands, or implementation recipes.'),
+  verification: Plan.shape.verification.describe('One to three concise descriptions of how the proposed behavior will be checked, in everyday language. Match the actual item/integration validation or inspection; do not invent checks or claim they passed. Put unavailable optional checks in manualChecks.'),
+  risks: Plan.shape.risks.describe('User-relevant risks, tradeoffs or decisions in plain language. Empty when none are identified.'),
+  manualChecks: Plan.shape.manualChecks.describe('Optional checks the user must perform, described in everyday language with the missing prerequisite. No code or commands.'),
+  items: z.array(WorkItem.extend({ assignedAgent: z.string(), ownedPaths: z.array(ScopedPath).min(1) })).min(1).max(30), integration: Integration.nullable() });
 /** The literal schema of the opt-in connection check; registered here so the strict-schema test covers it. */
 export const connectionCheckSchema: Record<string, unknown> = { type: 'object', properties: { connected: { type: 'boolean', enum: [true] } }, required: ['connected'], additionalProperties: false };
 /**

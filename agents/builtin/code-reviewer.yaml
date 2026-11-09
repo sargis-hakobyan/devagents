@@ -1,7 +1,7 @@
 schemaVersion: 1
 id: code-reviewer
 name: Code Reviewer
-description: Independently reviews diffs and test evidence
+description: Independently reviews correctness, security, architecture and test quality
 enabled: true
 engine: default
 provider: default

@@ -12,7 +12,7 @@ export const Provider = z.strictObject({
   baseUrl: z.url().optional(),
 }).superRefine((p, ctx) => {
   if (p.auth === 'api-key' && !p.apiKeyEnv) ctx.addIssue({ code: 'custom', message: 'api-key requires apiKeyEnv' });
-  if (p.auth === 'login' && p.kind !== 'openai') ctx.addIssue({ code: 'custom', message: 'Only Codex/OpenAI login is currently supported; use an API key for Anthropic' });
+  if (p.auth === 'login' && !['openai', 'anthropic'].includes(p.kind)) ctx.addIssue({ code: 'custom', message: 'Login is supported only for OpenAI and Anthropic' });
   if (['ollama', 'openai-compatible'].includes(p.kind) && !p.baseUrl) ctx.addIssue({ code: 'custom', message: 'Local/custom providers require baseUrl' });
   if (p.auth === 'none' && ['openai', 'anthropic'].includes(p.kind)) ctx.addIssue({ code: 'custom', message: 'Cloud providers require authentication' });
   if (p.baseUrl && (new URL(p.baseUrl).username || new URL(p.baseUrl).password || !['http:', 'https:'].includes(new URL(p.baseUrl).protocol))) ctx.addIssue({ code: 'custom', message: 'baseUrl must be HTTP(S) without embedded credentials' });
@@ -30,13 +30,14 @@ export const Config = z.strictObject({
   qaEnabled: z.boolean().default(false),
   defaultEngine: Id.default('codex'),
   defaultProvider: Id.default('openai'),
-  providers: z.array(Provider).default([{ id: 'openai', kind: 'openai', auth: 'login' }]),
+  providers: z.array(Provider).default([{ id: 'openai', kind: 'openai', auth: 'login' }, { id: 'anthropic', kind: 'anthropic', auth: 'login' }]),
   concurrency: z.number().int().min(1).max(8).default(2),
   maxRepairCycles: z.number().int().min(0).max(3).default(3),
   executionTimeoutMs: z.number().int().min(1000).max(3600000).default(1800000),
   validationTimeoutMs: z.number().int().min(1000).max(600000).default(600000),
   minFreeDiskBytes: z.number().int().min(256 * 1024 ** 2).max(Number.MAX_SAFE_INTEGER).default(5 * 1024 ** 3),
   compactCompletedTasks: z.boolean().default(true),
+  cleanupTerminalTasks: z.boolean().default(true),
   workspaceScanLimit: z.number().int().min(1000).max(2000000).default(200000),
   /** An explicit model ID pins team snapshots; without it `model: default` means the runtime chooses at execution. */
   defaultModel: z.string().min(1).max(200).optional(),
@@ -76,9 +77,9 @@ export const WorkItem = z.strictObject({
 export const Integration = z.strictObject({ assignedAgent: Id, validation: z.array(Command).min(1) });
 /** Checks the planner knows need tools the sandbox lacks; shown to the user, never enforced. Defaulted, not optional: strict model output schemas must list every property as required. */
 export const ManualChecks = z.array(z.string().min(1).max(1000)).max(10);
-export const Plan = z.strictObject({ summary: z.string().min(1), risks: z.array(z.string()), items: z.array(WorkItem).min(1).max(30), integration: Integration.nullable().optional(), manualChecks: ManualChecks.default([]) });
-/** Plans stored before manualChecks existed lack the field, so it stays optional on the stored type. */
-export type TaskPlan = Omit<z.infer<typeof Plan>, 'manualChecks'> & { manualChecks?: string[] };
+export const Plan = z.strictObject({ summary: z.string().min(1), risks: z.array(z.string()), items: z.array(WorkItem).min(1).max(30), integration: Integration.nullable().optional(), manualChecks: ManualChecks.default([]), verification: z.array(z.string().min(1).max(1000)).max(10).default([]) });
+/** Older persisted plans can lack the advisory manual checks and approval verification prose. */
+export type TaskPlan = Omit<z.infer<typeof Plan>, 'manualChecks' | 'verification'> & { manualChecks?: string[]; verification?: string[] };
 export const ProjectInput = z.strictObject({ id: Id, path: z.string().min(1), defaultMode: Mode.optional() });
 /** `version` guards default-team changes against lost updates; legacy rows read as version 0. */
 export type Project = z.infer<typeof ProjectInput> & { baseSha: string; registeredAt: string; defaultTeamId?: string; version?: number };

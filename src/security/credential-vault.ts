@@ -3,7 +3,6 @@ import { mkdir, readFile, open, rename, rm, statfs } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { AppError } from '../domain/errors.js';
 
-const aad = Buffer.from('devagents/codex-credentials/v1');
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT';
 async function optional(path: string): Promise<Buffer | undefined> {
   try { return await readFile(path); } catch (error) { if (missing(error)) return; throw error; }
@@ -23,9 +22,9 @@ async function atomic(path: string, bytes: Buffer): Promise<void> {
 const sealing = new Map<string, Promise<void>>();
 export class CredentialVault {
   readonly encrypted: string; readonly auth: string; readonly master: string;
-  constructor(readonly dataDir: string, readonly runtimeDir: string) {
-    this.encrypted = join(dataDir, 'credentials', 'codex.enc');
-    this.auth = join(runtimeDir, 'codex', 'auth.json');
+  constructor(readonly dataDir: string, readonly runtimeDir: string, readonly engine: 'codex' | 'claude' = 'codex') {
+    this.encrypted = join(dataDir, 'credentials', `${engine}.enc`);
+    this.auth = join(runtimeDir, engine, 'auth.json');
     this.master = join(runtimeDir, 'master.key');
   }
   async exists(): Promise<boolean> { return Boolean(await optional(this.encrypted)); }
@@ -36,7 +35,7 @@ export class CredentialVault {
       const nonce = Buffer.from(value.nonce, 'base64'); const tag = Buffer.from(value.tag, 'base64');
       if (nonce.length !== 12 || tag.length !== 16) throw new Error();
       const cipher = createDecipheriv('aes-256-gcm', key, nonce, { authTagLength: 16 });
-      cipher.setAAD(aad); cipher.setAuthTag(tag);
+      cipher.setAAD(Buffer.from(`devagents/${this.engine}-credentials/v1`)); cipher.setAuthTag(tag);
       const plain = Buffer.concat([cipher.update(Buffer.from(value.ciphertext, 'base64')), cipher.final()]);
       JSON.parse(plain.toString('utf8')); return plain;
     } catch { throw new AppError('vault_integrity', 'Credential vault could not be decrypted. Restore the matching OS keychain entry; saved credentials were not overwritten.'); }
@@ -45,7 +44,7 @@ export class CredentialVault {
     if (plain.length > 1024 * 1024) throw new AppError('credential_limit', 'Credential file exceeds its size limit');
     try { JSON.parse(plain.toString('utf8')); } catch { throw new AppError('invalid_credentials', 'Credential file is not valid JSON'); }
     const nonce = randomBytes(12); const cipher = createCipheriv('aes-256-gcm', key, nonce, { authTagLength: 16 });
-    cipher.setAAD(aad);
+    cipher.setAAD(Buffer.from(`devagents/${this.engine}-credentials/v1`));
     const ciphertext = Buffer.concat([cipher.update(plain), cipher.final()]);
     const envelope = Buffer.from(JSON.stringify({ version: 1, algorithm: 'aes-256-gcm', nonce: nonce.toString('base64'), tag: cipher.getAuthTag().toString('base64'), ciphertext: ciphertext.toString('base64') }));
     // Verify the envelope before replacing a previously usable vault.
@@ -59,7 +58,7 @@ export class CredentialVault {
     if (active && (active.length !== key.length || !timingSafeEqual(active, key))) throw new AppError('vault_locked', 'Runtime is already unlocked with a different key');
     const encrypted = await optional(this.encrypted);
     let plain = encrypted ? this.decrypt(encrypted, key) : undefined;
-    const legacyPath = resolve(this.dataDir, 'engines', 'codex', 'auth.json');
+    const legacyPath = resolve(this.dataDir, 'engines', this.engine, 'auth.json');
     const legacy = await optional(legacyPath);
     if (legacy && plain && !legacy.equals(plain)) throw new AppError('credential_conflict', 'Both legacy and encrypted credentials exist with different contents; no credentials were changed');
     if (legacy && !plain) { await this.save(legacy, key); plain = legacy; }
@@ -110,9 +109,9 @@ export class CredentialVault {
 }
 export const credentialRuntime = () => process.env.DEVAGENTS_CREDENTIAL_RUNTIME;
 export const credentialStore = (): 'file' | 'keyring' => credentialRuntime() ? 'file' : 'keyring';
-export async function configuredVault(dataDir: string): Promise<CredentialVault | undefined> {
+export async function configuredVault(dataDir: string, engine: 'codex' | 'claude' = 'codex'): Promise<CredentialVault | undefined> {
   const runtime = credentialRuntime(); if (!runtime) return;
   // Never silently put decrypted credentials on a persistent filesystem.
   if (process.platform !== 'linux' || Number((await statfs(runtime)).type) !== 0x01021994) throw new AppError('memory_mount_required', 'Credential runtime must be a Linux tmpfs mount');
-  return new CredentialVault(dataDir, runtime);
+  return new CredentialVault(dataDir, runtime, engine);
 }

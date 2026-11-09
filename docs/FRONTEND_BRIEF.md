@@ -48,14 +48,14 @@ Archive teams rather than deleting historical references. Existing tasks remain 
 
 ## Task submission and execution
 
-Submit a request with project, team, acceptance criteria and autonomy mode. Respect an explicit task mode and existing project defaults. When no mode is resolved, show the existing blocking choice; do not silently default to autonomous execution. Display a resolved summary before submission.
+Submit a request with project, team and autonomy mode. Describe the expected outcome in the request; the browser form has no separate acceptance-criteria field. Respect an explicit task mode and existing project defaults. When no mode is resolved, show the existing blocking choice; do not silently default to autonomous execution. Display a resolved summary before submission.
 
 The task detail screen is the main working screen:
 
 - Header: request/title, project, team revision, state, elapsed time and the currently permitted action.
 - Summary: plain-language current activity and any reason the task is waiting.
 - Work: item cards with assigned agent, dependencies, stage, validation/review result and repair attempt. Offer a dependency graph as a secondary view; the list must remain sufficient and accessible.
-- Plan: deliverables, scope, risks, validation commands and acceptance criteria. Plan approval binds to the exact task version; a stale approval must refresh rather than approve changed work.
+- Plan: a plain-language proposed change, assigned member names, planned verification and risks. Implementation descriptions, scope, validation commands and acceptance criteria appear under collapsed Technical details. Plan approval binds to the exact task version; a stale approval must refresh rather than approve changed work.
 - Activity: chronological persisted events with timestamps and actor. Detailed evidence is expandable, bounded and paginated.
 - Result: summary, changed files, read-only diff, tests, review outcome, branch and commit. Completion means a local reviewed commit, not a merge or deployment.
 

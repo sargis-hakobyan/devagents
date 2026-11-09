@@ -1,24 +1,43 @@
+import { claudeCredential, saveClaudeCredential } from '../engines/claude/credentials.js';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { AppError } from '../domain/errors.js';
 import type { AuthStatus } from '../domain/auth.js';
+import type { Store } from '../persistence/store.js';
 import { codexAuthStatus, setupCodexAuth } from '../engines/codex/setup.js';
 import { loginWithChatGPT, type DeviceChallenge } from '../engines/codex/device-login.js';
 
-export const AuthInput = z.object({ attemptId: z.uuid(), method: z.enum(['chatgpt', 'api-key']), apiKey: z.string().min(1).max(4096).regex(/^\S+$/, 'Enter one API key without whitespace').optional() }).strict().superRefine((v, c) => {
-  if ((v.method === 'api-key') !== (v.apiKey !== undefined)) c.addIssue({ code: 'custom', message: 'An API key is required only for API-key sign-in' });
+export const AuthInput = z.object({ attemptId: z.uuid(), method: z.enum(['chatgpt', 'api-key', 'subscription']), apiKey: z.string().min(1).max(4096).regex(/^\S+$/, 'Enter one API key without whitespace').optional() }).strict().superRefine((v, c) => {
+  if ((v.method !== 'chatgpt') !== (v.apiKey !== undefined)) c.addIssue({ code: 'custom', message: 'A credential is required for API-key or subscription-token sign-in' });
 });
-export type AuthJob = { attemptId: string; method: 'chatgpt' | 'api-key'; state: 'running' | 'completed' | 'failed' | 'cancelled'; challenge?: DeviceChallenge; message: string };
+export type AuthJob = { attemptId: string; method: 'chatgpt' | 'api-key' | 'subscription'; state: 'running' | 'completed' | 'failed' | 'cancelled'; challenge?: DeviceChallenge; message: string };
 export interface SetupAuthDriver {
   status(): Promise<AuthStatus>;
-  login(method: 'chatgpt' | 'api-key', key: string | undefined, signal: AbortSignal, challenge: (value: DeviceChallenge) => void): Promise<void>;
+  login(method: 'chatgpt' | 'api-key' | 'subscription', key: string | undefined, signal: AbortSignal, challenge: (value: DeviceChallenge) => void): Promise<void>;
+}
+/** Persisted Ready tasks may be idle after recovery. The runner guards queued work. */
+export function assertSignInIdle(store: Pick<Store, 'summaries'>, runner: { readonly busy: boolean }): void {
+  if (runner.busy || store.summaries({ states: ['planning', 'running', 'validating', 'reviewing', 'repairing', 'committing'], limit: 1 }).tasks.length) {
+    throw new AppError('work_active', 'Finish or cancel running work before changing sign-in.', 409);
+  }
 }
 export function codexSetupDriver(dataDir: string): SetupAuthDriver {
   return {
     status: () => codexAuthStatus(dataDir),
     login: async (method, key, signal, challenge) => {
+      if (method === 'subscription') throw new AppError('invalid_method', 'Choose ChatGPT or an OpenAI API key');
       if (method === 'chatgpt') await loginWithChatGPT(dataDir, { signal, onChallenge: challenge });
       else await setupCodexAuth(dataDir, { replaceKey: true, readKey: async () => key!, signal });
+    },
+  };
+}
+export function claudeSetupDriver(dataDir: string): SetupAuthDriver {
+  return {
+    status: async () => { const credential = await claudeCredential(dataDir); return credential ? { saved: true, method: credential.method } : { saved: false }; },
+    login: async (method, key, signal) => {
+      if (method === 'chatgpt') throw new AppError('invalid_method', 'Choose a Claude API key or subscription token');
+      if (signal.aborted) throw new AppError('cancelled', 'Sign-in stopped');
+      await saveClaudeCredential(dataDir, method, key!);
     },
   };
 }
@@ -60,7 +79,7 @@ export class SetupAuth {
         current.job.state = 'completed'; current.job.message = 'Connection saved securely. Model access has not been tested.';
       } catch {
         current.job.state = current.abort.signal.aborted ? 'cancelled' : 'failed';
-        current.job.message = current.abort.signal.aborted ? 'Sign-in stopped. Check the saved connection before retrying.' : 'Sign-in could not finish. Check the runtime and unlocked credential store. For ChatGPT, enable device code sign-in in Security settings, then try again.';
+        current.job.message = current.abort.signal.aborted ? 'Sign-in stopped. Check the saved connection before retrying.' : 'Sign-in could not finish. Check the runtime and unlocked credential store. For ChatGPT, enable device code sign-in in Security settings. Claude browser setup requires the Docker credential vault.';
       } finally { this.revision++; clearTimeout(timer); parsed.apiKey = undefined; delete current.job.challenge; }
     })();
     return this.view();

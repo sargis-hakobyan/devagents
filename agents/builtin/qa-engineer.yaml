@@ -1,7 +1,7 @@
 schemaVersion: 1
 id: qa-engineer
 name: QA Engineer
-description: Designs tests and verifies acceptance criteria
+description: Designs verification scenarios and independently checks acceptance criteria and behavior
 enabled: true
 engine: default
 provider: default

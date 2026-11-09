@@ -20,6 +20,8 @@ The implemented read-only diff extends the boards with GitHub-style green/red li
 
 The implemented task **Usage** tab adds three compact totals (reported tokens, estimated API cost, API-equivalent estimate), expandable step/attempt tables, missing-data labels and an explicit USD/EUR selector. This extends the cost boards without implementing their project budgets or monthly rollups.
 
+Form action buttons fit their labels and align left, retaining their existing height. On narrow screens, Submit task stays below the form instead of floating over its fields; this supersedes the sticky submit treatment in the U3 boards.
+
 ## Chosen palette (Direction A)
 
 | Token | Value | Use |
@@ -54,3 +56,7 @@ The Work tab now separates the team overview, the actual chronological **Executi
 Agent runs alone receive numbered cards. Consecutive automated checks form a compact, initially collapsed disclosure with visible pass/fail counts; individual scopes and commands remain inside. Commit is a compact confirmation. No repeated DevAgents member cards appear for test commands.
 
 Member avatars use consistent rounded line symbols: a hierarchy for the lead, code brackets for developers, a checked document for review, and a flask for QA. The original circular backgrounds and status badges remain. A separate 12 px engine mark sits beside the avatar: a terminal mark for Codex and a terracotta starburst for Claude, with the engine name in a tooltip and accessible label. The team editor uses the same symbols in compact 32 px circular avatars, with tiny engine marks beside them. Desktop workflow columns place each icon pair above the member text to preserve readable line lengths. Folded decorative avatar stacks omit engine marks; expanded rows show them.
+
+The task submission form uses a single request field for the change and expected outcome. The separate acceptance-criteria editor shown in the U3 boards has been removed.
+
+The Plan tab leads with the proposed change, assigned member names, planned verification and user-relevant risks. Branches, commands, file ownership, item descriptions and technical acceptance criteria live under a collapsed **Technical details** disclosure. New plans generate the approval prose in their existing planning call. Older summaries remain unchanged, and plans without verification prose show an explicit fallback pointing to the technical checks. Approval buttons follow the plan in normal document flow so they do not cover its content. This supersedes the expanded implementation-first approval treatment in the U3 boards.

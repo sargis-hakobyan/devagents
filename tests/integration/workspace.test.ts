@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { access, readFile, writeFile, symlink, mkdir } from 'node:fs/promises';
+import { access, readFile, writeFile, symlink, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { WorkspaceManager, git, inspectProject } from '../../src/workspace/git.js';
@@ -143,5 +143,24 @@ test('concurrent item worktree creation in one repository is serialized and ever
     const registered = (await git(f.project, ['worktree', 'list', '--porcelain'], false)).split('\n').filter(l => l.startsWith('worktree ')).map(l => l.slice(9));
     for (const w of created) assert.ok(registered.includes(w.path), w.path);
     assert.deepEqual(order, ['a', 'b', 'c', 'd', 'e', 'f'], 'creation completes in request order because it is serialized per repository');
+  } finally { await f.cleanup(); }
+});
+
+
+test('large unignored dependency caches fail with a setup diagnosis before Git buffer overflow', async () => {
+  const f = await fixture(false);
+  try {
+    const workspace = await new WorkspaceManager(f.dataDir).create(f.store.project('fixture'), randomUUID(), 'Small greeting');
+    const agent = (await f.service.agents('fixture')).find(a => a.id === 'general-developer')!;
+    const cache = join(workspace.path, '.pnpm-store'); await mkdir(cache);
+    for (let batch = 0; batch < 90; batch++) await Promise.all(Array.from({ length: 100 }, (_, i) => writeFile(join(cache, String(batch * 100 + i).padStart(235, 'x')), '')));
+    await writeFile(join(workspace.path, 'README.md'), 'Hello');
+    await assert.rejects(git(workspace.path, ['ls-files', '--others', '--exclude-standard', '-z']), /output exceeded 2097152/);
+    await assert.rejects(changes(workspace, agent), /Untracked dependency files at \.pnpm-store/);
+    await access(cache); // Diagnostics must not delete source or cache files.
+    await rm(cache, { recursive: true });
+    assert.deepEqual((await changes(workspace, agent)).files, ['README.md']);
+    await mkdir(join(workspace.path, 'node_modules')); await writeFile(join(workspace.path, 'node_modules/package.json'), '{}');
+    await assert.rejects(changes(workspace, agent), /ignore installed node_modules/);
   } finally { await f.cleanup(); }
 });

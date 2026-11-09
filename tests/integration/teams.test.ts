@@ -179,3 +179,15 @@ test('template copies keep complete instructions and the roster total is bounded
     assert.equal(f.service.teams('all').length, 1);
   } finally { await f.cleanup(); }
 });
+
+
+test('opening a version-4 database preserves optional QA settings without downgrading it', async () => {
+  const f = await fixture();
+  try {
+    const raw = new DatabaseSync(join(f.dataDir, 'test.db'));
+    raw.exec("CREATE TABLE execution_settings (id INTEGER PRIMARY KEY, data TEXT NOT NULL); INSERT INTO execution_settings VALUES (1, 'preserved-settings'); PRAGMA user_version=4;");
+    const reopened = new Store(join(f.dataDir, 'test.db'));
+    try { assert.equal(reopened.project('fixture').id, 'fixture'); assert.equal(raw.prepare('PRAGMA user_version').get()!.user_version, 4); assert.ok(raw.prepare('SELECT data FROM execution_settings WHERE id=1').get()); }
+    finally { reopened.close(); raw.close(); }
+  } finally { await f.cleanup(); }
+});

@@ -56,7 +56,7 @@ export function TaskDetailPage({ id }: { id: string }) {
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}><StateChip task={task} /><span class="muted" style={{ fontSize: '13px' }}>{task.mode ?? 'mode not chosen'} · v{task.version} · started {formatTime(task.createdAt)} · {terminal ? 'took' : 'elapsed'} {elapsed(task.createdAt, finishedAt, now)}</span></div>
             <div class="muted" style={{ fontSize: '13px' }}>Extra DevAgents rules: {(task.devagentsRules ?? true) ? 'on' : 'off · engine sandbox'} · frozen at submission</div>
             <h1 style={{ margin: 0, fontSize: '22px', letterSpacing: '-0.02em', lineHeight: 1.3 }} class="wrap-anywhere">{task.request}</h1>
-            <div class="muted" style={{ fontSize: '13.5px' }}>Project <span class="mono">{task.projectId}</span> · Team: {task.team ? <><a href={`/ui/teams/${task.team.id}`}><b>{task.team.name}</b></a> revision {task.team.revision} · {task.team.members.filter(m => m.enabled).length} enabled members frozen at submission{task.team.modelPinned ? '' : ' · model: runtime default (not pinned)'}</> : <><b>Legacy agent configuration</b>{task.agents ? ` (${task.agents.length} agents snapshotted at worktree creation)` : ' (snapshotted when the worktree is created)'}</>}{task.workspace && <> · Branch <span class="mono">{task.workspace.branch}</span></>}</div>
+            <div class="muted" style={{ fontSize: '13.5px' }}>Project <span class="mono">{task.projectId}</span> · Team: {task.team ? <><a href={`/ui/teams/${task.team.id}`}><b>{task.team.name}</b></a> revision {task.team.revision} · {task.team.members.filter(m => m.enabled).length} enabled members frozen at submission{task.team.modelPinned ? '' : ' · model: runtime default (not pinned)'}</> : <><b>Legacy agent configuration</b>{task.agents ? ` (${task.agents.length} agents snapshotted at worktree creation)` : ' (snapshotted when the worktree is created)'}</>}{task.workspace && tab !== 'plan' && <> · Branch <span class="mono">{task.workspace.branch}</span></>}</div>
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {renderActions()}
@@ -71,7 +71,7 @@ export function TaskDetailPage({ id }: { id: string }) {
       {([['work', `Work · ${items.length}`], ['plan', 'Plan'], ['activity', `Activity · ${events.rows.length + evidence.rows.length}`], ['usage', 'Usage'], ['result', 'Result']] as [Tab, string][]).map(([t, label]) => <button key={t} type="button" role="tab" class="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{label}</button>)}
     </div>
     {tab === 'work' && board && <WorkTab task={task} board={board} now={now} onActivity={item => { setActivityItem(item); setTab('activity'); }} />}
-    {tab === 'plan' && <><PlanTab task={task} />{task.state === 'awaiting_plan_approval' && <div class="decision-bar">{renderActions()}</div>}</>}
+    {tab === 'plan' && <><PlanTab task={task} />{task.state === 'awaiting_plan_approval' && <div class="decision-bar plan-decision-bar">{renderActions()}</div>}</>}
     {tab === 'activity' && <ActivityTab task={task} events={events.rows} evidence={evidence.rows} filter={activityItem} onClear={() => setActivityItem(undefined)} />}
     {tab === 'usage' && <TaskUsage key={id} id={id} />}
     {tab === 'result' && <ResultTab task={task} evidence={evidence.rows} />}
@@ -83,14 +83,14 @@ function summarize(task: Task, items: ItemProgress[]): { title: string; detail: 
   const done = items.filter(i => i.state === 'completed').length;
   switch (task.state) {
     case 'awaiting_mode': return { title: 'Waiting for you: choose autonomous or plan-approval', tone: 'warn', detail: 'Nothing runs until a mode is chosen. The choice is asked exactly once for this task.' };
-    case 'awaiting_plan_approval': return { title: `Waiting for you: approve plan version ${task.version} or reject it`, tone: 'warn', detail: 'Nothing runs until you decide. The plan tab shows the deliverables, scope, risks and validation commands.' };
+    case 'awaiting_plan_approval': return { title: `Waiting for you: approve plan version ${task.version} or reject it`, tone: 'warn', detail: 'Nothing runs until you decide. The Plan tab explains the proposed change, how it will be checked and any risks.' };
     case 'planning': return { title: 'The Tech Lead is planning', tone: 'info', detail: 'It inspects the project in a read-only sandbox and proposes a DAG of work items.' };
     case 'ready': return { title: 'Queued', tone: 'info', detail: 'One top-level request runs at a time; this one starts when the scheduler is free.' };
     case 'running': case 'validating': case 'reviewing': case 'repairing': return { title: current ? `Now: ${itemVerb(current.state)} work item ${current.itemId}${current.agentId ? ` (${current.agentId})` : ''}` : `Now: ${task.state}`, tone: 'info', detail: items.length > 1 ? `${done} of ${items.length} items integrated. After every item is integrated, the combined result is validated and reviewed before one local commit. No merge, push or deployment happens.` : 'Implementation, real validation and an independent review precede one local commit on the task branch. No merge, push or deployment happens.' };
     case 'committing': return { title: 'Creating the reviewed local commit', tone: 'info', detail: 'This boundary cannot be cancelled; the outcome appears in Result.' };
     case 'completed': { const n = limitationCount(task.outcome); return { title: n ? `Completed with ${task.outcome?.limitationOverflow ? 'at least ' : ''}${n} check${n === 1 ? '' : 's'} not run in this environment` : 'Completed: one reviewed local commit on the task branch', tone: n ? 'warn' : 'info', detail: `Commit ${task.outcome?.commit?.slice(0, 7) ?? '—'} on ${task.workspace?.branch ?? 'the task branch'}. Nothing was merged or pushed; you integrate it yourself.${n ? ' The Result tab lists what you should verify yourself.' : ''}` }; }
     case 'failed': if (task.outcome?.error?.startsWith('QA could not verify required acceptance criteria.')) return { title: 'Implementation complete; verification stopped at QA', tone: 'warn', detail: 'The developer finished and project validation passed. QA could not verify some checks in its environment, so this earlier run stopped before review and commit. See Activity for the original evidence.' }; return { title: /Service shutdown interrupted/.test(task.outcome?.error ?? '') ? 'Interrupted by a service shutdown' : 'Stopped: the task failed', tone: 'bad', detail: task.outcome?.error ?? 'See Activity for the last recorded step.' };
-    case 'cancelled': return { title: 'Cancelled by you', tone: 'warn', detail: 'Workers were stopped and worktrees preserved. Resubmitting creates a new task.' };
+    case 'cancelled': return { title: 'Cancelled by you', tone: 'warn', detail: 'Workers are stopping or have stopped. See Result for cleanup status and any recovery snapshot. Resubmitting creates a new task.' };
     default: return { title: task.state, tone: 'info', detail: '' };
   }
 }
@@ -108,47 +108,55 @@ function PlanTab({ task }: { task: Task }) {
   const plan = task.plan;
   if (!plan) return <Card><div class="empty"><b>No plan yet</b><span>{task.state === 'awaiting_mode' ? 'Planning starts after a mode is chosen.' : task.state === 'planning' ? 'The Tech Lead is planning now.' : 'This task ended before a plan was stored.'}</span></div></Card>;
   const awaiting = task.state === 'awaiting_plan_approval';
-  const agents = [...new Set(plan.items.map(i => i.assignedAgent ?? 'any eligible agent'))];
+  const roster = task.team?.members ?? task.agents ?? [];
+  const agentName = (id?: string) => roster.find(a => a.id === id)?.name ?? id ?? 'Any eligible team member';
+  const agents = [...new Set(plan.items.map(i => agentName(i.assignedAgent)))];
   const commands = new Set([...plan.items.flatMap(i => i.validation), ...(plan.integration?.validation ?? [])].map(command)).size;
   const section = (title: string, body: ComponentChildren, note?: string) => <section class="plan-section"><div class="h">{title}</div>{body}{note && <div class="muted plan-note">{note}</div>}</section>;
   const list = (rows: string[], size?: string) => <ul class="criteria" style={size ? { fontSize: size } : undefined}>{rows.map((r, i) => <li key={i} class="wrap-anywhere">{r}</li>)}</ul>;
   return <div class="stack plan">
     <Card title={<>Plan · {approvalLabel(task)}{task.approval?.timestamp ? ` · ${formatTime(task.approval.timestamp)}` : ''}</>} right={awaiting ? undefined : <Chip tone="neutral">version {task.version}</Chip>}>
       <div class="plan-summary">
+        <div class="h">Proposed change</div>
         <p class="plan-lead wrap-anywhere">{plan.summary}</p>
         <div class="plan-facts">
           <Chip tone="neutral">{plan.items.length} work item{plan.items.length === 1 ? '' : 's'}</Chip>
-          <Chip tone="neutral">{agents.join(', ')}</Chip>
-          <Chip tone="neutral">{commands} validation command{commands === 1 ? '' : 's'}</Chip>
-          {task.workspace && <Chip tone="neutral" title="Branch in your repository"><span class="mono">{task.workspace.branch}</span></Chip>}
+          <Chip tone="neutral">Assigned to: {agents.join(', ')}</Chip>
         </div>
       </div>
       <div class="plan-grid">
-        {section('Risks', plan.risks.length ? list(plan.risks) : <div class="muted">None declared by the planner.</div>)}
-        {plan.manualChecks?.length ? section('Manual checks for you', list(plan.manualChecks), 'These need tools the sandbox does not provide. They are reported with the result and never enforced by repair.') : null}
-        {task.acceptanceCriteria.length ? section('Your acceptance criteria', list(task.acceptanceCriteria)) : null}
-        {plan.integration && section('Integration', <div class="wrap-anywhere">{plan.integration.assignedAgent} · <span class="mono">{plan.integration.validation.map(command).join(' ; ')}</span></div>)}
+        {section("How we'll check it", plan.verification?.length ? list(plan.verification) : <div class="muted">This plan has no plain-language verification summary. The planned checks are available in Technical details.</div>)}
+        {section('Risks and decisions', plan.risks.length ? list(plan.risks) : <div class="muted">None identified by the Tech Lead.</div>)}
+        {plan.manualChecks?.length ? section('Manual checks for you', list(plan.manualChecks), 'These optional checks need your help. Any checks left undone will be listed with the result.') : null}
       </div>
     </Card>
-    <div class="h plan-items-head">Work items · {plan.items.length}</div>
-    <ol class="plan-items">{plan.items.map((i, n) => <li key={i.id}><article class="card item plan-item">
-      <header class="plan-item-head">
-        <span class="plan-item-n" aria-hidden="true">{n + 1}</span>
-        <div class="plan-item-title"><b class="wrap-anywhere">{i.title}</b><span class="mono muted">{i.id}</span></div>
-        <Chip tone="neutral">{i.assignedAgent ?? 'any eligible agent'}</Chip>
-      </header>
-      <p class="plan-item-text wrap-anywhere">{i.description}</p>
-      <div class="plan-item-body">
-        {section('Done when', list(i.acceptanceCriteria, '13.5px'))}
-        <dl class="kv plan-item-facts">
-          <dt>Needs</dt><dd>{i.requiredCapabilities.join(', ')}</dd>
-          <dt>{(task.devagentsRules ?? true) ? 'Scope' : 'Planned scope (advisory)'}</dt><dd class="mono wrap-anywhere">{i.ownedPaths?.join(', ') ?? 'agent write scope'}</dd>
-          <dt>Depends on</dt><dd class="mono">{i.dependsOn.length ? i.dependsOn.join(', ') : '—'}</dd>
-          <dt>Validation</dt><dd class="mono wrap-anywhere">{i.validation.map(command).join(' ; ')}</dd>
-          <dt>Branch</dt><dd class="mono wrap-anywhere">{i.branch}</dd>
-        </dl>
+    <details class="card plan-details">
+      <summary>Technical details</summary>
+      <div class="stack plan-details-body">
+        <div class="plan-facts"><Chip tone="neutral">{commands} validation command{commands === 1 ? '' : 's'}</Chip>{task.workspace && <Chip tone="neutral" title="Branch in your repository"><span class="mono">{task.workspace.branch}</span></Chip>}</div>
+        {task.acceptanceCriteria.length ? section('Your acceptance criteria', list(task.acceptanceCriteria)) : null}
+        {plan.integration && section('Integration', <div class="wrap-anywhere">{agentName(plan.integration.assignedAgent)} · <span class="mono">{plan.integration.validation.map(command).join(' ; ')}</span></div>)}
+        <div class="h plan-items-head">Work items · {plan.items.length}</div>
+        <ol class="plan-items">{plan.items.map((i, n) => <li key={i.id}><article class="card item plan-item">
+          <header class="plan-item-head">
+            <span class="plan-item-n" aria-hidden="true">{n + 1}</span>
+            <div class="plan-item-title"><b class="wrap-anywhere">{i.title}</b><span class="mono muted">{i.id}</span></div>
+            <Chip tone="neutral">{agentName(i.assignedAgent)}</Chip>
+          </header>
+          <p class="plan-item-text wrap-anywhere">{i.description}</p>
+          <div class="plan-item-body">
+            {section('Done when', list(i.acceptanceCriteria, '13.5px'))}
+            <dl class="kv plan-item-facts">
+              <dt>Needs</dt><dd>{i.requiredCapabilities.join(', ')}</dd>
+              <dt>{(task.devagentsRules ?? true) ? 'Scope' : 'Planned scope (advisory)'}</dt><dd class="mono wrap-anywhere">{i.ownedPaths?.join(', ') ?? 'agent write scope'}</dd>
+              <dt>Depends on</dt><dd class="mono">{i.dependsOn.length ? i.dependsOn.join(', ') : '—'}</dd>
+              <dt>Validation</dt><dd class="mono wrap-anywhere">{i.validation.map(command).join(' ; ')}</dd>
+              <dt>Branch</dt><dd class="mono wrap-anywhere">{i.branch}</dd>
+            </dl>
+          </div>
+        </article></li>)}</ol>
       </div>
-    </article></li>)}</ol>
+    </details>
   </div>;
 }
 function ActivityTab({ task, events, evidence, filter, onClear }: { task: Task; events: TaskEvent[]; evidence: Evidence[]; filter?: string | undefined; onClear?: () => void }) {
@@ -197,7 +205,9 @@ function evidenceTitle(e: Evidence): string {
     case 'repository-scan': return `${d.reason}${item}`;
     case 'qa-assignment': return d.state === 'assigned' ? `QA assigned to ${d.agentId}` : `QA skipped · ${d.reason}`;
     case 'qa-result': return `QA ${d.state} · ${d.summary}`;
-    case 'validation': return `validation ${typeof d.exitCode !== 'number' ? 'result unavailable' : d.truncated ? 'failed (output truncated)' : d.exitCode === 0 ? 'passed' : `failed (exit ${d.exitCode})`}${d.truncated ? ' · output truncated' : ''}${item} · ${[d.executable, ...((d.args as string[] | undefined) ?? [])].join(' ')}`;
+    case 'validation-started': return `validation running${item} · ${[d.executable, ...((d.args as string[] | undefined) ?? [])].join(' ')}`;
+    case 'validation-failed': return `validation stopped${item} · ${d.error ?? 'Command did not complete'}`;
+    case 'validation': return `validation ${typeof d.exitCode !== 'number' ? 'result unavailable' : d.timedOut ? 'timed out (partial output saved)' : d.truncated ? 'failed (output truncated)' : d.exitCode === 0 ? 'passed' : `failed (exit ${d.exitCode})`}${d.truncated ? ' · output truncated' : ''}${item} · ${[d.executable, ...((d.args as string[] | undefined) ?? [])].join(' ')}`;
     case 'work-item': return `item ${String(d.itemId)} → ${String(d.state)}`;
     case 'progress': return `engine ${String(d.kind)}${item}`;
     default: return `${e.kind}${item}`;
@@ -210,6 +220,18 @@ function LimitationReports({ outcome }: { outcome: Task['outcome'] }) {
     {!!outcome?.limitationOverflow && <p class="muted">{outcome.limitationOverflow} additional report occurrences have no retained distinct identities. The total is a lower bound; see Activity for every report.</p>}
   </>;
 }
+function TaskCleanup({ task, evidence }: { task: Task; evidence: Evidence[] }) {
+  const latest = evidence.filter(e => ['terminal-cleanup', 'compaction-deferred'].includes(e.kind)).at(-1);
+  const snapshots = [...new Set(evidence.filter(e => ['worktree-cleanup', 'worktree-cleanup-intent'].includes(e.kind))
+    .map(e => evidenceFacts(e).recoveryPath).filter((path): path is string => typeof path === 'string'))];
+  return <div class="muted wrap-anywhere" style={{ fontSize: '13px' }}>
+    {latest?.kind === 'terminal-cleanup' ? 'Task worktrees and generated resources cleaned up. Git branches and task history are retained.'
+      : latest?.kind === 'compaction-deferred' ? `Cleanup deferred: ${String(evidenceFacts(latest).message ?? 'See Activity for details')}`
+      : 'See Activity for cleanup status. Cleanup waits for all workers to stop.'}
+    {snapshots.length > 0 && <div>Unfinished files saved in private recovery snapshots:<ul class="criteria mono">{snapshots.map(path => <li key={path}>{path}</li>)}</ul></div>}
+    {task.state !== 'completed' && <div>Resubmitting creates a new task.</div>}
+  </div>;
+}
 function ResultTab({ task, evidence }: { task: Task; evidence: Evidence[] }) {
   const reviews = evidence.filter(e => e.kind === 'run-completed' && evidenceFacts(e).phase === 'review');
   const last = reviews[reviews.length - 1]; const review = last ? evidenceFacts(last).output as ReviewFacts | undefined : undefined;
@@ -221,7 +243,7 @@ function ResultTab({ task, evidence }: { task: Task; evidence: Evidence[] }) {
   const qaSummary = qa ? `${qa.state} · ${qa.summary}` : skipped?.state === 'skipped' ? String(skipped.reason ?? 'QA skipped') : 'No QA verification recorded';
   if (task.state !== 'completed') return <Card tone={task.state === 'failed' ? 'bad' : undefined}><div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
     <b>Result</b><span>Diff inspection is offered for completed tasks only.</span><div class="wrap-anywhere"><b>Quality assurance</b> · {qaSummary}</div><div><b>Not verified here</b><LimitationReports outcome={task.outcome} /></div>
-    {task.state === 'failed' || task.state === 'cancelled' ? <><div class="wrap-anywhere">{task.outcome?.error ?? 'No commit was created.'}</div><div class="muted" style={{ fontSize: '13px' }}>Worktrees are preserved for inspection{task.workspace ? <> under <span class="mono">{task.workspace.path}</span></> : null}. Resubmitting creates a new task. Cleanup is a separate, previewed action.</div><div style={{ display: 'flex', gap: '8px' }}><a class="btn" href={`/ui/tasks/new?from=${task.id}`}>Submit a new task from this request</a><Later label="Clean up worktrees" increment="U3" reason="Cleanup with a preview arrives in U3. CLI: devagents tasks cleanup" /></div></> : <div class="muted">Not available yet. Completion means one reviewed local commit{task.workspace ? <> on <span class="mono">{task.workspace.branch}</span></> : null}; you merge it yourself. Changed files, test evidence and the review outcome appear here afterwards.</div>}
+    {task.state === 'failed' || task.state === 'cancelled' ? <><div class="wrap-anywhere">{task.outcome?.error ?? 'No commit was created.'}</div><TaskCleanup task={task} evidence={evidence} /><div style={{ display: 'flex', gap: '8px' }}><a class="btn" href={`/ui/tasks/new?from=${task.id}`}>Submit a new task from this request</a><Later label="Clean up worktrees" increment="U3" reason="Cleanup with a preview arrives in U3. CLI: devagents tasks cleanup" /></div></> : <div class="muted">Not available yet. Completion means one reviewed local commit{task.workspace ? <> on <span class="mono">{task.workspace.branch}</span></> : null}; you merge it yourself. Changed files, test evidence and the review outcome appear here afterwards.</div>}
   </div></Card>;
   return <div class="stack">
     <Card title="Result · completed"><div style={{ padding: '14px 16px' }}><dl class="kv">
@@ -234,7 +256,7 @@ function ResultTab({ task, evidence }: { task: Task; evidence: Evidence[] }) {
       <dt>Quality assurance</dt><dd class="wrap-anywhere">{qaSummary}{qa && ' · See Activity for criterion-by-criterion evidence'}</dd>
       <dt>Not verified here</dt><dd><LimitationReports outcome={task.outcome} /></dd>
       <dt>Diff</dt><dd>Read the recorded base-to-final change below.</dd>
-      <dt>Worktree</dt><dd class="mono wrap-anywhere">{task.workspace?.path ?? '—'}</dd>
+      <dt>Task resources</dt><dd><TaskCleanup task={task} evidence={evidence} /></dd>
     </dl></div>
     <div class="card-foot">Completion is a local reviewed commit, not a merge or deployment. The original checkout was not modified.</div></Card>
     <TaskDiff id={task.id} />

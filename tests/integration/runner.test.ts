@@ -372,9 +372,9 @@ test('immediate review, repair feedback and displayed summaries cannot bypass pr
   const execute = engine.execute.bind(engine);
   engine.execute = async request => {
     const result = await execute(request);
-    const output = result.output as { summary: string; risks?: string[] };
+    const output = result.output as { summary: string; risks?: string[]; verification?: string[] };
     output.summary = 'Status password=SYNTHETIC_SUMMARY';
-    if (request.phase === 'planning') output.risks = ['Risk token=SYNTHETIC_RISK'];
+    if (request.phase === 'planning') { output.risks = ['Risk token=SYNTHETIC_RISK']; output.verification = ['Check token=SYNTHETIC_VERIFICATION']; }
     return result;
   };
   const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);

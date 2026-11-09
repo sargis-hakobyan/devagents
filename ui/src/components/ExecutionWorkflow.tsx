@@ -28,16 +28,19 @@ export function ExecutionWorkflow({ taskId, now, onActivity }: { taskId: string;
     {execution.error && <div><ErrorNote message={`Execution updates unavailable: ${execution.error}`} /><button class="btn small" onClick={execution.reload}>Retry execution updates</button></div>}
     {!execution.data && execution.loading && <Skeleton rows={3} label="Loading execution history" />}
     {execution.data && <>
-      <div class="note info" role="status">{working.length ? `Working now: ${working.map(e => `${e.actor} · ${phases[e.phase] ?? e.phase} · ${e.scopeLabel}`).join('; ')}` : `Task state: ${execution.data.state.replaceAll('_', ' ')}. ${entries.length ? 'No agent call is currently running.' : 'No agent runs recorded yet.'}`}</div>
+      <div class="note info" role="status">{working.length ? `Working now: ${working.map(e => `${e.actor} · ${phases[e.phase] ?? e.phase} · ${e.scopeLabel}${e.kind === 'validation' ? ' · ' + e.summary : ''}`).join('; ')}` : `Task state: ${execution.data.state.replaceAll('_', ' ')}. ${entries.length ? 'No agent call is currently running.' : 'No agent runs recorded yet.'}`}</div>
       <ol class="workflow-steps">
         {rows.map(({ entry, checks }) => {
           if (entry.kind === 'validation') {
+            const running = checks.some(c => c.status === 'running');
+            const interrupted = checks.filter(c => c.status === 'interrupted').length;
+            const passed = checks.filter(c => c.status === 'completed').length;
             const failed = checks.filter(c => c.status === 'failed').length;
-            return <li key={entry.id} id={`execution-${entry.id}`} class={`workflow-step execution-automation ${failed ? 'fail' : 'done'}`} data-validation-group>
-              <span class="execution-check-marker" aria-hidden="true">{failed ? '!' : '✓'}</span>
-              <details class="execution-checks">
-                <summary><b>{checks.length} automated {checks.length === 1 ? 'check' : 'checks'}</b><span class={`stage ${failed ? 'bad' : 'ok'}`}>{checks.length - failed} passed{failed ? ` · ${failed} failed` : ''}</span></summary>
-                <ul>{checks.map(check => <li key={check.id} data-validation-id={check.id}><Stage tone={check.status === 'failed' ? 'bad' : 'ok'}>{check.status === 'failed' ? 'Failed' : 'Passed'}</Stage><span class="wrap-anywhere">{check.scopeLabel} · {check.summary}</span><span class="what">{clock(check.startedAt)}</span></li>)}</ul>
+            return <li key={entry.id} id={`execution-${entry.id}`} class={`workflow-step execution-automation ${running ? 'busy' : failed ? 'fail' : interrupted ? 'aborted' : 'done'}`} data-validation-group>
+              <span class="execution-check-marker" aria-hidden="true">{running ? '…' : failed ? '!' : passed === checks.length ? '✓' : '—'}</span>
+              <details class="execution-checks" open={running}>
+                <summary><b>{checks.length} automated {checks.length === 1 ? 'check' : 'checks'}</b><span class={`stage ${running ? 'run' : failed ? 'bad' : interrupted ? 'neutral' : 'ok'}`}>{passed} passed{running ? ' · running' : ''}{failed ? ` · ${failed} failed` : ''}{interrupted ? ` · ${interrupted} interrupted` : ''}</span></summary>
+                <ul>{checks.map(check => <li key={check.id} data-validation-id={check.id}><Stage tone={statuses[check.status].tone}>{check.status === 'completed' ? 'Passed' : statuses[check.status].label}</Stage><span class="wrap-anywhere">{check.scopeLabel} · {check.summary}</span><span class="what">{clock(check.startedAt)}{check.status === 'running' ? ` · ${duration(now - Date.parse(check.startedAt))} elapsed${check.timeoutMs ? ' · limit ' + duration(check.timeoutMs) : ''}` : check.finishedAt ? ' · ' + duration(Date.parse(check.finishedAt) - Date.parse(check.startedAt)) : ''}</span></li>)}</ul>
               </details>
             </li>;
           }

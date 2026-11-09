@@ -116,10 +116,21 @@ fieldset.plain { border: 0; margin: 0; min-width: 0; }
 .back { font-weight: 700; font-size: 13.5px; text-decoration: none; }
 .field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 700; color: var(--neutral-text); min-width: 0; }
 .field input, .field select, .field textarea { font: inherit; font-size: 13.5px; font-weight: 400; color: var(--text); border: 1px solid var(--btn-border); border-radius: 8px; padding: 8px 10px; background: #fff; min-height: 38px; width: 100%; }
+select:not([multiple]), .field select:not([multiple]) {
+  appearance: none;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%235A5F78' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px;
+}
+@media (forced-colors: active) {
+  select:not([multiple]), .field select:not([multiple]) { appearance: auto; background-image: none; }
+}
 .field textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; line-height: 1.5; }
 .field input[aria-invalid="true"], .field textarea[aria-invalid="true"] { border-color: var(--bad-border); box-shadow: 0 0 0 3px var(--bad-bg); }
 .hint { font-weight: 400; color: var(--muted); font-size: 12px; }
-fieldset:disabled .field input, fieldset:disabled .field select, fieldset:disabled .field textarea { background: var(--sidebar); color: var(--muted); }
+fieldset:disabled .field input, fieldset:disabled .field select, fieldset:disabled .field textarea { background-color: var(--sidebar); color: var(--muted); }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .check { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; } .check input { margin-top: 3px; width: 16px; height: 16px; }
 .editor { display: grid; grid-template-columns: minmax(260px, 300px) minmax(0, 1fr); gap: 18px; align-items: start; }
@@ -158,6 +169,7 @@ fieldset:disabled .field input, fieldset:disabled .field select, fieldset:disabl
 /* U3 workflows reuse the established fields, cards and notes. */
 .workflow-grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:18px;align-items:start}
 .form-stack{display:flex;flex-direction:column;gap:14px;padding:20px;min-width:0}.form-stack .form-stack{padding:0}.command{display:flex;flex-direction:column;gap:6px;align-items:flex-start;min-width:0}.command pre{width:100%}
+.form-stack > .btn{align-self:flex-start;max-width:100%;justify-content:center}
 .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.choice{display:flex;gap:10px;align-items:baseline}.criterion-row{display:flex;gap:8px;align-items:center}.criterion-row .field{min-width:0;flex:1}
 @media(max-width:800px){.workflow-grid{grid-template-columns:minmax(0,1fr)}.form-stack{padding:16px}}
 
@@ -174,15 +186,19 @@ pre.diff-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:650px;overf
 
 .diff-grid{grid-template-columns:minmax(0,1fr) minmax(0,2fr)}
 .decision-bar{position:sticky;bottom:12px;background:var(--panel,#fff);padding:12px;border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 28px rgba(35,31,74,.12)}
-@media(max-width:800px){.diff-grid{grid-template-columns:minmax(0,1fr)}.submit-action{position:sticky;bottom:12px;box-shadow:0 6px 16px rgba(35,31,74,.16)}}
+@media(max-width:800px){.diff-grid{grid-template-columns:minmax(0,1fr)}}
 
 /* Plan tab */
 .plan-summary{padding:16px 18px;border-bottom:1px solid var(--row)}
 .plan-lead{margin:0;font-size:15.5px;line-height:1.55;max-width:84ch}
 .plan-facts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .plan-facts .chip{white-space:normal;overflow-wrap:anywhere}
-.plan-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px 32px;padding:14px 18px 16px}
+.plan-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:16px 32px;padding:14px 18px 16px}
 .plan-section{min-width:0}
+.plan-summary>.h{margin-bottom:8px}
+.plan-details>summary{padding:14px 18px;font-weight:700;cursor:pointer}
+.plan-details-body{padding:0 18px 18px}
+.plan-decision-bar{position:static;margin-top:14px}
 .plan-section .criteria{margin-top:6px}.plan-section .criteria li{margin-bottom:4px}
 .plan-note{font-size:12.5px;margin-top:6px}
 .plan-items-head{margin-top:4px}
@@ -215,6 +231,7 @@ pre.diff-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:650px;overf
 .link::after{content:"";position:absolute;right:-1px;top:-5px;border:6px solid transparent;border-left:8px solid #C9CCDD;border-right:0}
 .link.done{background:#1E9A5B}.link.done::after{border-left-color:#1E9A5B}
 .member{display:flex;gap:12px;align-items:flex-start;min-width:0}
+@media(min-width:901px){.pipe .member{flex-direction:column;gap:8px}}
 .member .name{font-weight:800;line-height:1.25}.what{font-size:13px;color:var(--muted)}
 .avatar{position:relative;flex:0 0 auto;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center}
 .avatar.lg{width:56px;height:56px;box-shadow:0 0 0 3px #fff,0 0 0 6px #B9BCD0}
@@ -224,6 +241,13 @@ pre.diff-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:650px;overf
 .avatar.next{background:#8E92AD}.avatar.fail{box-shadow:0 0 0 2px #fff,0 0 0 4px #C2362B}.avatar.aborted{background:#8E92AD}
 .avatar.you{background:var(--warn-icon);box-shadow:0 0 0 2px #fff,0 0 0 4px var(--warn-icon)}.avatar.off{background:#C9CCDD;box-shadow:0 0 0 2px #fff,0 0 0 4px var(--border)}
 .avatar.xs.done{background:#1E9A5B}.avatar.xs.next,.avatar.xs.aborted{background:#8E92AD}.avatar.xs.off{background:#C9CCDD}
+.engine-badge{display:inline-grid;place-items:center;flex:0 0 auto;width:12px;height:12px;color:var(--ink);font-size:10px;font-weight:800;line-height:1;vertical-align:middle}
+.engine-badge.claude-code{color:#8A3F27}.engine-badge.unknown{color:var(--muted)}
+.engine-badge svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.avatar-with-engine{display:inline-flex;align-items:center;gap:8px;flex:0 0 auto}
+.member-role-icons{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;color:var(--ink)}
+.member-role-avatar{display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:var(--ink);color:#fff;flex:0 0 auto}
+.member-engine-name{display:flex;align-items:center;gap:6px;min-width:0}
 .abadge{position:absolute;right:-5px;bottom:-5px;width:18px;height:18px;border-radius:50%;border:2px solid #fff;display:grid;place-items:center;font-size:10px;font-weight:800;line-height:1}
 .abadge.done{background:#1E9A5B;color:#fff}.abadge.busy{background:var(--run-icon);color:#fff}.abadge.next,.abadge.aborted{background:#B9BCD0;color:#fff}.abadge.fail{background:#C2362B;color:#fff}.abadge.you{background:var(--accent);color:var(--ink)}.abadge.off{background:var(--border);color:var(--muted)}
 .facepile{display:flex;align-items:center;padding-left:8px}
@@ -301,13 +325,3 @@ pre.diff-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:650px;overf
 .execution-checks li>.wrap-anywhere{flex:1;min-width:140px}
 .execution-commit{display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;font-size:13px;padding:8px 0}
 @media(max-width:600px){.execution-check-marker{width:26px}.execution-checks summary .stage{margin-left:6px}}
-
-/* Role avatars and compact engine indicators. */
-@media(min-width:901px){.pipe .member{flex-direction:column;gap:8px}}
-.engine-badge{display:inline-grid;place-items:center;flex:0 0 auto;width:12px;height:12px;color:var(--ink);font-size:10px;font-weight:800;line-height:1;vertical-align:middle}
-.engine-badge.claude-code{color:#8A3F27}.engine-badge.unknown{color:var(--muted)}
-.engine-badge svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-.avatar-with-engine{display:inline-flex;align-items:center;gap:8px;flex:0 0 auto}
-.member-role-icons{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;color:var(--ink)}
-.member-role-avatar{display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:var(--ink);color:#fff;flex:0 0 auto}
-.member-engine-name{display:flex;align-items:center;gap:6px;min-width:0}

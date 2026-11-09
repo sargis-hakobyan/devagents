@@ -16,6 +16,11 @@ export async function loadConfig(path = process.env.DEVAGENTS_CONFIG): Promise<A
     if (compact !== 'true' && compact !== 'false') throw new AppError('invalid_config', 'DEVAGENTS_COMPACT_COMPLETED_TASKS must be true or false');
     config.compactCompletedTasks = compact === 'true';
   }
+  const cleanup = process.env.DEVAGENTS_CLEANUP_TERMINAL_TASKS;
+  if (cleanup !== undefined && cleanup !== '') {
+    if (cleanup !== 'true' && cleanup !== 'false') throw new AppError('invalid_config', 'DEVAGENTS_CLEANUP_TERMINAL_TASKS must be true or false');
+    config.cleanupTerminalTasks = cleanup === 'true';
+  }
   return config;
 }
 export function dataDirectory(): string { return resolve(process.env.DEVAGENTS_DATA_DIR ?? '.devagents'); }

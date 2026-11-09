@@ -6,8 +6,10 @@ export type ProcessOptions = {
   input?: string; onStderrLine?: (line: string) => void; onLine?: (line: string) => void; maxBytes?: number;
   /** 'fail' (default) terminates the process when output exceeds maxBytes; 'truncate' keeps head and tail and marks the result. */
   overflow?: 'fail' | 'truncate';
+  /** Validators retain partial evidence on timeout; engines still reject by default. */
+  timeoutResult?: boolean;
 };
-export type ProcessResult = { stdout: string; stderr: string; exitCode: number; truncated: boolean };
+export type ProcessResult = { stdout: string; stderr: string; exitCode: number; truncated: boolean; timedOut?: boolean };
 /** Cut a string at a byte budget without splitting a UTF-8 code point. */
 function firstBytes(text: string, limit: number): string {
   const bytes = Buffer.from(text, 'utf8'); if (bytes.length <= limit) return text;
@@ -104,6 +106,7 @@ export async function runProcess(binary: string, args: string[], options: Proces
       kill('SIGKILL'); options.signal?.removeEventListener('abort', abort);
       try { if (pending.trim() && !failure) options.onLine!(pending); if (stderrPending.trim() && !failure) options.onStderrLine!(stderrPending); }
       catch (error) { failure = error instanceof Error ? error : new Error(String(error)); }
+      if (failure instanceof AppError && failure.code === 'timeout' && options.timeoutResult) { resolve({ stdout: stdout.text(), stderr: stderr.text(), exitCode: 124, truncated: stdout.dropped + stderr.dropped > 0, timedOut: true }); return; }
       if (failure) reject(failure); else resolve({ stdout: stdout.text(), stderr: stderr.text(), exitCode: code ?? 1, truncated: stdout.dropped + stderr.dropped > 0 });
     });
     child.stdin.end(options.input ?? '');

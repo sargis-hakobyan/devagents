@@ -4,7 +4,7 @@ export type ExecutionEntry = {
   id: string; sequence: number; kind: 'agent' | 'validation' | 'commit'; actor: string; agentId: string | null;
   engine?: string | undefined; phase: string; scope: string; scopeLabel: string; attempt: number; startedAt: string; finishedAt: string | null;
   status: 'running' | 'completed' | 'approved' | 'changes-requested' | 'failed' | 'interrupted' | 'blocked';
-  summary: string; findings: string[]; follows: { id: string; reason: string }[]; parallelWith: string[];
+  timeoutMs?: number; summary: string; findings: string[]; follows: { id: string; reason: string }[]; parallelWith: string[];
 };
 export type Execution = { state: string; updatedAt: string; entries: ExecutionEntry[] };
 type TaskFacts = {
@@ -17,6 +17,7 @@ const strings = (v: unknown) => Array.isArray(v) ? v.filter((s): s is string => 
 
 export function taskExecution(task: TaskFacts, events: ExecutionEvent[]): Execution {
   const entries: ExecutionEntry[] = []; const runs = new Map<string, ExecutionEntry>();
+  const validations = new Map<string, ExecutionEntry>();
   const attempts = new Map<string, number>();
   const pending = new Map<string, Map<string, { id: string; reason: string }>>();
   const roster = task.team?.members ?? task.agents ?? [];
@@ -54,23 +55,33 @@ export function taskExecution(task: TaskFacts, events: ExecutionEvent[]): Execut
         entry.status = state === 'blocked' ? 'blocked' : 'changes-requested'; entry.findings = [str(d.feedback) || str(d.summary) || `QA ${state}.`];
         issues(scope).set('qa', { id: entry.id, reason: entry.findings[0]! });
       } else if (state === 'passed') issues(scope).delete('qa');
-    } else if (event.kind === 'validation' || event.kind === 'commit-created') {
-      const validation = event.kind === 'validation';
+    } else if (event.kind === 'validation-started' || event.kind === 'validation-failed' || event.kind === 'validation' || event.kind === 'commit-created') {
+      const validation = event.kind !== 'commit-created';
+      const started = event.kind === 'validation-started';
+      const validationId = str(d.validationId);
       const command = [str(d.executable), ...strings(d.args)].join(' ');
       const truncated = d.truncated === true || d.truncated === 1;
-      const failed = validation && (d.exitCode !== 0 || truncated);
-      const entry: ExecutionEntry = { id: `evidence-${event.sequence}`, sequence: event.sequence, kind: validation ? 'validation' : 'commit', actor: 'DevAgents', agentId: null,
+      const failed = validation && !started && (event.kind === 'validation-failed' || d.exitCode !== 0 || truncated);
+      const entry: ExecutionEntry = validations.get(validationId) ?? { id: `evidence-${event.sequence}`, sequence: event.sequence, kind: validation ? 'validation' : 'commit', actor: 'DevAgents', agentId: null,
         phase: validation ? 'validation' : 'commit', scope, scopeLabel: label, attempt: 1, startedAt: event.at, finishedAt: event.at,
         status: failed ? 'failed' : 'completed', summary: validation ? command : `Created local commit ${str(d.commit)}`, findings: [], follows: [], parallelWith: [] };
-      entries.push(entry);
+      if (!entries.includes(entry)) entries.push(entry);
       if (validation) {
+        if (validationId) validations.set(validationId, entry);
+        entry.status = started ? 'running' : failed ? 'failed' : 'completed';
+        entry.finishedAt = started ? null : event.at;
+        if (typeof d.timeoutMs === 'number') entry.timeoutMs = d.timeoutMs;
+        if (d.timedOut) entry.findings = ['Command timed out. Partial output is saved in Activity.'];
+        if (event.kind === 'validation-failed') entry.findings = [str(d.error)];
+      }
+      if (validation && !started) {
         if (failed) issues(scope).set(command, { id: entry.id, reason: `Validation failed: ${command} (${truncated ? 'output truncated' : `exit ${d.exitCode ?? 'unknown'}`}).` });
         else issues(scope).delete(command);
       }
     }
   }
-  if (['completed', 'failed', 'cancelled'].includes(task.state)) for (const entry of runs.values()) {
-    if (entry.status === 'running') { entry.status = 'interrupted'; entry.summary = 'No completion was recorded before the task stopped.'; }
+  if (['completed', 'failed', 'cancelled'].includes(task.state)) for (const entry of [...runs.values(), ...validations.values()]) {
+    if (entry.status === 'running') { entry.status = 'interrupted'; entry.findings.push('No completion was recorded before the task stopped.'); }
   }
   return { state: task.state, updatedAt: task.updatedAt, entries };
 }

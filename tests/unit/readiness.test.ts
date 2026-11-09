@@ -36,7 +36,7 @@ test('unsupported capabilities, engines and providers are per-member errors, not
   assert.equal(r.ready, false);
   assert.ok(r.diagnostics.some(d => d.code === 'capability_unavailable' && d.memberId === 'designer' && /asset-design/.test(d.message)));
   const claude = teamReadiness([lead(), { ...developer(), engine: 'claude-code' }, reviewer()], support());
-  assert.ok(claude.diagnostics.some(d => d.code === 'engine_unavailable' && d.memberId === 'dev' && /M4/.test(d.message)));
+  assert.ok(claude.diagnostics.some(d => d.code === 'engine_unavailable' && d.memberId === 'dev' && /not available/.test(d.message)));
   const local = teamReadiness([lead(), { ...developer(), provider: 'local' }, reviewer()], support({ providers: [{ id: 'openai', kind: 'openai', auth: 'login' }, { id: 'local', kind: 'ollama', auth: 'none', baseUrl: 'http://127.0.0.1:11434' }] }));
   assert.ok(local.diagnostics.some(d => d.code === 'provider_unavailable' && d.memberId === 'dev'));
   assert.ok(teamReadiness([{ ...developer(), provider: 'missing' }], support()).diagnostics.some(d => d.code === 'provider_unknown'));

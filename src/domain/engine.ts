@@ -14,7 +14,7 @@ export interface CodingEngine {
   preflight(provider: AppConfig['providers'][number]): Promise<void>;
   execute(request: EngineRequest, progress: (event: EngineProgress) => void): Promise<EngineResult>;
 }
-export type ValidationResult = { executable: string; args: string[]; exitCode: number; output: string; truncated?: boolean };
+export type ValidationResult = { executable: string; args: string[]; exitCode: number; output: string; truncated?: boolean; timedOut?: boolean; validationId?: string };
 export interface Validator {
   preflight?(cwd: string, commands: { executable: string; args: string[] }[], signal: AbortSignal, devagentsRules: boolean): Promise<void>;
   execute(cwd: string, command: { executable: string; args: string[] }, signal: AbortSignal, timeoutMs: number, devagentsRules?: boolean): Promise<ValidationResult>;

@@ -27,7 +27,7 @@ try {
   await mkdir(data);
   store = new Store(join(data, 'state.db'));
   // Keep this fixture's checkout for the post-completion sandbox containment check below.
-  const config = Config.parse({ schemaVersion: 1, executionTimeoutMs: 180000, compactCompletedTasks: false });
+  const config = Config.parse({ schemaVersion: 1, executionTimeoutMs: 180000, compactCompletedTasks: false, cleanupTerminalTasks: false });
   const service = new TaskService(store, config, data);
   await service.registerProject({ id: 'fixture', path: project });
   const engine = live ? new CodexAdapter(process.env.DEVAGENTS_DATA_DIR ?? '.devagents') : {

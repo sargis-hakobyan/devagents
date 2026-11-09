@@ -11,6 +11,11 @@ export async function changes(workspace: NonNullable<Task['workspace']>, agent: 
   if (await realpath(workspace.path) !== workspace.path) throw new AppError('path_denied', 'Worktree path was replaced');
   if (await git(workspace.path, ['rev-parse', 'HEAD']) !== workspace.baseSha || await git(workspace.path, ['branch', '--show-current']) !== workspace.branch) throw new AppError('worktree_changed', 'Worktree HEAD or branch changed outside this task');
   const tracked = (await git(workspace.path, ['diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z', 'HEAD', '--'], false)).split('\0').filter(Boolean);
+  // Inspect collapsed untracked directories first: an unignored dependency cache can
+  // contain tens of thousands of paths. Never silently exclude it from review/commit.
+  const directories = (await git(workspace.path, ['ls-files', '--others', '--exclude-standard', '--directory', '-z'], false)).split('\0').filter(Boolean);
+  const generated = directories.find(path => path.split('/').some(segment => segment === '.pnpm-store' || segment === 'node_modules'));
+  if (generated) throw new AppError('environment_blocked', `Untracked dependency files at ${generated}. Keep package caches outside the checkout in the task's private HOME, and ignore installed node_modules in the project. DevAgents will not include dependency files in a source review or silently discard them.`);
   const untracked = (await git(workspace.path, ['ls-files', '--others', '--exclude-standard', '-z'], false)).split('\0').filter(Boolean);
   const files = [...new Set([...tracked, ...untracked])].sort();
   const policy = new PolicyEngine(); const digest = createHash('sha256');

@@ -95,7 +95,8 @@ Ownership clarified by the owner on 2026-10-30: Codex handles implementation fix
 U1 is the first integrated UI increment before M4. Keep U2/U3 and M4 as separately reviewed work; a team editor must not claim unavailable engines or capabilities work.
 
 ## Later
-- [ ] M4: Claude adapter, per-agent routing, shared engine fixtures.
+- [x] M4 implementation: Claude adapter, per-member routing and deterministic engine fixtures (see the 2026-11-03 update below).
+- [ ] M4 authenticated acceptance: Claude model access and a paid end-to-end fixture remain unverified.
 - [ ] M5: authorized GitHub integration, recovery hardening, multi-arch CI/release.
 - [ ] Follow-up: local inference and a validated tool harness.
 
@@ -305,3 +306,19 @@ New task worktrees resolve the current local main commit and create a fresh task
 - [x] Reported tokens per step/work item and attempt, with cached-input subsets and missing-usage counts.
 - [x] Separate estimated API and API-equivalent costs, recorded pricing snapshots, unknown-model handling and explicit EUR conversion.
 - [ ] Project/monthly usage rollups and budget enforcement (separate planned scope).
+
+
+## Claude integration update — 2026-11-03
+
+Per-member engine routing, Claude structured execution, sandboxed tools, API-key/personal-token credential setup and engine-aware model defaults are implemented. Deterministic adapter, mixed-team, credential and browser checks cover local behavior; authenticated Claude execution and account model access remain unverified. Local LLM adapters are not implemented. This update does not claim an Anthropic-approved subscription product integration.
+
+
+Verification: 268 regression tests passed (four optional runtime checks skipped); the Claude runtime/tool containment check was also run explicitly on macOS and Linux, with no model network access in the container. The existing Codex setup browser workflow and the new Claude credential/per-member selection workflow passed. Backend/UI typechecks, production build and Docker packaging passed. No real Claude credential was inspected or submitted, and authenticated model acceptance remains outstanding.
+
+## Terminal-task resource cleanup — 2026-11-03
+
+Automatic cleanup now covers completed, failed and cancelled tasks after workers drain. Dependencies, private tool homes, owned run scratch and registered checkouts are reclaimed; unfinished working files, staged binary changes and conflict stages are preserved in private recovery snapshots. Every branch and task/workflow history remains. The Result tab reports actual cleanup/deferred status and snapshot locations. Interrupted Ready/setup tasks are recovered as failed without replaying model calls. Parallel preparation budgets free space per new checkout; runtime headroom is 2 GiB with a physically allocated 64 MiB emergency database reserve.
+
+Standard checks passed (281 passed, 4 skipped, backend/UI typechecks and production build). The focused terminal-cleanup suite passed eight cases, including conflict recovery, missing checkpoints, canonicalized paths, cancellation and refusal to remove without durable intent. Three browser checks passed for completed/multi-item results, failed/cancelled cleanup and recovery paths. No authenticated model calls were made.
+
+Deployed and applied to all 34 historical terminal tasks: no task worktrees remain, all 13 completed branches still match their recorded commits, and all 13 completed diffs remain accessible. Both SQLite databases pass `quick_check`. Private recovery archives occupy about 1.9 GiB. After task cleanup and unused Docker image/build-cache reclamation, the task filesystem has about 30.3 GiB available (about 7 GiB before cleanup). The deployed service reports terminal cleanup enabled, a 2 GiB runtime threshold and a fully allocated 64 MiB reserve.

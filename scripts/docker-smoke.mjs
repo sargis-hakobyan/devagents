@@ -106,12 +106,12 @@ try {
   assert.equal(inspect.Config.User, 'node');
   assert.equal(inspect.HostConfig.ReadonlyRootfs, true);
   assert.equal(inspect.Mounts.some(m => m.Destination === '/var/run/docker.sock'), false);
-  await exec('docker', ['run', '--rm', '--read-only', '--tmpfs', '/tmp:size=128m,mode=1777', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--mount', `type=bind,source=${resolve('scripts/sandbox-spike.mjs')},target=/tmp/sandbox-spike.mjs,readonly`, 'devagents:local', 'node', '/tmp/sandbox-spike.mjs'], { timeout: 30000 });
-  for (const script of ['auth-smoke.mjs', 'environment-smoke.mjs', 'm2-smoke.mjs', 'm3-smoke.mjs', 'codex-protocol-smoke.mjs']) {
+  await exec('docker', ['run', '--rm', '--read-only', '--tmpfs', '/tmp:size=128m,mode=1777', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--security-opt', 'systempaths=unconfined', '--mount', `type=bind,source=${resolve('scripts/sandbox-spike.mjs')},target=/tmp/sandbox-spike.mjs,readonly`, 'devagents:local', 'node', '/tmp/sandbox-spike.mjs'], { timeout: 30000 });
+  for (const script of ['auth-smoke.mjs', 'environment-smoke.mjs', 'pnpm-cache-smoke.mjs', 'proc-sandbox-smoke.mjs', 'm2-smoke.mjs', 'm3-smoke.mjs', 'codex-protocol-smoke.mjs']) {
     const command = script === 'codex-protocol-smoke.mjs'
       ? ['node', '--input-type=module', '-e', `import {spawn} from 'node:child_process'; await Promise.all([0,1].map(() => new Promise((resolve,reject) => { const child=spawn(process.execPath,['/app/scripts/${script}'],{stdio:'inherit'}); child.once('error',reject); child.once('exit',(code,signal)=>code===0?resolve():reject(new Error('Parallel runtime fixture failed: '+(signal??code)))); })));`]
       : ['node', `/app/scripts/${script}`];
-    const result = await exec('docker', ['run', '--rm', '--read-only', '--pids-limit', String(inspect.HostConfig.PidsLimit), '--cpus', String(inspect.HostConfig.NanoCpus / 1e9), '--memory', String(inspect.HostConfig.Memory), '--tmpfs', '/tmp:size=128m,mode=1777', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--tmpfs', '/data:size=128m,mode=1777,exec', '-e', 'TMPDIR=/data', '--mount', `type=bind,source=${resolve('scripts', script)},target=/app/scripts/${script},readonly`, 'devagents:local', ...command], { timeout: 90000, maxBuffer: 2 * 1024 * 1024 });
+    const result = await exec('docker', ['run', '--rm', '--read-only', '--pids-limit', String(inspect.HostConfig.PidsLimit), '--cpus', String(inspect.HostConfig.NanoCpus / 1e9), '--memory', String(inspect.HostConfig.Memory), '--tmpfs', '/tmp:size=128m,mode=1777', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--security-opt', 'systempaths=unconfined', '--tmpfs', '/data:size=8g,mode=1777,exec', '-e', 'TMPDIR=/data', '--mount', `type=bind,source=${resolve('scripts', script)},target=/app/scripts/${script},readonly`, 'devagents:local', ...command], { timeout: 90000, maxBuffer: 2 * 1024 * 1024 });
     console.log(result.stdout.trim());
   }
   console.log('PASS: Docker health, unauthenticated setup, explicit project mount, non-root execution, persistent task/event history and idempotent retry.');

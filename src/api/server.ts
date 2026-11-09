@@ -51,6 +51,7 @@ const integer = (value: string | null, fallback: number) => { const n = Number(v
 
 export type ApiOptions = {
   setupAuth?: SetupAuth;
+  claudeAuth?: SetupAuth;
   assertSetupIdle?: () => void;
   sessions?: BrowserSessions;
   uiRoot?: string | undefined;
@@ -123,20 +124,24 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       if (path === '/ui/logout' && req.method === 'POST') {
         if (principal.kind !== 'session') throw new AppError('session_required', 'Only browser sessions can sign out', 403);
         if (options.setupAuth) await options.setupAuth.cancel(principal.session.id).catch(() => {});
+        if (options.claudeAuth) await options.claudeAuth.cancel(principal.session.id).catch(() => {});
         sessions.destroy(principal.session.id);
         return send(res, 200, { signedOut: true }, { 'set-cookie': clearedSessionCookie(Boolean(options.secureCookies)) });
       }
       const owner = principal.kind === 'session' ? principal.session.id : 'terminal';
-      if (path === '/setup/auth' && req.method === 'GET') return send(res, 200, options.setupAuth ? await options.setupAuth.status(owner) : { available: false, busy: false, connection: { saved: false } });
-      if (path === '/setup/auth' && req.method === 'POST') {
-        if (!options.setupAuth) throw new AppError('setup_unavailable', 'Provider setup is not enabled on this service.', 503);
+      const authController = path.startsWith('/setup/claude-auth') ? options.claudeAuth : options.setupAuth;
+      const authPath = path.replace('/setup/claude-auth', '/setup/auth');
+      if (authPath === '/setup/auth' && req.method === 'GET') return send(res, 200, authController ? await authController.status(owner) : { available: false, busy: false, connection: { saved: false } });
+      if (authPath === '/setup/auth' && req.method === 'POST') {
+        if (!authController) throw new AppError('setup_unavailable', 'Provider setup is not enabled on this service.', 503);
         const input = await body(req, 8192);
         if (maintenanceUntil > Date.now()) throw new AppError('setup_busy', 'The launcher is updating project mounts. Try again afterwards.', 409);
-        return send(res, 202, options.setupAuth.start(owner, input));
+        if ((authController !== options.setupAuth && options.setupAuth?.busy) || (authController !== options.claudeAuth && options.claudeAuth?.busy)) throw new AppError('setup_busy', 'Another provider sign-in is in progress', 409);
+        return send(res, 202, authController.start(owner, input));
       }
-      if (path === '/setup/auth/cancel' && req.method === 'POST') {
-        if (!options.setupAuth) throw new AppError('setup_unavailable', 'Provider setup is not enabled on this service.', 503);
-        return send(res, 200, await options.setupAuth.cancel(owner));
+      if (authPath === '/setup/auth/cancel' && req.method === 'POST') {
+        if (!authController) throw new AppError('setup_unavailable', 'Provider setup is not enabled on this service.', 503);
+        return send(res, 200, await authController.cancel(owner));
       }
       if (path === '/setup/maintenance/release' && req.method === 'POST') {
         if (principal.kind !== 'bearer') throw new AppError('bearer_required', 'Project mounts are managed by the local launcher.', 403);
@@ -145,12 +150,12 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       if (path === '/setup/maintenance' && req.method === 'POST') {
         if (principal.kind !== 'bearer') throw new AppError('bearer_required', 'Project mounts are managed by the local launcher.', 403);
         options.assertSetupIdle?.();
-        if (options.setupAuth?.busy || service.store.summaries({ states: ['planning', 'ready', 'running', 'validating', 'reviewing', 'repairing', 'committing'], limit: 1 }).tasks.length) throw new AppError('setup_busy', 'Finish or cancel active work and sign-in before changing project mounts.', 409);
+        if (options.setupAuth?.busy || options.claudeAuth?.busy || service.store.summaries({ states: ['planning', 'ready', 'running', 'validating', 'reviewing', 'repairing', 'committing'], limit: 1 }).tasks.length) throw new AppError('setup_busy', 'Finish or cancel active work and sign-in before changing project mounts.', 409);
         maintenanceUntil = Date.now() + 120000;
         return send(res, 200, { ready: true });
       }
-      const assertExecutionReady = () => { if (options.setupAuth?.busy || maintenanceUntil > Date.now()) throw new AppError('setup_busy', 'Setup is in progress. Retry after it finishes.', 409); };
-      if ((options.setupAuth?.busy || maintenanceUntil > Date.now()) && req.method === 'POST' && (path === '/tasks' || /^\/tasks\/[^/]+\/(mode|approve|run|plan)$/.test(path))) throw new AppError('setup_busy', 'Setup is in progress. Retry after it finishes.', 409);
+      const assertExecutionReady = () => { if ((options.setupAuth?.busy || options.claudeAuth?.busy) || maintenanceUntil > Date.now()) throw new AppError('setup_busy', 'Setup is in progress. Retry after it finishes.', 409); };
+      if (((options.setupAuth?.busy || options.claudeAuth?.busy) || maintenanceUntil > Date.now()) && req.method === 'POST' && (path === '/tasks' || /^\/tasks\/[^/]+\/(mode|approve|run|plan)$/.test(path))) throw new AppError('setup_busy', 'Setup is in progress. Retry after it finishes.', 409);
       if (req.method === 'GET' && path === '/submission-options') return send(res, 200, service.submissionOptions());
       if (req.method === 'GET' && path === '/projects') return send(res, 200, service.store.projects());
       if (req.method === 'POST' && path === '/projects') return send(res, 201, await service.registerProject(await body(req)));

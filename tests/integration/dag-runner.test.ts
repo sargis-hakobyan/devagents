@@ -5,13 +5,16 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fixture } from '../helpers.js';
 import { FixtureValidator, fixtureQualityReport } from '../fixtures/fake-engine.js';
+import { EngineRegistry } from '../../src/engines/registry.js';
+import { TaskService } from '../../src/orchestration/service.js';
 import { TaskRunner } from '../../src/orchestration/runner.js';
 import { git } from '../../src/workspace/git.js';
 import type { CodingEngine, EngineRequest, EngineResult } from '../../src/domain/engine.js';
 
-type Options = { qaFirstFails?: boolean; qaBlocked?: boolean; failAfterReport?: boolean; limitations?: boolean; environmentRecovery?: boolean; synchronizeWorkers?: boolean; devagentsRules?: boolean; projectCommands?: boolean; hidden?: boolean; markdown?: boolean; unresolved?: 'markers' | 'separator'; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
+type Options = { mixedEngines?: boolean; qaFirstFails?: boolean; qaBlocked?: boolean; failAfterReport?: boolean; limitations?: boolean; environmentRecovery?: boolean; synchronizeWorkers?: boolean; devagentsRules?: boolean; projectCommands?: boolean; hidden?: boolean; markdown?: boolean; unresolved?: 'markers' | 'separator'; invalidCombinedCommand?: boolean; conflict?: boolean; rejectCombined?: boolean; failItem?: boolean; wait?: boolean; outside?: boolean; diverge?: boolean; roleConcurrency?: number };
 async function dagFixture(options: Options = {}) {
   const f = await fixture(options.devagentsRules ?? true);
+  if (options.mixedEngines) f.service = new TaskService(f.store, f.service.config, f.dataDir, process.platform, new Set(['codex', 'claude-code']));
   // Modules live in per-item directories so ownership uses subtree grants, the only write-grant form the Linux runtime accepts.
   for (const id of ['a', 'b', 'c']) {
     const assertion = options.conflict && id !== 'c'
@@ -28,7 +31,7 @@ async function dagFixture(options: Options = {}) {
   const originalHead = await git(f.project, ['rev-parse', 'HEAD']);
   await mkdir(join(f.dataDir, 'agents'), { recursive: true });
   await writeFile(join(f.dataDir, 'agents', 'module-developer.md'), 'Implement only the assigned module.');
-  await writeFile(join(f.dataDir, 'agents', 'module-developer.yaml'), `schemaVersion: 1\nid: module-developer\nname: Module developer\ndescription: Custom module specialist\ncapabilities: [implementation, filesystem-read, filesystem-write]\ninstructionsFile: ./module-developer.md\ndelegation: {canReceiveTasks: true, canDelegate: false}\npermissions:\n  readPaths: ["project:/**"]\n  writePaths: ["project:/a/**", "project:/b/**", "project:/c/**", "project:/shared/**"]\n  allowCommands: true\nconcurrency: ${options.roleConcurrency ?? 2}\n`);
+  await writeFile(join(f.dataDir, 'agents', 'module-developer.yaml'), `schemaVersion: 1\n${options.mixedEngines ? 'engine: claude-code\nprovider: anthropic\n' : ''}id: module-developer\nname: Module developer\ndescription: Custom module specialist\ncapabilities: [implementation, filesystem-read, filesystem-write]\ninstructionsFile: ./module-developer.md\ndelegation: {canReceiveTasks: true, canDelegate: false}\npermissions:\n  readPaths: ["project:/**"]\n  writePaths: ["project:/a/**", "project:/b/**", "project:/c/**", "project:/shared/**"]\n  allowCommands: true\nconcurrency: ${options.roleConcurrency ?? 2}\n`);
   let active = 0; let maxActive = 0; let reviewActive = 0; let maxReviewActive = 0; let aborted = 0; let combinedReviews = 0;
   let release!: () => void; const twoRunning = new Promise<void>(r => { release = r; });
   let reportRecorded!: () => void; const firstReport = new Promise<void>(resolve => { reportRecorded = resolve; });
@@ -119,7 +122,7 @@ async function dagFixture(options: Options = {}) {
     if (!checkedEnvironments.has(cwd)) { checkedEnvironments.add(cwd); return {...command, exitCode: 1, output: "Cannot find package 'workspace-tool' imported from /workspace/"}; }
     return baseValidator.execute(cwd, command, signal, timeout);
   } } : baseValidator;
-  const runner = new TaskRunner(f.service, engine, validator, options.synchronizeWorkers ? { async prepare({ cwd }) { preparedCwds.add(cwd); } } : undefined); f.service.attachRunner(runner);
+  const runner = new TaskRunner(f.service, options.mixedEngines ? new EngineRegistry([engine, { id: 'claude-code', preflight: async provider => { assert.equal(provider.kind, 'anthropic'); }, execute: (request, progress) => { assert.equal(request.agent.id, 'module-developer'); assert.equal(request.provider.kind, 'anthropic'); return engine.execute(request, progress); } }]) : engine, validator, options.synchronizeWorkers ? { async prepare({ cwd }) { preparedCwds.add(cwd); } } : undefined); f.service.attachRunner(runner);
   return { ...f, runner, calls, preparedCwds, originalHead, twoRunning, metrics: () => ({ active, maxActive, maxReviewActive, aborted, combinedReviews }), options };
 }
 
@@ -424,5 +427,18 @@ test('disabling QA preserves parallel item validation, integration, and final co
     assert.equal(f.calls.filter(c => c.phase === 'review' && c.workItemId === '@integration').length, 1);
     assert.equal(f.store.workItems(task.id).filter(i => i.state === 'completed').length, 3);
     assert.ok(done.outcome?.commit);
+  } finally { await f.runner.stop(); await f.cleanup(); }
+});
+
+
+test('DAG specialists run on Claude while planning, independent review and combined repair use Codex', async () => {
+  const f = await dagFixture({ mixedEngines: true, rejectCombined: true });
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Mixed engines', mode: 'autonomous' }, 'mixed-dag');
+    await f.runner.idle(); assert.equal(f.store.task(task.id).state, 'completed', JSON.stringify(f.store.task(task.id).outcome));
+    const runs = f.store.evidence(task.id).filter(e => e.kind === 'run-started').map(e => e.data as { agentId: string; engine: string });
+    assert.ok(runs.some(r => r.engine === 'claude-code'));
+    assert.ok(runs.every(r => r.engine === (r.agentId === 'module-developer' ? 'claude-code' : 'codex')));
+    assert.equal(f.metrics().combinedReviews, 2);
   } finally { await f.runner.stop(); await f.cleanup(); }
 });

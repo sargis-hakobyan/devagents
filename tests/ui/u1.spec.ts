@@ -63,14 +63,15 @@ test('a completed multi-item task shows real items, plan, activity and result', 
   await page.goto(`${base}/ui/tasks/${t.id}`);
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Implement three modules');
   await expect(page.locator('.chip.ok', { hasText: 'Completed' }).first()).toBeVisible();
-  await expect(page.getByText(/5 of 6 members involved · 5 finished/)).toBeVisible();
-  const items = page.locator('.memberlist article[data-member]');
-  await expect(items).toHaveCount(7); // six involved members plus the unused QA engineer
-  await expect(page.locator('.memberlist article[data-member="general-developer"]')).toContainText('depends on a, b');
-  const first = page.locator('.memberlist article[data-member="backend-developer"]');
-  await expect(first).toContainText('Tests ✓'); await expect(first).toContainText('Review ✓'); await expect(first).toContainText('Checkpoint');
+  await expect(page.getByText(/6 of 6 members involved · 6 finished/)).toBeVisible();
+  const build = page.getByRole('listitem', { name: 'Stage 2: Build', exact: true });
+  await expect(build).toContainText('Backend Developer'); await expect(build).toContainText('Frontend Developer');
+  await expect(build).toContainText('tests ✓'); await expect(build).toContainText('review ✓'); await expect(build).toContainText('checkpoint');
+  await expect(page.getByRole('listitem', { name: 'Stage 4: QA', exact: true })).toContainText('Passed');
   await page.getByRole('tab', { name: 'Plan' }).click();
-  await expect(page.getByText('Fixture risk: module c depends on both a and b')).toBeVisible();
+  await expect(page.getByText('The final part depends on the first two being ready.')).toBeVisible();
+  await expect(page.getByText('node --test a.test.cjs b.test.cjs c.test.cjs').first()).not.toBeVisible();
+  await page.locator('.plan-details > summary').click();
   await expect(page.getByText('node --test a.test.cjs b.test.cjs c.test.cjs').first()).toBeVisible();
   await page.getByRole('tab', { name: /Activity/ }).click();
   await expect(page.locator('ol.timeline li').first()).toBeVisible();
@@ -84,7 +85,7 @@ test('a completed multi-item task shows real items, plan, activity and result', 
   await expect(page.getByText('Completion is a local reviewed commit, not a merge or deployment.')).toBeVisible();
   await page.screenshot({ path: join(shots, 'u1-task-completed.png'), fullPage: true });
 });
-test('approval-wait, failed and cancelled tasks explain themselves and keep cleanup unavailable', async ({ page }) => {
+test('approval waits survive while failed and cancelled tasks show actual cleanup status', async ({ page }) => {
   await signIn(page);
   const waiting = await find('Add input validation');
   await page.goto(`${base}/ui/tasks/${waiting.id}`);
@@ -97,7 +98,8 @@ test('approval-wait, failed and cancelled tasks explain themselves and keep clea
   await expect(page.locator('.chip.bad', { hasText: 'Failed' }).first()).toBeVisible();
   await expect(page.getByText('Repair budget exhausted', { exact: false }).first()).toBeVisible();
   await page.getByRole('tab', { name: 'Result' }).click();
-  await expect(page.getByText('Worktrees are preserved for inspection', { exact: false })).toBeVisible();
+  await expect(page.getByText('Task worktrees and generated resources cleaned up.', { exact: false })).toBeVisible();
+  await expect(page.getByText('Unfinished files saved in private recovery snapshots:', { exact: false })).toBeVisible();
   await expect(page.getByRole('button', { name: /Clean up worktrees/ })).toBeDisabled();
   await page.screenshot({ path: join(shots, 'u1-task-failed.png'), fullPage: true });
   const cancelled = await find('Rename the helper');
@@ -183,4 +185,15 @@ test('sign-out ends the session and the API refuses unauthenticated or cross-ori
   await expect(page.getByText('devagents ui', { exact: true })).toBeVisible();
   await page.goto(`${base}/ui/tasks`);
   await expect(page).toHaveURL(`${base}/ui/signed-out`);
+});
+
+
+test('completed task result reports resource cleanup and retained commit diff', async ({ page }) => {
+  await signIn(page); const task = await find('Fix the greeting');
+  await page.goto(`${base}/ui/tasks/${task.id}`);
+  await page.getByRole('tab', { name: 'Result' }).click();
+  await expect(page.getByText('Task worktrees and generated resources cleaned up.', { exact: false })).toBeVisible();
+  await expect(page.getByText('Result · completed')).toBeVisible();
+  await expect(page.getByText('greeting.cjs', { exact: false }).first()).toBeVisible();
+  await page.screenshot({ path: join(shots, 'terminal-cleanup-completed.png'), fullPage: true });
 });

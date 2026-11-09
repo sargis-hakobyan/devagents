@@ -2,7 +2,7 @@
 set -eu
 cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 umask 077
-usage() { echo 'Usage: ./devagents [start|setup|project add] [--browser|--terminal|--later] [--build] [--auth chatgpt|api-key|saved] [--test-connection]'; }
+usage() { echo 'Usage: ./devagents [start|setup|project add] [--browser|--terminal|--later] [--build] [--auth chatgpt|api-key|saved] [--test-connection]'; echo '       ./devagents project add [--name PROJECT_ID --path /absolute/host/folder]'; }
 command_name=${1:-start}
 case "$command_name" in
   start|setup) if [ "$#" -gt 0 ]; then shift; fi ;;
@@ -10,9 +10,13 @@ case "$command_name" in
   --help|-h) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
-place=''; auth=''; test_connection=''; build=''
+place=''; auth=''; test_connection=''; build=''; project_name_arg=''; project_path_arg=''
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --name|--path)
+      [ "$command_name" = project ] && [ "$#" -ge 2 ] && [ -n "$2" ] || { usage >&2; exit 2; }
+      case "$1" in --name) project_name_arg=$2 ;; --path) project_path_arg=$2 ;; esac
+      shift 2 ;;
     --browser) place=browser; shift ;;
     --terminal) place=terminal; shift ;;
     --later) place=later; shift ;;
@@ -93,11 +97,13 @@ echo 'DevAgents is running.'
 add_project() {
   [ -t 0 ] || { echo 'Run ./devagents project add in an interactive terminal.' >&2; return 1; }
   while :; do
-    printf 'Project name: '; IFS= read -r project_name
+    if [ -n "$project_name_arg" ]; then project_name=$project_name_arg; project_name_arg=''
+    else printf 'Project name: '; IFS= read -r project_name; fi
     if project_id=$(sh scripts/project-id.sh "$project_name"); then break; fi
   done
   printf 'Project ID: %s\n' "$project_id"
-  printf 'Absolute path to your existing Git checkout: '; IFS= read -r project_path
+  if [ -n "$project_path_arg" ]; then project_path=$project_path_arg
+  else printf 'Absolute path to your existing Git checkout: '; IFS= read -r project_path; fi
   case "$project_path" in /*) ;; *) echo 'Enter an absolute folder path.' >&2; return 1 ;; esac
   [ -d "$project_path" ] || { echo 'That directory does not exist.' >&2; return 1; }
   project_path=$(CDPATH= cd -- "$project_path" && pwd -P)
