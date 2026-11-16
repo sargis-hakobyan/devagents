@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — GitHub accounts in Settings (U7, housekeeping)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#3B3F5E;text-decoration:none;font-weight:600;font-size:14px}
+.nav a:hover{background:#E6E8F3;color:#1C1A33}.nav a.on{background:#231F4A;color:#FFFFFF}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.c-ok{background:#E1F5EA;color:#135E38}.c-warn{background:#FFF1DB;color:#7A4A00}.c-bad{background:#FDE8E6;color:#8A1C14}.c-n{background:#EAECF5;color:#3B3F5E}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}.btn.small{min-height:36px;font-size:13px;padding:0 14px}.btn.quiet{border-color:transparent;background:transparent;color:#5A5F78;padding:0 8px}
+.btn:focus-visible,.nav a:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:#F2F3FA;border:1px solid #E0E2EE;border-radius:6px;padding:2px 6px}
+.h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5A5F78}
+.acct{display:flex;align-items:center;gap:14px;padding:16px 22px;flex-wrap:wrap}
+.acct + .acct{border-top:1px solid #EAECF5}
+.mark{flex:0 0 40px;width:40px;height:40px;border-radius:10px;background:#231F4A;color:#FFFFFF;display:grid;place-items:center;font-weight:800;font-size:15px}
+.who{display:flex;flex-direction:column;min-width:0;flex:1 1 260px}
+.who b{font-size:16px;line-height:1.3}.who span{font-size:13.5px;color:#5A5F78}
+.token{display:flex;gap:10px;align-items:stretch;flex-wrap:wrap}
+.token input{flex:1 1 320px;min-height:48px;border:1px solid #D1D4E4;border-radius:12px;padding:0 14px;font:inherit;font-size:15px;background:#FFFFFF;color:#1C1A33}
+details > summary{cursor:pointer;font-weight:700;font-size:13.5px;color:#3B3F5E;list-style:none}
+details > summary::-webkit-details-marker{display:none}
+details > summary::before{content:"▸ ";color:#5A5F78}details[open] > summary::before{content:"▾ "}
+.fine{font-size:13.5px;color:#5A5F78;margin:8px 0 0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:4px}
+.trouble{display:grid;grid-template-columns:200px minmax(0,1fr) auto;gap:6px 18px;align-items:center;padding:12px 22px}
+.trouble + .trouble{border-top:1px solid #EAECF5}
+.callout{background:#FFF8E1;border:1px solid #F1D18A;border-radius:10px;padding:10px 12px;font-size:13px;color:#5A4A00}
+.callout b{color:#7A4A00}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+  <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 18px"><div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div><div style="width: 1px; height: 36px; background: rgba(255,255,255,0.18)"></div><div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #B9B6D9">Local workspace</span><span style="font-weight: 700; font-size: 16px">127.0.0.1:4310 · docker</span></div></div>
+    <span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6EE7A8" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Service connected</span>
+  </header>
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD">
+      <a href="Main.dc.html">Overview</a><a href="A-Tasks.dc.html">Tasks</a><a href="A-Teams.dc.html">Teams</a><a href="U7-GitHub-Projects.dc.html">Projects</a><a href="A-Settings.dc.html" class="on" aria-current="page">Settings</a>
+    </nav>
+    <main style="flex: 999 1 560px; min-width: 0; padding: 32px 40px 48px; display: flex; flex-direction: column; gap: 22px; max-width: 980px">
+      <div><div class="h">Settings</div><h1 style="margin: 4px 0 0; font-size: 36px; letter-spacing: -0.03em; line-height: 1.1">GitHub accounts</h1><p class="muted" style="margin: 6px 0 0; font-size: 16px">An account is connected when you add a GitHub project. Come here only to replace or remove a token. One token serves every project on its account.</p></div>
+
+      <!-- Connected accounts: one line each, one status, at most one prominent action. -->
+      <section class="card" aria-label="Connected accounts" style="display: flex; flex-direction: column">
+        <div style="padding: 14px 22px; border-bottom: 1px solid #E0E2EE; font-weight: 800; font-size: 16px">Connected accounts · 2</div>
+        <article class="acct">
+          <span class="mark" aria-hidden="true">EO</span>
+          <div class="who"><b>example-org</b><span>as <span class="mono">@sargis</span> · 2 repositories · used by projects <a href="U7-GitHub-Projects.dc.html">website</a>, <a href="U7-GitHub-Projects.dc.html">api</a></span></div>
+          <span class="chip c-ok">✓ Connected</span>
+          <button class="btn small quiet" type="button" aria-label="More actions for example-org">Manage ▾</button>
+        </article>
+        <article class="acct" style="background: #FFFBF2">
+          <span class="mark" aria-hidden="true" style="background: #B45309">SG</span>
+          <div class="who"><b>sargis</b><span>personal account · 5 repositories · used by project <a href="U7-GitHub-Projects.dc.html">notes-app</a> · <b style="color: #7A4A00">token expires on Sunday</b></span></div>
+          <span class="chip c-warn">⚠ Expires in 3 days</span>
+          <button class="btn small primary" type="button">Replace token</button>
+        </article>
+        <div style="padding: 12px 22px; border-top: 1px solid #EAECF5; font-size: 13.5px" class="muted">Need another account? <a href="U7-GitHub-Projects.dc.html#add">Add a GitHub project</a> and choose "Use another account…".</div>
+      </section>
+
+      <!-- "Manage" opened: everything that used to be on the row lives here. -->
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start">
+        <section class="card" aria-label="Manage menu, opened" style="padding: 16px 20px; display: flex; flex-direction: column; gap: 10px">
+          <div class="h">"Manage" opened · example-org</div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn small" type="button">Replace token</button><button class="btn small" type="button">Check again</button><button class="btn small" type="button" disabled aria-disabled="true" style="opacity: .55; cursor: not-allowed" title="Two projects use this account. Unlink them first.">Remove · used by 2 projects</button></div>
+          <details open>
+            <summary>Details</summary>
+            <ul class="fine">
+              <li>Fine-grained token · checked 12:04 · expires in 58 days</li>
+              <li>Repositories: <span class="mono">example-org/website</span>, <span class="mono">example-org/api</span></li>
+              <li>Can push branches, open pull requests, read checks and reviews</li>
+              <li>Cannot edit workflow files (Workflows permission not granted)</li>
+            </ul>
+          </details>
+        </section>
+        <section class="card" aria-label="No accounts yet" style="padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; border-style: dashed">
+          <div class="h">Before any account is connected</div>
+          <span><b>No GitHub accounts yet.</b> <span class="muted">Projects in local folders need none.</span></span>
+          <div><a class="btn small primary" href="U7-GitHub-Projects.dc.html#add">Add a GitHub project</a></div>
+        </section>
+      </div>
+
+      <!-- Problems appear only when they exist, on the account's own row. -->
+      <section class="card" aria-label="When something needs you" style="display: flex; flex-direction: column">
+        <div style="padding: 14px 22px; border-bottom: 1px solid #E0E2EE; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap"><span style="font-weight: 800; font-size: 16px">When something needs you</span><span class="muted" style="font-size: 13px">Shown on the account's row in place of "Connected". Local tasks keep working in every case.</span></div>
+        <div class="trouble"><span class="chip c-bad" style="justify-self: start">✕ Token not accepted</span><span>Mistyped, expired or revoked. Pull requests pause; nothing is retried in a loop.</span><button class="btn small primary" type="button">Replace token</button></div>
+        <div class="trouble"><span class="chip c-warn" style="justify-self: start">⚠ Limited</span><span>A permission is missing, for example Pull requests is read only. The buttons that need it are disabled and say why.</span><button class="btn small" type="button">Replace token</button></div>
+        <div class="trouble"><span class="chip c-n" style="justify-self: start">Locked</span><span>The vault is locked after a restart, like the engine sign-ins. Run <code>./devagents start</code> to unlock.</span><span class="muted" style="font-size: 13px">no button</span></div>
+      </section>
+
+      <!-- The promise, in one line. -->
+      <details class="card" style="padding: 14px 22px">
+        <summary style="font-size: 14.5px; color: #1C1A33">Only DevAgents uses the token. Agents never see it, and it never merges, force-pushes or pushes to your default branch.</summary>
+        <ul class="fine">
+          <li>It fetches, pushes task branches named <span class="mono">devagents/…</span>, opens and updates pull requests, reads reviews and checks, and replies to review threads.</li>
+          <li>It never changes repository settings and never re-runs or cancels workflows.</li>
+          <li>Token values are redacted from logs, events, evidence, prompts and diffs.</li>
+        </ul>
+      </details>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

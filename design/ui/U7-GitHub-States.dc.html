@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — GitHub in Overview and Tasks, edge states and narrow view (U7)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#3B3F5E;text-decoration:none;font-weight:600;font-size:14px}
+.nav a:hover{background:#E6E8F3;color:#1C1A33}.nav a.on{background:#231F4A;color:#FFFFFF}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.c-ok{background:#E1F5EA;color:#135E38}.c-warn{background:#FFF1DB;color:#7A4A00}.c-bad{background:#FDE8E6;color:#8A1C14}.c-run{background:#E3ECFF;color:#1C3F99}.c-n{background:#EAECF5;color:#3B3F5E}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}.btn.small{min-height:34px;font-size:13px;padding:0 12px}
+.btn:focus-visible,.nav a:focus-visible,.filter:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.note{border-radius:10px;padding:10px 12px;font-size:13.5px}
+.note.warn{background:#FFF1DB;border:1px solid #F1D18A}.note.bad{background:#FDF2F1;border:1px solid #F3C1BD}.note.info{background:#F3F6FE;border:1px solid #C9D7F7}
+.h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5A5F78}
+.strip{display:flex;align-items:center;gap:8px;padding:12px 18px;background:#FFF1DB;border-bottom:1px solid #F1D18A;border-radius:14px 14px 0 0;font-weight:800;color:#7A4A00}
+.att{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 18px;border-top:1px solid #EAECF5}
+.att:first-of-type{border-top:0}
+.filter{min-height:36px;padding:0 14px;border-radius:999px;border:1px solid #D1D4E4;background:#FFFFFF;font:inherit;font-size:13.5px;font-weight:600;color:#3B3F5E;cursor:pointer}.filter.on{background:#231F4A;border-color:#231F4A;color:#FFFFFF}
+.trow{display:grid;grid-template-columns:minmax(0,1fr) 150px 250px;gap:12px;align-items:center;padding:12px 18px;border-top:1px solid #EAECF5;font-size:14px}
+.state{padding:16px 18px;display:flex;flex-direction:column;gap:8px}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+  <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 18px"><div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div><div style="width: 1px; height: 36px; background: rgba(255,255,255,0.18)"></div><div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #B9B6D9">Local workspace</span><span style="font-weight: 700; font-size: 16px">127.0.0.1:4310 · docker</span></div></div>
+    <div style="display: flex; gap: 8px; flex-wrap: wrap"><span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6EE7A8" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Service connected</span><span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF">GitHub synced 12:04</span></div>
+  </header>
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD">
+      <a href="Main.dc.html" class="on" aria-current="page">Overview</a><a href="A-Tasks.dc.html">Tasks <span style="margin-left: auto; background: #FFB703; color: #231F4A; font-size: 11px; padding: 1px 7px; border-radius: 999px; font-weight: 800">3</span></a><a href="A-Teams.dc.html">Teams</a><a href="U7-GitHub-Projects.dc.html">Projects</a><a href="U7-GitHub-Connect.dc.html">Settings</a>
+    </nav>
+    <main style="flex: 999 1 560px; min-width: 0; padding: 24px 40px 48px; display: flex; flex-direction: column; gap: 20px">
+      <div><div class="h">Overview · the existing "Needs your attention" card gains GitHub items</div><p class="muted" style="margin: 4px 0 0; font-size: 13.5px">No new page and no new navigation entry. A pull request needs you when something on GitHub is waiting and the project policy does not let DevAgents act by itself, or when it has used up its automatic rounds.</p></div>
+      <section class="card" aria-label="Needs your attention" style="border-color: #F1D18A">
+        <div class="strip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#B45309" stroke-width="2.5" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>Needs your attention · 4</div>
+        <div class="att"><div style="min-width: 0"><b>website · PR #42 · 2 new review comments and 1 failed check</b><div class="muted" style="font-size: 13.5px">Add input validation to the signup form · changes requested by @mira at 13:31</div></div><a class="btn small primary" href="U7-GitHub-PR.dc.html">Open pull request</a></div>
+        <div class="att"><div style="min-width: 0"><b>api · PR #17 · checks still fail after 3 automatic rounds</b><div class="muted" style="font-size: 13.5px">Paginate the orders endpoint · the limit of this project is reached, nothing more starts by itself</div></div><a class="btn small" href="U7-GitHub-PR.dc.html">Open pull request</a></div>
+        <div class="att"><div style="min-width: 0"><b>website · round 2 of PR #40 finished locally, waiting to be pushed</b><div class="muted" style="font-size: 13.5px">Commit 77c0d31 · policy "on click"</div></div><a class="btn small" href="U7-GitHub-PR.dc.html">Review and push</a></div>
+        <div class="att"><div style="min-width: 0"><b>GitHub connection "personal" expires in 3 days</b><div class="muted" style="font-size: 13.5px">1 project uses it</div></div><a class="btn small" href="U7-GitHub-Connect.dc.html">Replace token</a></div>
+      </section>
+
+      <div><div class="h">Tasks · one chip per row, one new filter</div></div>
+      <section class="card" aria-label="Tasks" style="display: flex; flex-direction: column">
+        <div role="group" aria-label="Filters" style="padding: 12px 18px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center"><button class="filter on" type="button" aria-pressed="true">All · 9</button><button class="filter" type="button" aria-pressed="false">Needs you · 3</button><button class="filter" type="button" aria-pressed="false">Active · 1</button><button class="filter" type="button" aria-pressed="false">Open pull request · 3</button></div>
+        <div class="trow"><div style="min-width: 0"><b>Add input validation to the signup form</b><div class="muted" style="font-size: 13px">website · today 11:41</div></div><span class="chip c-ok" style="justify-self: start">✓ Completed</span><span class="chip c-warn" style="justify-self: start">⚠ PR #42 · needs you</span></div>
+        <div class="trow"><div style="min-width: 0"><b>Round 2 · review comments on PR #42</b><div class="muted" style="font-size: 13px">website · today 13:02 · follows "Add input validation…"</div></div><span class="chip c-ok" style="justify-self: start">✓ Completed</span><span class="chip c-n" style="justify-self: start">PR #42 · round 2 pushed</span></div>
+        <div class="trow"><div style="min-width: 0"><b>Round 4 · failed check on PR #17</b><div class="muted" style="font-size: 13px">api · today 13:40 · started by you</div></div><span class="chip c-run" style="justify-self: start">Running</span><span class="chip c-run" style="justify-self: start">PR #17 · round 4 running</span></div>
+        <div class="trow"><div style="min-width: 0"><b>Rename the pricing helper</b><div class="muted" style="font-size: 13px">website · yesterday 16:10</div></div><span class="chip c-ok" style="justify-self: start">✓ Completed</span><span class="chip c-ok" style="justify-self: start">✓ PR #40 · merged</span></div>
+        <div class="trow"><div style="min-width: 0"><b>Tidy the footer links</b><div class="muted" style="font-size: 13px">website · yesterday 15:02</div></div><span class="chip c-ok" style="justify-self: start">✓ Completed</span><span class="chip c-n" style="justify-self: start">Local commit · not published</span></div>
+        <div class="trow"><div style="min-width: 0"><b>Three modules</b><div class="muted" style="font-size: 13px">fixture · Monday 09:41</div></div><span class="chip c-ok" style="justify-self: start">✓ Completed</span><span class="muted" style="font-size: 13px">Local-only project</span></div>
+      </section>
+
+      <div class="h">Pull request edge states · shown in the banner of the Pull request tab</div>
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) 422px; gap: 16px; align-items: start">
+        <section aria-label="Edge states" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+          <div class="card state" style="border-color: #B7E3C8"><div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800">Merged</span><span class="chip c-ok">✓ Merged into main</span></div><span class="muted" style="font-size: 13.5px">Merged on GitHub by @mira at 14:02 as <span class="mono">a41f9d0</span>. Syncing stops. Rounds, evidence and diffs stay readable. The local task branch is kept until you clean it up.</span></div>
+          <div class="card state"><div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800">Closed without merging</span><span class="chip c-n">Closed</span></div><span class="muted" style="font-size: 13.5px">Closed on GitHub. Syncing stops and no round can start. Reopening it on GitHub resumes syncing at the next check.</span></div>
+          <div class="card state" style="border-color: #F1D18A"><div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800">Automatic limit reached</span><span class="chip c-warn">⚠ 3 of 3 rounds used</span></div><span class="muted" style="font-size: 13.5px">Checks still fail after the third automatic round. Nothing more starts by itself. You can read the three rounds, start another one yourself, or take over the branch.</span></div>
+          <div class="card state" style="border-color: #F1D18A"><div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800">Someone else pushed</span><span class="chip c-warn">⚠ 1 commit by @mira</span></div><span class="muted" style="font-size: 13.5px">The branch on GitHub is ahead of DevAgents' last push. The next round starts from GitHub's latest commit <span class="mono">5f0c2b8</span> and builds on it. DevAgents never rewrites or force-pushes over it.</span></div>
+          <div class="card state" style="border-color: #F1D18A"><div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800">Conflicts with main</span><span class="chip c-warn">⚠ Cannot merge cleanly</span></div><span class="muted" style="font-size: 13.5px">Offered as its own round: "Update from main". The team merges <span class="mono">origin/main</span> into the branch, resolves the conflicts, and the result is validated and reviewed before the push. No rebase.</span><div><button class="btn small" type="button">Start round · update from main</button></div></div>
+          <div class="card state"><div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800">No checks reported</span><span class="chip c-n">None after 10 min</span></div><span class="muted" style="font-size: 13.5px">GitHub lists no checks for <span class="mono">9c1d2aa</span>. The card says so plainly; a missing check is never shown as passed.</span></div>
+          <div class="card state" style="border-color: #F3C1BD"><div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800">GitHub unreachable</span><span class="chip c-bad">✕ Last synced 12:01</span></div><span class="muted" style="font-size: 13.5px">Network down or rate limit reached. The last known state stays visible with its time. DevAgents waits longer between attempts. Local tasks are not affected.</span></div>
+          <div class="card state" style="border-color: #F3C1BD"><div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800">Round failed</span><span class="chip c-bad">✕ Round 3 failed · nothing pushed</span></div><span class="muted" style="font-size: 13.5px">A failed or cancelled round leaves the pull request as it was. It counts toward the automatic limit, and its task explains the failure like any task.</span></div>
+        </section>
+
+        <section aria-label="Narrow view, 390 pixels" style="display: flex; flex-direction: column; gap: 8px">
+          <span class="h">390 px · Pull request tab</span>
+          <div style="width: 390px; max-width: 100%; border: 1px solid #C9CCDD; border-radius: 22px; overflow: hidden; background: #F2F3FA">
+            <div style="background: #231F4A; color: #FFFFFF; padding: 14px 16px; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #B9B6D9">website · PR #42</span><span style="font-weight: 700">Add input validation</span></div>
+            <div style="padding: 14px; display: flex; flex-direction: column; gap: 12px">
+              <div class="card" style="padding: 14px; display: flex; flex-direction: column; gap: 10px">
+                <div style="display: flex; gap: 6px; flex-wrap: wrap"><span class="chip c-run">Open · draft</span><span class="chip c-warn">⚠ Changes requested</span><span class="chip c-bad">✕ 1 check failed</span></div>
+                <div class="note warn"><b>Waiting for you: 2 comments and 1 failed check.</b></div>
+                <button class="btn primary" type="button" style="justify-content: center">Start round 3</button>
+                <button class="btn" type="button" style="justify-content: center">Comments only</button>
+              </div>
+              <div class="card" style="padding: 14px; display: flex; flex-direction: column; gap: 8px"><span style="font-weight: 800">Rounds</span><span style="font-size: 14px">1 · Original task · <span class="mono">b2f5e69</span> ✓</span><span style="font-size: 14px">2 · Review comments · <span class="mono">4e7a110</span> ✓</span><span class="muted" style="font-size: 14px">3 · Not started</span></div>
+              <div class="card" style="padding: 14px; display: flex; flex-direction: column; gap: 8px"><span style="font-weight: 800">Checks</span><span style="font-size: 14px">✓ build · ✓ lint</span><span style="font-size: 14px; color: #8A1C14"><b>✕ test (node 24)</b> · Run tests · exit 1</span></div>
+              <div class="card" style="padding: 14px; display: flex; flex-direction: column; gap: 8px"><span style="font-weight: 800">Review comments · 3 open</span><label style="display: flex; gap: 8px; font-size: 14px; align-items: flex-start"><input type="checkbox" checked style="margin-top: 4px"><span><span class="mono">validate.ts:22</span> · @mira<br><span class="muted">An empty password passes here…</span></span></label><label style="display: flex; gap: 8px; font-size: 14px; align-items: flex-start"><input type="checkbox" checked style="margin-top: 4px"><span><span class="mono">form.tsx:71</span> · @mira<br><span class="muted">The error text should come from…</span></span></label></div>
+            </div>
+          </div>
+          <span class="muted" style="font-size: 12.5px">Checks and comments stack under the banner; the two round buttons take the full width.</span>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":2100}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

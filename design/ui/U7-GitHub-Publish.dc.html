@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — Result tab: local result first, then publish to GitHub (U7)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#3B3F5E;text-decoration:none;font-weight:600;font-size:14px}
+.nav a:hover{background:#E6E8F3;color:#1C1A33}.nav a.on{background:#231F4A;color:#FFFFFF}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.c-ok{background:#E1F5EA;color:#135E38}.c-warn{background:#FFF1DB;color:#7A4A00}.c-bad{background:#FDE8E6;color:#8A1C14}.c-run{background:#E3ECFF;color:#1C3F99}.c-n{background:#EAECF5;color:#3B3F5E}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}.btn.small{min-height:34px;font-size:13px;padding:0 12px}.btn[disabled]{opacity:.55;cursor:not-allowed}
+.btn:focus-visible,.nav a:focus-visible,.tab:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.tab{min-height:44px;padding:0 4px;border:0;background:transparent;font:inherit;font-weight:700;font-size:15px;color:#5A5F78;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;gap:6px}.tab.on{color:#1C1A33;border-bottom-color:#FFB703}
+.note{border-radius:10px;padding:10px 12px;font-size:13.5px}
+.note.warn{background:#FFF1DB;border:1px solid #F1D18A}.note.bad{background:#FDF2F1;border:1px solid #F3C1BD}.note.info{background:#F3F6FE;border:1px solid #C9D7F7}
+.h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5A5F78}
+dl.kv{margin:0;display:grid;grid-template-columns:150px minmax(0,1fr);gap:7px 12px;font-size:14px}dl.kv dt{color:#5A5F78}dl.kv dd{margin:0;overflow-wrap:anywhere}
+.field{display:flex;flex-direction:column;gap:6px;font-size:13.5px;font-weight:700}
+.field input[type=text]{min-height:44px;border:1px solid #D1D4E4;border-radius:10px;padding:0 12px;font:inherit;font-weight:500;background:#FFFFFF;color:#1C1A33}
+ol.ops{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;font-size:14px}
+ol.ops li{display:flex;gap:10px;align-items:baseline}
+ol.ops .s{flex:0 0 22px;font-weight:800}
+details.body{border:1px solid #E0E2EE;border-radius:10px;background:#F8F8FD}
+details.body summary{padding:10px 12px;font-weight:700;font-size:13.5px;cursor:pointer}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+  <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 18px"><div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div><div style="width: 1px; height: 36px; background: rgba(255,255,255,0.18)"></div><div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #B9B6D9">website</span><span style="font-weight: 700; font-size: 16px">Add input validation</span></div></div>
+    <span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6EE7A8" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Service connected</span>
+  </header>
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD">
+      <a href="Main.dc.html">Overview</a><a href="A-Tasks.dc.html" class="on" aria-current="page">Tasks</a><a href="A-Teams.dc.html">Teams</a><a href="U7-GitHub-Projects.dc.html">Projects</a><a href="U7-GitHub-Connect.dc.html">Settings</a>
+    </nav>
+    <main style="flex: 999 1 560px; min-width: 0; padding: 24px 40px 48px; display: flex; flex-direction: column; gap: 20px">
+      <a href="A-Tasks.dc.html" style="font-weight: 700; font-size: 14px; text-decoration: none">← All tasks</a>
+      <section class="card" aria-label="Task header" style="padding: 22px 24px; display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip c-ok">✓ Completed</span><span class="chip c-n">Local only · not published</span><span class="muted" style="font-size: 13px">plan-approval · v9 · started 11:41 · took 14 min</span></div>
+        <h1 style="margin: 0; font-size: 28px; letter-spacing: -0.02em; line-height: 1.2">Add input validation to the signup form</h1>
+        <div class="muted" style="font-size: 14px">Project <span class="mono">website</span> · linked to <span class="mono">example-org/website</span> · Team: <a href="A-Teams.dc.html"><b>Website team</b></a> revision 3 · Branch <span class="mono">devagents/add-input-validation-2a6f7e1c</span></div>
+        <div class="note info"><b>Completed: one reviewed local commit on the task branch.</b> Commit <span class="mono">b2f5e69</span> on <span class="mono">devagents/add-input-validation-2a6f7e1c</span>. Nothing was merged or pushed. You can publish it to GitHub below, or integrate it yourself.</div>
+      </section>
+      <div role="tablist" aria-label="Task sections" style="display: flex; gap: 22px; border-bottom: 1px solid #E0E2EE; overflow-x: auto">
+        <button class="tab" role="tab" aria-selected="false" type="button">Work · 2</button><button class="tab" role="tab" aria-selected="false" type="button">Plan</button><button class="tab" role="tab" aria-selected="false" type="button">Activity · 38</button><button class="tab" role="tab" aria-selected="false" type="button">Usage</button><button class="tab on" role="tab" aria-selected="true" type="button">Result</button><a class="tab" href="U7-GitHub-PR.dc.html">Pull request · not opened</a>
+      </div>
+
+      <section class="card" aria-label="Local result" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800; font-size: 16px">Local result</span><span class="chip c-n">Unchanged from today</span></div>
+        <dl class="kv">
+          <dt>Summary</dt><dd>Email and password are validated in the form and again in the signup handler; four new tests pass; independent review approved with 0 findings.</dd>
+          <dt>Commit</dt><dd><span class="mono">b2f5e69c…</span> on <span class="mono">devagents/add-input-validation-2a6f7e1c</span> · base <span class="mono">feee8db</span></dd>
+          <dt>Validation</dt><dd><span class="mono">npm test</span> ✓ exit 0 · <span class="mono">npm run typecheck</span> ✓ exit 0</dd>
+          <dt>Review</dt><dd>✓ approved, 0 findings (Code Reviewer, frozen revision 3)</dd>
+          <dt>Changed files</dt><dd>5 files · +112 −9 · <a href="U3-Diff.dc.html">read-only diff below</a></dd>
+        </dl>
+      </section>
+
+      <section class="card" aria-label="Publish to GitHub" style="display: flex; flex-direction: column">
+        <div style="padding: 16px 22px; border-bottom: 1px solid #E0E2EE; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap"><div style="display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 800; font-size: 16px">Publish to GitHub</span><span class="muted" style="font-size: 13px">Shown only for projects linked to GitHub. Policy of <b>website</b>: pull requests on click.</span></div><span class="chip c-n">Not published</span></div>
+        <div style="padding: 20px 22px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px">
+          <div style="display: flex; flex-direction: column; gap: 12px">
+            <div class="h">What will happen</div>
+            <dl class="kv">
+              <dt>Repository</dt><dd><span class="mono">example-org/website</span> · connection <b>example-org</b></dd>
+              <dt>Push</dt><dd><span class="mono">devagents/add-input-validation-2a6f7e1c</span> at <span class="mono">b2f5e69</span>, as a new remote branch</dd>
+              <dt>Pull request</dt><dd>into <span class="mono">main</span>, as you (<span class="mono">@sargis</span>)</dd>
+              <dt>main on GitHub</dt><dd>2 commits ahead of this task's base · fetched 12:03 · merges cleanly</dd>
+              <dt>Afterwards</dt><dd>DevAgents watches reviews and checks. It never merges.</dd>
+            </dl>
+          </div>
+          <form style="display: flex; flex-direction: column; gap: 12px">
+            <label class="field">Pull request title<input type="text" value="Add input validation to the signup form"></label>
+            <label style="display: flex; gap: 8px; align-items: center; font-size: 14px"><input type="checkbox" checked> Open as draft</label>
+            <details class="body"><summary>Description preview · written from recorded evidence</summary><div style="padding: 0 12px 12px; font-size: 13.5px; display: flex; flex-direction: column; gap: 6px"><span><b>Summary</b> · the plan's proposed change, in plain language.</span><span><b>How it was checked</b> · the validation commands with exit codes and the review verdict.</span><span><b>Not verified</b> · the limitations listed on this task, if any.</span><span class="muted">Footer: "Prepared by DevAgents for @sargis". No model text is added that the task did not already record.</span></div></details>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap"><button class="btn primary" type="button">Push branch and open pull request</button><button class="btn" type="button">Push branch only</button></div>
+          </form>
+        </div>
+      </section>
+
+      <div class="h">Publishing states</div>
+      <section aria-label="Publishing states" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800">Publishing</span><span class="chip c-run">Step 3 of 4</span></div>
+          <ol class="ops"><li><span class="s" style="color: #135E38">✓</span><span>Fetched <span class="mono">origin</span></span></li><li><span class="s" style="color: #135E38">✓</span><span>Pushed <span class="mono">b2f5e69</span> to the new branch</span></li><li><span class="s" style="color: #2457C5">…</span><span><b>Opening the pull request</b></span></li><li><span class="s muted">·</span><span class="muted">First sync of reviews and checks</span></li></ol>
+          <span class="muted" style="font-size: 13px">Each step is recorded before it runs. After a restart DevAgents asks GitHub what exists and continues from there.</span>
+        </div>
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800">Published</span><span class="chip c-ok">✓ PR #42 · open · draft</span></div>
+          <span style="font-size: 14px">Opened 12:05 by you. The header chip changes to <b>PR #42</b> and the sixth tab becomes <b>Pull request · #42</b>.</span>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap"><a class="btn small primary" href="U7-GitHub-PR.dc.html">Open the Pull request tab</a><a class="btn small" href="https://github.com/">View on GitHub</a></div>
+        </div>
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800">Automatic policy</span><span class="chip c-ok">✓ PR #42 · opened automatically</span></div>
+          <span class="muted" style="font-size: 13.5px">Project policy "automatically when a task completes": the same four steps start right after the commit, with no form. The task still reads "Completed" first; publishing is a separate recorded step and can fail without changing the task.</span>
+        </div>
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800">Local-only project</span><span class="chip c-n">No GitHub card</span></div>
+          <span class="muted" style="font-size: 13.5px">For a project without a link, the Result tab is exactly today's: summary, commit, evidence, diff and "Nothing was merged or pushed; you integrate it yourself." There is no sixth tab and no publish card.</span>
+        </div>
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; border-color: #F3C1BD">
+          <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800">Push refused</span><span class="chip c-bad">✕ Nothing published</span></div>
+          <div class="note bad" role="alert"><b>GitHub refused the push.</b> The token of connection example-org cannot write to <span class="mono">example-org/website</span>. Your local commit is untouched.</div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap"><a class="btn small" href="U7-GitHub-Connect.dc.html">Open connections</a><button class="btn small" type="button">Try again</button></div>
+        </div>
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; border-color: #F1D18A">
+          <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800">Outcome unknown</span><span class="chip c-warn">⚠ Checking GitHub first</span></div>
+          <span class="muted" style="font-size: 13.5px">The connection dropped while pushing. DevAgents compares the remote branch with <span class="mono">b2f5e69</span> and looks for an existing pull request before doing anything else. It never repeats a push or opens a second pull request blindly.</span>
+          <div><button class="btn small" type="button">Check now</button></div>
+        </div>
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; border-color: #F3C1BD">
+          <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800">Branch name taken</span><span class="chip c-bad">✕ Not overwritten</span></div>
+          <span class="muted" style="font-size: 13.5px">A remote branch with this name already holds other commits. DevAgents does not force-push; it stops and shows both commits so you can decide on GitHub.</span>
+        </div>
+        <div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="font-weight: 800">Failed, cancelled or running task</span><span class="chip c-n">Not offered</span></div>
+          <span class="muted" style="font-size: 13.5px">Only a completed task with a recorded commit can be published. Other tasks show the reason in place of the buttons.</span>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

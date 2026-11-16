@@ -153,6 +153,54 @@
       "h": 4900,
       "title": "U6 · Work tab: the team on this task",
       "expand": "fill"
+    },
+    "U7-GitHub-Connect.dc.html": {
+      "x": 0,
+      "y": 13800,
+      "w": 1360,
+      "h": 1200,
+      "title": "U7 · Settings: GitHub accounts (replace or remove a token)",
+      "expand": "fill"
+    },
+    "U7-GitHub-Projects.dc.html": {
+      "x": 1440,
+      "y": 13800,
+      "w": 1360,
+      "h": 2500,
+      "title": "U7 · Projects: add from a folder or from GitHub, autonomy presets",
+      "expand": "fill"
+    },
+    "U7-GitHub-Publish.dc.html": {
+      "x": 2880,
+      "y": 13800,
+      "w": 1360,
+      "h": 1900,
+      "title": "U7 · Result tab: local result, then publish to GitHub",
+      "expand": "fill"
+    },
+    "U7-GitHub-PR.dc.html": {
+      "x": 4320,
+      "y": 13800,
+      "w": 1360,
+      "h": 2200,
+      "title": "U7 · Pull request tab: rounds, checks, review comments",
+      "expand": "fill"
+    },
+    "U7-GitHub-States.dc.html": {
+      "x": 5760,
+      "y": 13800,
+      "w": 1360,
+      "h": 2100,
+      "title": "U7 · Overview and Tasks, edge states, narrow view",
+      "expand": "fill"
+    },
+    "U8-Integrations.dc.html": {
+      "x": 0,
+      "y": 16900,
+      "w": 1360,
+      "h": 2590,
+      "title": "U8 · Project integrations: GitHub and Jira, both optional",
+      "expand": "fill"
     }
   },
   "order": [
@@ -173,7 +221,13 @@
     "U4-Cleanup-Lists.dc.html",
     "U5-Attention.dc.html",
     "U5-Modes-Cost.dc.html",
-    "U6-Work-Team.dc.html"
+    "U6-Work-Team.dc.html",
+    "U7-GitHub-Connect.dc.html",
+    "U7-GitHub-Projects.dc.html",
+    "U7-GitHub-Publish.dc.html",
+    "U7-GitHub-PR.dc.html",
+    "U7-GitHub-States.dc.html",
+    "U8-Integrations.dc.html"
   ],
   "notes": {
     "rowA": {
@@ -252,6 +306,27 @@
       "w": 440,
       "text": "Two treatments on one page: the pipeline (plan → build → review → integrate → commit, with the members who do each stage) and the roster (Finished / Working now / Up next columns). \"You\" appears as a member whenever a decision is yours. Every value is a recorded run, event or checkpoint; durations are timestamp differences; nothing is estimated. Members the plan does not need are shown as not needed. No new backend field is required. Large teams: each stage and roster column shows up to four full rows; finished members fold into a stack first, then up-next members; working, failed and needs-you rows never fold.",
       "fill": "blue"
+    },
+    "rowU7": {
+      "x": 0,
+      "y": 13500,
+      "text": "U7 — GitHub: attach repositories, publish pull requests, address reviews and failed checks (design only; local-only projects unchanged)",
+      "kind": "title1",
+      "maxW": 10000
+    },
+    "legendU7": {
+      "x": 7200,
+      "y": 13800,
+      "w": 440,
+      "text": "Contract: GitHub is optional per project. One project is one repository: local only (unchanged), a local folder linked to its repository, or a clone DevAgents manages. The account is chosen where a project is added; its token is pasted there the first time, sits in the vault once per account and is shared by that account's projects. Only the service uses it, agents never do. A completed task still ends in a local commit and diff; publishing (push the task branch, open a pull request) is a separate recorded step. Reviews and checks are read by polling. A follow-up round is a normal task that starts from the pull request's latest commit and adds one commit. Per-project policy decides what happens on click or automatically, with a limit on automatic rounds. Never: merge, force-push, push to the default branch. Plan: docs/GITHUB_INTEGRATION_PLAN.md.",
+      "fill": "blue"
+    },
+    "rowU8": {
+      "x": 0,
+      "y": 16600,
+      "text": "U8 — Integrations per project: Jira is where work comes from, GitHub is where the result goes; either, both or neither (design only)",
+      "kind": "title1",
+      "maxW": 10000
     }
   },
   "designSystems": []

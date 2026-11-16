@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — Projects: local folder or GitHub (U7, simplified)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#3B3F5E;text-decoration:none;font-weight:600;font-size:14px}
+.nav a:hover{background:#E6E8F3;color:#1C1A33}.nav a.on{background:#231F4A;color:#FFFFFF}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.c-ok{background:#E1F5EA;color:#135E38}.c-warn{background:#FFF1DB;color:#7A4A00}.c-bad{background:#FDE8E6;color:#8A1C14}.c-run{background:#E3ECFF;color:#1C3F99}.c-n{background:#EAECF5;color:#3B3F5E}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}.btn.small{min-height:36px;font-size:13px;padding:0 14px}.btn.quiet{border-color:transparent;background:transparent;color:#5A5F78;padding:0 8px}
+.btn:focus-visible,.nav a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,.pick:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:#F2F3FA;border:1px solid #E0E2EE;border-radius:6px;padding:2px 6px}
+.h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5A5F78}
+.field{display:flex;flex-direction:column;gap:6px;font-size:13.5px;font-weight:700}
+.field input,.field select{min-height:46px;border:1px solid #D1D4E4;border-radius:12px;padding:0 12px;font:inherit;font-weight:500;background:#FFFFFF;color:#1C1A33}
+/* The one question: two large choices. */
+.choice{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.pick{display:flex;gap:14px;align-items:flex-start;padding:16px 18px;border:2px solid #E0E2EE;border-radius:14px;background:#FFFFFF;text-align:left;font:inherit;color:inherit;cursor:pointer}
+.pick.on{border-color:#231F4A;background:#F6F6FC}
+.pick .ico{flex:0 0 40px;width:40px;height:40px;border-radius:10px;background:#EAECF5;color:#231F4A;display:grid;place-items:center}
+.pick.on .ico{background:#231F4A;color:#FFFFFF}
+.pick b{font-size:16px;display:block;line-height:1.3}.pick span{font-size:13.5px;color:#5A5F78}
+.radio{display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid #E0E2EE;border-radius:12px;font-size:14.5px}
+.radio.on{border-color:#231F4A;background:#F6F6FC}
+.dot{flex:0 0 18px;width:18px;height:18px;border-radius:50%;border:2px solid #B9BCD0;display:grid;place-items:center}
+.radio.on .dot{border-color:#231F4A}.radio.on .dot::after{content:"";width:8px;height:8px;border-radius:50%;background:#231F4A}
+.row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1.6fr) auto;gap:8px 18px;align-items:center;padding:14px 22px}
+.row + .row{border-top:1px solid #EAECF5}
+.row b{font-size:16px}
+.token{display:flex;gap:10px;align-items:stretch;flex-wrap:wrap}
+.token input{flex:1 1 260px;min-height:46px;border:1px solid #D1D4E4;border-radius:12px;padding:0 14px;font:inherit;background:#FFFFFF;color:#1C1A33}
+details > summary{cursor:pointer;font-weight:700;font-size:13.5px;color:#3B3F5E;list-style:none}
+details > summary::-webkit-details-marker{display:none}
+details > summary::before{content:"▸ ";color:#5A5F78}details[open] > summary::before{content:"▾ "}
+.fine{font-size:13.5px;color:#5A5F78;margin:8px 0 0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:4px}
+.preset{display:flex;flex-direction:column;gap:6px;padding:14px 16px;border:2px solid #E0E2EE;border-radius:14px;background:#FFFFFF}
+.preset.on{border-color:#231F4A;background:#F6F6FC}
+.preset b{font-size:15px}.preset span{font-size:13.5px;color:#5A5F78}
+.tune{display:grid;grid-template-columns:200px minmax(0,1fr);gap:10px 18px;align-items:center;font-size:14px}
+.seg{display:inline-flex;border:1px solid #D1D4E4;border-radius:10px;overflow:hidden;background:#FFFFFF}
+.seg span{padding:6px 12px;font-size:13px;font-weight:700;color:#5A5F78}.seg span + span{border-left:1px solid #D1D4E4}.seg span.on{background:#231F4A;color:#FFFFFF}
+.trouble{display:grid;grid-template-columns:230px minmax(0,1fr);gap:6px 18px;align-items:center;padding:12px 22px}
+.trouble + .trouble{border-top:1px solid #EAECF5}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+  <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 18px"><div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div><div style="width: 1px; height: 36px; background: rgba(255,255,255,0.18)"></div><div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #B9B6D9">Local workspace</span><span style="font-weight: 700; font-size: 16px">127.0.0.1:4310 · docker</span></div></div>
+    <span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6EE7A8" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Service connected</span>
+  </header>
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD">
+      <a href="Main.dc.html">Overview</a><a href="A-Tasks.dc.html">Tasks</a><a href="A-Teams.dc.html">Teams</a><a href="U7-GitHub-Projects.dc.html" class="on" aria-current="page">Projects</a><a href="U7-GitHub-Connect.dc.html">Settings</a>
+    </nav>
+    <main style="flex: 999 1 560px; min-width: 0; padding: 32px 40px 48px; display: flex; flex-direction: column; gap: 22px; max-width: 1040px">
+      <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap">
+        <div><div class="h">Projects</div><h1 style="margin: 4px 0 0; font-size: 36px; letter-spacing: -0.03em; line-height: 1.1">Projects</h1><p class="muted" style="margin: 6px 0 0; font-size: 16px">One project is one repository: a folder on this machine, or a repository on GitHub.</p></div>
+        <a class="btn primary" href="#add">Add project</a>
+      </div>
+
+      <!-- 1 · Your projects: one row each. -->
+      <section class="card" aria-label="Your projects" style="display: flex; flex-direction: column">
+        <div style="padding: 14px 22px; border-bottom: 1px solid #E0E2EE; font-weight: 800; font-size: 16px">Your projects · 4</div>
+        <article class="row">
+          <div><b>website</b><div class="muted" style="font-size: 13.5px">2 open pull requests · 1 needs you</div></div>
+          <div style="display: flex; flex-direction: column; gap: 4px"><span><span class="chip c-n">Local folder</span> <span class="mono">/projects/website</span></span><span><span class="chip c-ok">GitHub</span> <span class="mono">example-org/website</span> · account <b style="font-size: 14px">example-org</b></span></div>
+          <button class="btn small quiet" type="button">Manage ▾</button>
+        </article>
+        <article class="row">
+          <div><b>api</b><div class="muted" style="font-size: 13.5px">1 open pull request · checks running</div></div>
+          <div><span class="chip c-ok">GitHub</span> <span class="mono">example-org/api</span> · account <b style="font-size: 14px">example-org</b></div>
+          <button class="btn small quiet" type="button">Manage ▾</button>
+        </article>
+        <article class="row">
+          <div><b>notes-app</b><div class="muted" style="font-size: 13.5px">no open pull requests</div></div>
+          <div><span class="chip c-ok">GitHub</span> <span class="mono">sargis/notes-app</span> · account <b style="font-size: 14px">sargis</b> <span class="chip c-warn">⚠ token expires in 3 days</span></div>
+          <a class="btn small" href="U7-GitHub-Connect.dc.html">Replace token</a>
+        </article>
+        <article class="row">
+          <div><b>fixture</b><div class="muted" style="font-size: 13.5px">ends in a local commit, as today</div></div>
+          <div><span class="chip c-n">Local folder</span> <span class="mono">/projects/fixture</span> · nothing leaves this machine</div>
+          <a class="btn small" href="#link">Link to GitHub</a>
+        </article>
+      </section>
+
+      <!-- 2 · Add project: one question, then one short form. Both answers are drawn. -->
+      <section id="add" class="card" aria-label="Add project" style="padding: 22px 24px; display: flex; flex-direction: column; gap: 16px">
+        <div><span style="font-weight: 800; font-size: 18px">Add project</span><div class="muted" style="font-size: 14px">Where is the code?</div></div>
+        <div class="choice" role="radiogroup" aria-label="Where is the code?">
+          <button type="button" class="pick" role="radio" aria-checked="false"><span class="ico" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span><span><b>A folder on this machine</b><span>Tasks end in a local commit. Nothing is sent anywhere.</span></span></button>
+          <button type="button" class="pick on" role="radio" aria-checked="true"><span class="ico" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 4-6 3-11.5 5.5"/></svg></span><span><b>A repository on GitHub</b><span>DevAgents keeps its own clone. Finished tasks can become pull requests.</span></span></button>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; align-items: start">
+          <!-- GitHub, an account is already connected -->
+          <div style="display: flex; flex-direction: column; gap: 12px">
+            <div class="h">GitHub · which account?</div>
+            <div class="radio on" role="radio" aria-checked="true"><span class="dot" aria-hidden="true"></span><span><b>example-org</b> <span class="muted">· 2 repositories</span></span></div>
+            <div class="radio" role="radio" aria-checked="false"><span class="dot" aria-hidden="true"></span><span><b>sargis</b> <span class="muted">· 5 repositories</span></span></div>
+            <div class="radio" role="radio" aria-checked="false"><span class="dot" aria-hidden="true"></span><span>Use another account…</span></div>
+            <label class="field">Repository<select><option>example-org/api</option><option>example-org/website · already a project</option></select></label>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap"><button class="btn primary" type="button">Add project</button><span class="muted" style="font-size: 13px">Named <b>api</b> after the repository. You can rename it later.</span></div>
+          </div>
+          <!-- GitHub, first time or "Use another account…": the token is asked right here -->
+          <div style="display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; border: 1px dashed #C9CCDD; border-radius: 14px; background: #FAFAFE">
+            <div class="h">First time, or "Use another account…"</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap"><span style="font-weight: 700">Connect the account</span><a class="btn small" href="#" role="button">Create a token on GitHub ↗</a></div>
+            <form class="token" aria-label="Paste a token"><input type="password" value="" placeholder="Paste the token here · github_pat_…" autocomplete="off" aria-label="GitHub access token"><button class="btn primary" type="button" style="min-height: 46px">Connect</button></form>
+            <span class="muted" style="font-size: 13px">Stored once in the encrypted vault and shared by every project on this account. After connecting, pick the repository.</span>
+            <details>
+              <summary>What the token needs</summary>
+              <ul class="fine">
+                <li>A <b>fine-grained</b> token, limited to the repositories DevAgents may touch.</li>
+                <li><b>Read and write:</b> Contents, Pull requests. <b>Read:</b> Actions, Commit statuses.</li>
+                <li>Optional: Workflows, only if tasks may edit files under <span class="mono">.github/workflows</span>.</li>
+              </ul>
+            </details>
+          </div>
+        </div>
+
+        <div style="border-top: 1px solid #EAECF5; padding-top: 14px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 16px; align-items: end">
+          <label class="field"><span><span class="h" style="margin-right: 8px">If you chose a folder</span>Path of the checkout</span><input type="text" value="/projects/fixture" class="mono"></label>
+          <button class="btn" type="button">Add project</button>
+          <span class="muted" style="font-size: 13px; grid-column: 1 / -1">In Docker, the folder must be mounted first; the form says how when the path is not visible. Named after the folder. If it is also on GitHub, link it afterwards from its row.</span>
+        </div>
+      </section>
+
+      <!-- 3 · Link a local project: found automatically, one button. -->
+      <section id="link" class="card" aria-label="Link a local project to GitHub" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 12px">
+        <div><span style="font-weight: 800; font-size: 16px">Link to GitHub · fixture</span><div class="muted" style="font-size: 13.5px">Your folder stays where the work happens and is never modified. Linking only adds the option to open pull requests.</div></div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px">
+          <div style="display: flex; flex-direction: column; gap: 10px"><div class="h">Reachable</div><span>Found <span class="mono">origin</span> → <span class="mono">example-org/fixture</span>, reachable with account <b>example-org</b>.</span><div><button class="btn primary small" type="button">Link project</button></div></div>
+          <div style="display: flex; flex-direction: column; gap: 10px"><div class="h">Not reachable yet</div><span>Found <span class="mono">origin</span> → <span class="mono">example-org/fixture</span>, but no connected account can open it.</span><div style="display: flex; gap: 8px; flex-wrap: wrap"><button class="btn small" type="button">Use another account…</button><span class="muted" style="font-size: 13px; align-self: center">or add the repository to the token on GitHub</span></div></div>
+        </div>
+      </section>
+
+      <!-- 4 · "Manage" on a GitHub project: three presets instead of seven questions. -->
+      <section id="policy" class="card" aria-label="How much may DevAgents do on GitHub" style="padding: 22px 24px; display: flex; flex-direction: column; gap: 14px">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap"><div><span style="font-weight: 800; font-size: 16px">Manage · website</span><div class="muted" style="font-size: 14px">How much may DevAgents do on GitHub without asking?</div></div><span class="muted" style="font-size: 13px">A task keeps the setting it was submitted with. If the setting changed elsewhere, saving reloads it instead of overwriting.</span></div>
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px" role="radiogroup" aria-label="GitHub autonomy">
+          <div class="preset on" role="radio" aria-checked="true"><b>Ask me every time</b><span>You click to open a pull request and to start each follow-up round. The default.</span></div>
+          <div class="preset" role="radio" aria-checked="false"><b>Open pull requests for me</b><span>A finished task opens a draft pull request by itself. Follow-up rounds still wait for your click.</span></div>
+          <div class="preset" role="radio" aria-checked="false"><b>Keep the pull request moving</b><span>Also fixes failed checks and answers review comments by itself, at most 3 rounds, then waits for you.</span></div>
+        </div>
+        <details open>
+          <summary>Fine-tune</summary>
+          <div class="tune" style="margin-top: 12px">
+            <span>Open a pull request</span><span><span class="seg"><span class="on">On click</span><span>Automatically</span></span> <span class="muted" style="font-size: 13px">· as draft</span></span>
+            <span>Review comments</span><span class="seg" style="justify-self: start"><span class="on">On click</span><span>Automatically</span></span>
+            <span>Failed checks</span><span class="seg" style="justify-self: start"><span class="on">On click</span><span>Automatically</span></span>
+            <span>Automatic rounds</span><span>at most <b>3</b> per pull request</span>
+            <span>Whose comments count</span><span class="seg" style="justify-self: start"><span>Only me</span><span class="on">People with write access</span></span>
+            <span>Work starts from</span><span class="seg" style="justify-self: start"><span class="on">Local main</span><span>origin/main, fetched first</span></span>
+            <span>Reply on threads</span><span>Yes, with the commit that addressed it</span>
+          </div>
+        </details>
+        <div style="border-top: 1px solid #EAECF5; padding-top: 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap"><span class="muted" style="font-size: 13.5px"><b style="color: #1C1A33">Never, in any setting:</b> merge, force-push, or push to the default branch.</span><div style="display: flex; gap: 8px"><button class="btn small" type="button">Unlink from GitHub</button><button class="btn small primary" type="button">Save</button></div></div>
+      </section>
+
+      <!-- 5 · Problems, on the project's own row when they happen. -->
+      <section class="card" aria-label="When a project needs you" style="display: flex; flex-direction: column">
+        <div style="padding: 14px 22px; border-bottom: 1px solid #E0E2EE; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap"><span style="font-weight: 800; font-size: 16px">When a project needs you</span><span class="muted" style="font-size: 13px">Shown on the project's row. Tasks keep running and end in a local commit in every case.</span></div>
+        <div class="trouble"><span class="chip c-run" style="justify-self: start">Cloning example-org/api…</span><span>The project appears when the clone finishes. A failed clone leaves no half-added project.</span></div>
+        <div class="trouble"><span class="chip c-bad" style="justify-self: start">✕ Repository not reachable</span><span>Renamed, deleted or removed from the token. Pull requests pause until it is reachable again.</span></div>
+        <div class="trouble"><span class="chip c-warn" style="justify-self: start">⚠ Account needs a new token</span><span>The row shows "Replace token", which opens the account in Settings. One replacement fixes every project on that account.</span></div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":2500}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
