@@ -28,33 +28,34 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await rm(root, { recursive: true, force: true }); });
 
-test('registration validation explains disabled submit and offers an explicit ID correction', async ({ page }) => {
+test('registration validation explains disabled submit; a project is given a name, never an ID', async ({ page }) => {
   await page.route(/\/status$/, async route => {
     const response = await route.fetch(); const status = await response.json();
     await route.fulfill({ response, json: { ...status, service: { ...status.service, dataDir: '/data' } } });
   });
   await signIn(page); await page.goto(`${base}/ui/projects/new`);
-  const id = page.getByLabel('Project ID', { exact: true });
+  const name = page.getByLabel('Project name', { exact: true });
+  await expect(page.getByLabel('Project ID')).toHaveCount(0);
   await page.getByRole('radio', { name: 'Already mounted in Docker (advanced)' }).check();
   const path = page.getByLabel('Repository path inside Docker');
   const submit = page.getByRole('button', { name: 'Register project', exact: true });
   await expect(submit).toBeDisabled();
-  await expect(submit).toHaveAccessibleDescription('Enter a Project ID and an absolute path to enable registration.');
-  await id.focus(); await id.press('Tab');
-  await expect(id).toHaveAttribute('aria-invalid', 'true');
-  await expect(id).toHaveAccessibleDescription(/Enter a project ID/);
-  await id.fill('My Project'); await path.fill('~/Projects/my-project');
-  await expect(id).toHaveAccessibleDescription(/lowercase letters, digits and dashes/);
+  await expect(submit).toHaveAccessibleDescription('Enter a project name and an absolute path to enable registration.');
+  await name.focus(); await name.press('Tab');
+  await expect(name).toHaveAttribute('aria-invalid', 'true');
+  await expect(name).toHaveAccessibleDescription(/Enter a project name/);
+  await name.fill('   '); await expect(name).toHaveAccessibleDescription(/Enter a project name/);
+  await name.fill('My Project · Café'); await path.fill('~/Projects/my-project');
+  await expect(name).not.toHaveAttribute('aria-invalid', 'true');
+  await expect(name).toHaveAccessibleDescription(/you can change it later/);
   await expect(path).toHaveAccessibleDescription(/Expand ~/);
   await expect(submit).toBeDisabled();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: join(shots, 'registration-validation-mobile.png'), fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await id.fill('A'.repeat(64));
+  await name.fill('A'.repeat(80));
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await id.fill('My Project');
-  await page.getByRole('button', { name: 'Use “my-project”' }).click();
-  await expect(id).toHaveValue('my-project'); await expect(id).not.toHaveAttribute('aria-invalid', 'true');
+  await name.fill('My Project');
   await path.fill('projects/my-project'); await expect(path).toHaveAccessibleDescription(/must start with/);
   await path.fill('/projects/../my-project'); await expect(path).toHaveAccessibleDescription(/without \.\. segments/);
   await path.fill('/'); await expect(path).toHaveAccessibleDescription(/not the filesystem root/);
@@ -82,7 +83,7 @@ test('Docker registration accepts a host folder and prepares a literal launcher 
   const path = page.getByLabel('Repository folder on your computer');
   const prepare = page.getByRole('button', { name: 'Prepare setup command' });
   await expect(prepare).toBeDisabled();
-  await page.getByLabel('Project ID', { exact: true }).fill('my-project');
+  await page.getByLabel('Project name', { exact: true }).fill("Sam's Project");
   await path.fill('/Users/example/folder,with-comma');
   await expect(prepare).toBeDisabled();
   await expect(path).toHaveAccessibleDescription(/does not support commas/);
@@ -92,10 +93,10 @@ test('Docker registration accepts a host folder and prepares a literal launcher 
   const command = (await page.locator('.command pre').textContent())!;
   // Evaluate only the argument quoting using printf, never launch Docker or touch this synthetic folder.
   const args = execFileSync('/bin/sh', ['-c', command.replace('./devagents', "printf '%s\\n'")], { encoding: 'utf8' }).trimEnd().split('\n');
-  expect(args).toEqual(['project', 'add', '--name', 'my-project', '--path', hostPath]);
+  expect(args).toEqual(['project', 'add', '--name', "Sam's Project", '--path', hostPath]);
   expect(posts).toBe(0);
   await page.getByText('How the folder will be connected', { exact: true }).click();
-  await expect(page.getByText('/projects/my-project', { exact: true })).toBeVisible();
+  await expect(page.getByText('/projects/<generated project ID>', { exact: true })).toBeVisible();
   await path.fill('/Users/example/Projects/my-project'); await prepare.click();
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -109,18 +110,20 @@ test('Docker registration accepts a host folder and prepares a literal launcher 
 
 test('registration preserves input on backend refusal and registers an existing checkout', async ({ page }) => {
   await signIn(page); await page.goto(`${base}/ui/projects/new`);
-  await page.getByLabel('Project ID', { exact: true }).fill('browser-project');
+  await page.getByLabel('Project name', { exact: true }).fill('Browser project');
   await page.getByLabel('Absolute path as the service sees it').fill('/projects/not-mounted');
   await page.getByRole('button', { name: 'Register project', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('mount the checkout and register its container path');
-  await expect(page.getByLabel('Project ID', { exact: true })).toHaveValue('browser-project');
+  await expect(page.getByLabel('Project name', { exact: true })).toHaveValue('Browser project');
   await expect(page.getByLabel('Absolute path as the service sees it')).toHaveValue('/projects/not-mounted');
   await page.screenshot({ path: join(shots, 'u3-register-error.png'), fullPage: true });
   await page.getByLabel('Absolute path as the service sees it').fill(root);
   await page.getByRole('button', { name: 'Register project', exact: true }).click();
   await expect(page.getByText('Repository registered', { exact: true })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Submit work' })).toHaveAttribute('href', '/ui/tasks/new?project=browser-project');
-  expect((await (await call('/projects')).json()).find((p: { id: string }) => p.id === 'browser-project').path).toBe(await realpath(root));
+  const registered = (await (await call('/projects')).json()).find((p: { name: string }) => p.name === 'Browser project') as { id: string; path: string };
+  expect(registered.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  await expect(page.getByRole('link', { name: 'Submit work' })).toHaveAttribute('href', `/ui/tasks/new?project=${registered.id}`);
+  expect(registered.path).toBe(await realpath(root));
 });
 
 test('submission uses effective defaults, disables unavailable teams and shows the frozen response', async ({ page }) => {

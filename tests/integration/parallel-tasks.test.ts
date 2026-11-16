@@ -145,3 +145,34 @@ test('two DAG tasks share global capacity and keep their item and integration ev
     assert.equal(peak, 2);
   } finally { release.resolve(); await runner.stop(); await f.cleanup(); }
 });
+
+test('raising task capacity starts queued work and lowering it drains without cancelling active tasks', { timeout: 30000 }, async () => {
+  const f = await fixture(); const engine = new FakeEngine(); const execute = engine.execute.bind(engine);
+  const gates = new Map<string, { started: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> }>();
+  engine.execute = async request => {
+    if (request.phase === 'implementation') {
+      const gate = gates.get(basename(request.cwd))!; gate.started.resolve(); await gate.release.promise;
+    }
+    return execute(request);
+  };
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
+  try {
+    const tasks = ['A', 'B', 'C'].map(request => {
+      const task = f.service.submit({ projectId: 'fixture', request, mode: 'autonomous' }, request);
+      gates.set(task.id, { started: deferred(), release: deferred() }); return task;
+    });
+    await gates.get(tasks[0]!.id)!.started.promise;
+    assert.equal(runner.scheduling.active.length, 1);
+    f.service.setTaskConcurrency({ maxConcurrentTasks: 2, expectedVersion: 0 });
+    await gates.get(tasks[1]!.id)!.started.promise;
+    assert.equal(runner.scheduling.active.length, 2);
+    f.service.setTaskConcurrency({ maxConcurrentTasks: 1, expectedVersion: 1 });
+    gates.get(tasks[0]!.id)!.release.resolve();
+    for (let i = 0; i < 200 && runner.scheduling.active.length > 1; i++) await new Promise(r => setTimeout(r, 20));
+    assert.deepEqual(runner.scheduling.active, [tasks[1]!.id]);
+    assert.equal(engine.calls.some(c => c.cwd.endsWith(tasks[2]!.id)), false);
+    gates.get(tasks[1]!.id)!.release.resolve(); await gates.get(tasks[2]!.id)!.started.promise;
+    gates.get(tasks[2]!.id)!.release.resolve(); await runner.idle();
+    for (const task of tasks) assert.equal(f.store.task(task.id).state, 'completed');
+  } finally { for (const gate of gates.values()) gate.release.resolve(); await runner.stop(); await f.cleanup(); }
+});

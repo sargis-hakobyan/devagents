@@ -1,3 +1,5 @@
+import { TaskConcurrency } from '../components/TaskConcurrency';
+import { ArchivedProjects } from './Project';
 import { useState } from 'preact/hooks';
 import { api, ApiError, resources, type Project, type TeamSummary } from '../api';
 import { Card, Chip, Code, Empty, ErrorNote, Later, Skeleton } from '../components/ui';
@@ -17,7 +19,7 @@ function DefaultTeam({ project, teams, onChanged }: { project: Project; teams: T
   const id = `default-team-${project.id}`;
   return <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
     <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-      <label class="sr-only" for={id}>Default team for {project.id}</label>
+      <label class="sr-only" for={id}>Default team for {project.name}</label>
       <select id={id} value={project.defaultTeamId ?? ''} disabled={busy || !teams} onChange={e => { const v = (e.target as HTMLSelectElement).value; void choose(v || null); }} style={{ minHeight: '34px', borderRadius: '8px', border: '1px solid var(--btn-border)', backgroundColor: '#fff', font: 'inherit', paddingBlock: '0', paddingLeft: '10px', maxWidth: '100%' }}>
         <option value="">None · legacy agent configuration</option>
         {(teams ?? []).filter(t => !t.archived || t.id === project.defaultTeamId).map(t => <option key={t.id} value={t.id} disabled={t.archived}>{t.name} · revision {t.revision}{t.archived ? ' · archived' : t.readiness.ready ? '' : ' · draft'}</option>)}
@@ -38,18 +40,20 @@ export function ProjectsPage() {
     <div class="page-head"><div><div class="h">Projects</div><h1>Registered repositories</h1><p>Existing Git checkouts registered by absolute path. Work happens in managed worktrees; the original checkout is never modified.</p></div><a class="btn primary" href="/ui/projects/new">Register repository</a></div>
     {projects.error && !projects.data && <ErrorNote message={projects.error} />}
     {!projects.data ? <Skeleton rows={3} label="Loading projects" /> : projects.data.length === 0 ? <Card><Empty title="No projects yet"><span>Add an existing Git checkout from your computer. DevAgents never clones or imports.</span><a class="btn" href="/ui/projects/new">Add your repository</a></Empty></Card> : <div class="items" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))' }}>{projects.data.map(p => <article key={p.id} class="card item" style={{ padding: '18px 20px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}><b style={{ fontSize: '17px' }}>{p.id}</b><Chip tone="ok">✓ Registered Git root</Chip></div>
-      <div><span class="hint">{docker ? 'Repository path inside Docker' : 'Repository folder'}</span><div class="mono wrap-anywhere">{p.path}</div>{docker && <span class="hint">This is the shared folder’s internal address, not a folder you need to create on your computer.</span>}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}><b class="wrap-anywhere" style={{ fontSize: '17px' }}>{p.name}</b><Chip tone="ok">✓ Registered Git root</Chip></div>
+      {p.hostPath ? <div><span class="hint">Repository folder</span><div class="mono wrap-anywhere">{p.hostPath}</div><span class="hint">Inside Docker: <span class="mono wrap-anywhere">{p.path}</span></span></div>
+        : <div><span class="hint">{docker ? 'Repository path inside Docker' : 'Repository folder'}</span><div class="mono wrap-anywhere">{p.path}</div>{docker && <span class="hint">This is the shared folder’s internal address, not a folder you need to create on your computer.</span>}</div>}
       <dl class="kv" style={{ gridTemplateColumns: '150px minmax(0, 1fr)' }}>
         <dt>Registered</dt><dd>{formatTime(p.registeredAt)} · base <span class="mono">{p.baseSha.slice(0, 7)}</span></dd>
         <dt>Default mode</dt><dd>{p.defaultMode ?? <span class="muted">None · each task asks once</span>}</dd>
         <dt>Default team</dt><dd><DefaultTeam project={p} teams={teams.data} onChanged={() => { projects.reload(); teams.reload(); }} /></dd>
         <dt>Path check</dt><dd class="muted">Verified at registration; execution rechecks access.</dd>
       </dl>
-      <a href={`/ui/tasks`} style={{ fontWeight: 700, fontSize: '13.5px' }}>History →</a>
+      <span style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}><a href={`/ui/projects/${encodeURIComponent(p.id)}`} style={{ fontWeight: 700, fontSize: '13.5px' }} aria-label={`Open ${p.name}`}>Rename, integrations →</a><a href={`/ui/tasks`} style={{ fontWeight: 700, fontSize: '13.5px' }}>History →</a></span>
     </article>)}</div>}
+    <ArchivedProjects />
     <Card title="How registration works"><div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}><b>Native</b><span class="muted" style={{ fontSize: '13.5px' }}>Register the absolute path of an existing checkout. The service validates that it is a Git root with at least one commit and that the path has not moved.</span><Code>devagents projects add website /absolute/path/to/website</Code></div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}><b>Native</b><span class="muted" style={{ fontSize: '13.5px' }}>Register the absolute path of an existing checkout. The service validates that it is a Git root with at least one commit and that the path has not moved.</span><Code>devagents projects add "Website" /absolute/path/to/website</Code></div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}><b>Docker{docker ? ' (this service)' : ''}</b><span class="muted" style={{ fontSize: '13.5px' }}>Enter your computer’s absolute folder path on the registration page, then run the prepared command. The launcher shares the folder and handles its internal Docker address.</span><Code>./devagents project add</Code></div>
     </div></Card>
   </>;
@@ -60,7 +64,7 @@ export function SettingsPage() {
   if (!status) return <Skeleton rows={6} label="Loading settings" />;
   const c = status.codex;
   return <>
-    <div class="page-head"><div><div class="h">Settings</div><h1>Connection, engine and limits</h1><p>Service configuration is read-only here. Values come from the running service; edit <span class="mono">devagents.yaml</span> and restart, or use the terminal setup below.</p></div></div>
+    <div class="page-head"><div><div class="h">Settings</div><h1>Connection, engine and limits</h1><p>Manage parallel tasks and connections here. Other values reflect the running service and require startup configuration changes.</p></div></div>
     <Card title="Codex connection" right={<span style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>{c.vaultLocked ? <Chip tone="warn">⚠ Credentials locked</Chip> : c.signedIn ? <Chip tone="ok">✓ Sign-in saved</Chip> : c.installed ? <Chip tone="warn">⚠ Not signed in</Chip> : <Chip tone="bad">✕ Not installed</Chip>}<Chip tone="warn">⚠ Model access not verified</Chip></span>}
       foot={<span style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}><a class="btn" href="/ui/settings/setup">Guided setup / change sign-in</a><Later label="Test connection" increment="U3" reason="Browser testing is unavailable; use the explicitly chosen terminal connection test" /><span>Terminal setup today: <Code>npm run cli -- auth setup</Code> or <Code>./devagents start</Code></span></span>}>
       <div style={{ padding: '14px 16px' }}><dl class="kv">
@@ -87,9 +91,10 @@ export function SettingsPage() {
         <dt>Scheduling</dt><dd>{status.scheduler?.enabled ? `Up to ${status.scheduler.maxConcurrentTasks} tasks and ${status.scheduler.maxConcurrentOperations} operations concurrently; FIFO task dispatch` : 'Execution scheduler unavailable'}</dd>
       </dl></div></Card>
     </div>
+    <TaskConcurrency />
     <Card title="Service and browser session"><div style={{ padding: '14px 16px' }}><dl class="kv">
       <dt>Listening</dt><dd class="mono">{status.service.host}:{status.service.port} · data {status.service.dataDir}</dd>
-      <dt>Browser session</dt><dd>Signed in with a one-time link; ends after 12 h idle, 24 h in total, or when the service restarts. Sign out from the top bar.</dd>
+      <dt>Browser session</dt><dd>Signed in with a one-time link. This browser stays signed in, also across restarts and sleep, until you sign out from the top bar.</dd>
       <dt>CLI access</dt><dd>Bearer token in <span class="mono">api-token</span>, never sent to the browser</dd>
       <dt>Version</dt><dd class="mono">devagents {status.service.version} · node {status.service.node} · {status.service.platform} · started {formatTime(status.service.startedAt)}</dd>
     </dl></div></Card>
@@ -100,7 +105,7 @@ export function SignedOutPage() {
     <Card><div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
       <b style={{ fontSize: '20px' }}>Signed out</b>
       <a href="/ui/tasks/new">Recover an unresolved submission after signing in</a>
-      <span>Your browser session has ended. Sessions end on sign-out, after 12 hours idle, or when the service restarts.</span>
+      <span>This browser is not signed in. A sign-in lasts until you sign out; it also ends if the service's data was reset.</span>
       <span>Create a new one-time link in the terminal and open it:</span>
       <Code>devagents ui</Code>
       <span class="muted" style={{ fontSize: '13px' }}>With npm: <code>npm run cli -- ui</code>. In Docker: <code>docker compose exec devagents node dist/cli/main.js ui</code>. The link is single use and expires in 10 minutes; the CLI token itself is never shown to the browser.</span>

@@ -3,11 +3,11 @@ import { z } from 'zod';
 import { join } from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { Store } from '../persistence/store.js';
-import { Mode, TaskInput, TeamInput, TEAM_INSTRUCTION_BYTES, type AgentDefinition, type AppConfig, type Task, type TaskTeam, type TeamMember, type TeamRecord, type TeamReadiness, type TeamSummary } from '../domain/schemas.js';
+import { Config, Mode, ProjectName, TaskInput, TeamInput, newProjectId, TEAM_INSTRUCTION_BYTES, type AgentDefinition, type AppConfig, type Task, type TaskTeam, type TeamMember, type TeamRecord, type TeamReadiness, type TeamSummary } from '../domain/schemas.js';
 import { terminalStates } from '../domain/lifecycle.js';
 import { AppError } from '../domain/errors.js';
 import { redactReportProse } from '../domain/limitations.js';
-import { inspectProject, WorkspaceManager } from '../workspace/git.js';
+import { folderIdentity, inspectProject, WorkspaceManager } from '../workspace/git.js';
 import { builtinCapabilities, builtinDirectory, loadRegistry } from '../agents/registry.js';
 import { providerExecutable, resolveEngine, resolveProviderId, teamReadiness, type RuntimeSupport } from '../domain/readiness.js';
 import { validatePlan } from '../domain/plan.js';
@@ -30,7 +30,18 @@ export class TaskService {
   private reserve?: DiskReserve;
   get diskReserve(): DiskReserve { return this.reserve ??= new DiskReserve(this.dataDir); }
   /** `executableEngines` is what this build can actually run; the schema accepts more engines than that. */
-  constructor(readonly store: Store, readonly config: AppConfig, readonly dataDir: string, readonly platform: NodeJS.Platform = process.platform, readonly executableEngines: ReadonlySet<string> = new Set(['codex'])) {}
+  constructor(readonly store: Store, readonly config: AppConfig, readonly dataDir: string, readonly platform: NodeJS.Platform = process.platform, readonly executableEngines: ReadonlySet<string> = new Set(['codex'])) {
+    const saved = store.taskConcurrency();
+    if (saved) config.maxConcurrentTasks = Config.shape.maxConcurrentTasks.parse(saved.maxConcurrentTasks);
+  }
+  taskConcurrency() { return { maxConcurrentTasks: this.config.maxConcurrentTasks, version: this.store.taskConcurrency()?.version ?? 0 }; }
+  setTaskConcurrency(input: unknown) {
+    const settings = z.object({ maxConcurrentTasks: Config.shape.maxConcurrentTasks.removeDefault(), expectedVersion: z.number().int().min(0) }).strict().parse(input);
+    this.assertExecutionAvailable();
+    this.store.setTaskConcurrency(settings.maxConcurrentTasks, settings.expectedVersion);
+    this.config.maxConcurrentTasks = settings.maxConcurrentTasks;
+    return this.taskConcurrency();
+  }
   get support(): RuntimeSupport { return { config: this.config, capabilities: builtinCapabilities, executableEngines: this.executableEngines, platform: this.platform }; }
   attachRunner(runner: Runner): void { this.runner = runner; }
   get executionEnabled(): boolean { return Boolean(this.runner); }
@@ -141,8 +152,43 @@ export class TaskService {
     if (!this.runner) throw new AppError('execution_unavailable', 'No execution runtime attached', 503);
     this.runner.enqueue(id); return this.store.task(id);
   }
+  /** In Docker one folder can be mounted under two project IDs; the paths differ but the directory is the same. */
+  private async folderHolder(path: string, except?: string) {
+    const identity = await folderIdentity(path);
+    for (const other of this.store.projects()) {
+      if (other.id === except || other.archivedAt) continue;
+      if (other.path === path || (identity && await folderIdentity(other.path) === identity)) return other;
+    }
+    return undefined;
+  }
+  /** Archiving keeps history and the ID; restoring needs the folder to be reachable and not held by an active project. */
+  async setProjectArchived(projectId: string, archived: boolean, expectedVersion: number) {
+    const project = this.store.project(projectId);
+    if (!archived && project.archivedAt) {
+      if (!await folderIdentity(project.path)) throw new AppError('invalid_path', 'The folder of this project is not reachable by the service, so it cannot be restored.', 409);
+      const holder = await this.folderHolder(project.path, projectId);
+      if (holder) throw new AppError('project_conflict', `Project "${holder.name}" uses this folder. Archive it first.`, 409);
+    }
+    return this.store.setProjectArchived(projectId, archived, expectedVersion);
+  }
+  renameProject(projectId: string, name: unknown, expectedVersion: number) { return this.store.setProjectName(projectId, ProjectName.parse(name), expectedVersion); }
+  /** For the launcher, which needs the ID before it can attach the folder: checks the name and reserves nothing. */
+  prepareProject(name: unknown) {
+    const parsed = ProjectName.parse(name);
+    const holder = this.store.projects().find(p => !p.archivedAt && p.name!.toLowerCase() === parsed.toLowerCase());
+    if (holder) throw new AppError('project_conflict', `An active project is already named "${holder.name}". Choose another name.`, 409);
+    return { id: this.freeProjectId(), name: parsed };
+  }
+  private freeProjectId(): string {
+    const taken = new Set(this.store.projects().map(p => p.id));
+    for (;;) { const id = newProjectId(); if (!taken.has(id)) return id; }
+  }
   async registerProject(input: unknown) {
     const project = await inspectProject(input);
+    // A generated ID never collides with a registered one; an explicit ID is the caller's choice.
+    if ((input as { id?: unknown } | null)?.id === undefined) project.id = this.freeProjectId();
+    const holder = await this.folderHolder(project.path, project.id);
+    if (holder) throw new AppError('project_conflict', `This folder is already registered as project "${holder.name}". Use it, or archive it first.`, 409);
     const starter = this.store.teams('all').find(t => t.id === STARTER_TEAM_ID);
     return this.store.registerProject(project, starter && !starter.archived && teamReadiness(starter.members, this.support).ready ? starter.id : undefined);
   }
@@ -222,7 +268,7 @@ export class TaskService {
   /** Diff text is redacted with the same secret list the store applies at rest, not only the environment heuristic. */
   diff(id: string) { const task = this.store.task(id); return readTaskDiff(this.store.project(task.projectId), task, this.dataDir, this.store.secrets); }
   submissionOptions() {
-    return { projects: this.store.projects().map(p => ({ projectId: p.id, mode: p.defaultMode ?? this.config.defaultMode ?? null, source: p.defaultMode ? 'project' : this.config.defaultMode ? 'service' : 'none' })) };
+    return { projects: this.store.projects().filter(p => !p.archivedAt).map(p => ({ projectId: p.id, mode: p.defaultMode ?? this.config.defaultMode ?? null, source: p.defaultMode ? 'project' : this.config.defaultMode ? 'service' : 'none' })) };
   }
   submit(input: unknown, key: string): Task {
     this.assertExecutionAvailable();

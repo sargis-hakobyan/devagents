@@ -6,7 +6,7 @@ import { isWithin } from './paths.js';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, parse, resolve } from 'node:path';
 import { AppError } from '../domain/errors.js';
-import { ProjectInput, type Project, type Task } from '../domain/schemas.js';
+import { ProjectInput, newProjectId, type Project, type Task } from '../domain/schemas.js';
 import { isOwnedBranch, itemBranch, ownedRefPatterns, taskBranch } from './branches.js';
 
 const exec = promisify(execFile);
@@ -37,8 +37,14 @@ async function mainCommit(path: string): Promise<string> {
     throw error;
   }
 }
+/** Device and inode of a directory: equal for one folder reached through two paths, such as two bind mounts. */
+export async function folderIdentity(path: string): Promise<string | undefined> {
+  try { const info = await stat(path, { bigint: true }); return info.isDirectory() ? `${info.dev}:${info.ino}` : undefined; }
+  catch { return undefined; }
+}
 export async function inspectProject(input: unknown): Promise<Project> {
-  const project = ProjectInput.parse(input);
+  const { id: givenId, name: givenName, ...project } = ProjectInput.parse(input);
+  const id = givenId ?? newProjectId();
   if (!isAbsolute(project.path)) throw new AppError('invalid_path', 'Provide an absolute project path');
   const path = await realpath(project.path).catch(() => { throw new AppError('invalid_path', 'Project path does not exist or is inaccessible to the service. In Docker, mount the checkout and register its container path.'); });
   if (path === parse(path).root || path === await realpath(homedir())) throw new AppError('invalid_path', 'Register a project directory, not a filesystem root or home directory');
@@ -46,7 +52,7 @@ export async function inspectProject(input: unknown): Promise<Project> {
   const root = await git(path, ['rev-parse', '--show-toplevel']);
   if (await realpath(root) !== path) throw new AppError('invalid_path', 'Register the Git checkout root');
   const baseSha = await mainCommit(path);
-  return { ...project, path, baseSha, registeredAt: new Date().toISOString() };
+  return { ...project, id, name: givenName ?? id, path, baseSha, registeredAt: new Date().toISOString() };
 }
 function lockRepository<T>(path: string, work: () => Promise<T>): Promise<T> {
   // Preserve call order for this checkout while resolving the shared repository identity.

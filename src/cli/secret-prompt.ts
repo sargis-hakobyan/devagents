@@ -6,9 +6,10 @@ import { AppError } from '../domain/errors.js';
 export function readHiddenKey(
   input: Readable & { isTTY?: boolean } = process.stdin,
   output: Writable = process.stderr,
+  label = 'your OpenAI API key',
 ): Promise<string> {
   if (!input.isTTY) throw new AppError('terminal_required', 'API-key setup needs an interactive terminal. Run ./devagents start in your terminal.');
-  output.write('Paste your OpenAI API key (input hidden; Ctrl+C cancels): ');
+  output.write(`Paste ${label} (input hidden; Ctrl+C cancels): `);
   const muted = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
   const reader = createInterface({ input, output: muted, terminal: true, historySize: 0 });
   return new Promise((resolve, reject) => {

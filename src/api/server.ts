@@ -8,11 +8,12 @@ import { join } from 'node:path';
 import { z, ZodError } from 'zod';
 import type { TaskService } from '../orchestration/service.js';
 import { AppError } from '../domain/errors.js';
-import { Id, State, TeamId } from '../domain/schemas.js';
+import { ProjectId, State, TeamId } from '../domain/schemas.js';
 import { environmentSecrets, redactValues, log } from '../telemetry/redact.js';
 import { BrowserSessions, SESSION_COOKIE, parseCookies, sessionCookie, clearedSessionCookie, type BrowserSession } from './session.js';
 import { securityHeaders, serveUi } from './static.js';
 import { evidenceMetadata } from './evidence.js';
+import type { ProjectIntegrationService } from '../integrations/service.js';
 
 export async function accessToken(dataDir: string): Promise<string> {
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
@@ -63,6 +64,8 @@ export type ApiOptions = {
    * Defaults to the listening port.
    */
   publicPort?: number | undefined;
+  /** Per-project GitHub and Jira connections; absent on services that do not configure a secret store. */
+  integrations?: ProjectIntegrationService;
   /** Host header values that may carry a browser session; defaults to loopback names on the public port. */
   allowedHosts?: (port: number) => string[];
 };
@@ -100,6 +103,9 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
     if (!['GET', 'HEAD'].includes(req.method ?? '') && !sessions.verifyCsrf(session, req.headers['x-csrf-token'] as string | undefined)) throw new AppError('csrf_required', 'State-changing requests need the session CSRF token', 403);
     return { kind: 'session', session };
   };
+  /** Tasks store the project ID; the name is added on the way out because it can change. */
+  const projectNames = () => new Map(service.store.projects().map(p => [p.id, p.name ?? p.id]));
+  const named = <T extends { projectId: string }>(task: T, names = projectNames()) => ({ ...task, projectName: names.get(task.projectId) ?? task.projectId });
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', 'http://localhost'); const path = url.pathname;
@@ -108,7 +114,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       if (req.method === 'GET' && path === '/ui/login') {
         const session = sessions.exchange(url.searchParams.get('code') ?? '');
         if (!session) throw new AppError('invalid_login_code', 'This sign-in link is invalid, expired or already used; create a new one with: devagents ui', 403);
-        res.writeHead(303, { ...securityHeaders, 'set-cookie': sessionCookie(session.id, Boolean(options.secureCookies)), location: url.searchParams.get('next') === 'setup' ? '/ui/settings/setup' : '/ui/', 'cache-control': 'no-store' }); return res.end();
+        res.writeHead(303, { ...securityHeaders, 'set-cookie': sessionCookie(session.id, Boolean(options.secureCookies), sessions.cookieMaxAgeSeconds), location: url.searchParams.get('next') === 'setup' ? '/ui/settings/setup' : '/ui/', 'cache-control': 'no-store' }); return res.end();
       }
       if (req.method === 'GET' && (path === '/ui' || (path.startsWith('/ui/') && !['/ui/session', '/ui/logout', '/ui/bootstrap'].includes(path)))) return serveUi(options.uiRoot, path, res);
       const principal = authenticate(req);
@@ -119,7 +125,8 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       }
       if (path === '/ui/session' && req.method === 'GET') {
         if (principal.kind !== 'session') throw new AppError('session_required', 'Only browser sessions have a CSRF token', 403);
-        return send(res, 200, { authenticated: true, csrfToken: principal.session.csrfToken, expiresAt: new Date(sessions.expiresAt(principal.session)).toISOString() });
+        const expires = sessions.expiresAt(principal.session);
+        return send(res, 200, { authenticated: true, csrfToken: principal.session.csrfToken, expiresAt: expires === undefined ? null : new Date(expires).toISOString() });
       }
       if (path === '/ui/logout' && req.method === 'POST') {
         if (principal.kind !== 'session') throw new AppError('session_required', 'Only browser sessions can sign out', 403);
@@ -157,13 +164,58 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       const assertExecutionReady = () => { if ((options.setupAuth?.busy || options.claudeAuth?.busy) || maintenanceUntil > Date.now()) throw new AppError('setup_busy', 'Setup is in progress. Retry after it finishes.', 409); };
       if (((options.setupAuth?.busy || options.claudeAuth?.busy) || maintenanceUntil > Date.now()) && req.method === 'POST' && (path === '/tasks' || /^\/tasks\/[^/]+\/(mode|approve|run|plan)$/.test(path))) throw new AppError('setup_busy', 'Setup is in progress. Retry after it finishes.', 409);
       if (req.method === 'GET' && path === '/submission-options') return send(res, 200, service.submissionOptions());
-      if (req.method === 'GET' && path === '/projects') return send(res, 200, service.store.projects());
-      if (req.method === 'POST' && path === '/projects') return send(res, 201, await service.registerProject(await body(req)));
+      if (req.method === 'GET' && path === '/projects') {
+        const filter = z.enum(['active', 'archived', 'all']).parse(url.searchParams.get('filter') ?? 'active');
+        return send(res, 200, service.store.projects().filter(p => filter === 'all' || Boolean(p.archivedAt) === (filter === 'archived')));
+      }
+      if (req.method === 'PUT' && path === '/projects/host-folders') {
+        if (principal.kind !== 'bearer') throw new AppError('bearer_required', 'Project folders are reported by the local launcher.', 403);
+        const input = z.strictObject({ folders: z.record(z.string().min(1).max(4096), z.string().min(1).max(4096)) }).parse(await body(req));
+        if (Object.keys(input.folders).length > 500) throw new AppError('invalid_request', 'Too many folders');
+        return send(res, 200, { updated: service.store.setProjectHostPaths(input.folders) });
+      }
+      if (req.method === 'POST' && path === '/projects/prepare') return send(res, 200, service.prepareProject(z.strictObject({ name: z.unknown() }).parse(await body(req)).name));
+      const projectName = /^\/projects\/([a-z0-9][a-z0-9-]{0,63})\/name$/.exec(path);
+      if (req.method === 'PUT' && projectName) {
+        const change = z.strictObject({ name: z.unknown(), expectedVersion: z.number().int().nonnegative() }).parse(await body(req));
+        return send(res, 200, service.renameProject(projectName[1]!, change.name, change.expectedVersion));
+      }
+      const projectArchive = /^\/projects\/([a-z0-9][a-z0-9-]{0,63})\/archive$/.exec(path);
+      if (req.method === 'POST' && projectArchive) {
+        const change = z.strictObject({ archived: z.boolean(), expectedVersion: z.number().int().nonnegative() }).parse(await body(req));
+        const project = await service.setProjectArchived(projectArchive[1]!, change.archived, change.expectedVersion);
+        // An archived project holds no connections; a token goes only when no other project uses it.
+        if (change.archived && options.integrations) for (const kind of ['github', 'jira'] as const) await options.integrations.disconnect(project.id, kind);
+        return send(res, 200, service.store.project(project.id));
+      }
+      if (req.method === 'POST' && path === '/projects') {
+        const input = await body(req);
+        // IDs are generated. The launcher sends the UUID it was handed by /projects/prepare; nothing else is accepted as an ID.
+        const id = (input as { id?: unknown } | null)?.id;
+        if (id !== undefined && !z.uuid().safeParse(id).success) throw new AppError('invalid_project_id', 'Project IDs are generated by the service. Send a name instead of an ID.');
+        return send(res, 201, await service.registerProject(input));
+      }
       if (req.method === 'GET' && path === '/agents') return send(res, 200, await service.agents(url.searchParams.get('projectId') ?? undefined));
-      const projectDefault = /^\/projects\/([a-z][a-z0-9-]{0,63})\/default-team$/.exec(path);
+      const projectDefault = /^\/projects\/([a-z0-9][a-z0-9-]{0,63})\/default-team$/.exec(path);
       if (req.method === 'PUT' && projectDefault) {
         const change = z.strictObject({ teamId: TeamId.nullable(), expectedVersion: z.number().int().nonnegative() }).parse(await body(req));
         return send(res, 200, service.setProjectDefaultTeam(projectDefault[1]!, change.teamId, change.expectedVersion));
+      }
+      // Project integrations: tokens are write-only; responses carry settings and the last check, never a secret.
+      const integration = /^\/projects\/([a-z0-9][a-z0-9-]{0,63})\/integrations(?:\/(github|jira)(?:\/(check|options|columns|suggest|preview|rule))?)?$/.exec(path);
+      if (integration) {
+        const integrations = options.integrations;
+        if (!integrations) throw new AppError('integrations_unavailable', 'Integrations are not enabled on this service.', 503);
+        const id = integration[1]!; const kind = integration[2] as 'github' | 'jira' | undefined; const action = integration[3];
+        if (req.method === 'GET' && !kind) return send(res, 200, await integrations.view(id));
+        if (req.method === 'PUT' && kind && !action) return send(res, 200, kind === 'github' ? await integrations.connectGitHub(id, await body(req, 16384)) : await integrations.connectJira(id, await body(req, 16384)));
+        if (req.method === 'DELETE' && kind && !action) return send(res, 200, await integrations.disconnect(id, kind));
+        if (req.method === 'POST' && kind && action === 'check') return send(res, 200, kind === 'github' ? await integrations.checkGitHub(id) : await integrations.checkJira(id));
+        if (kind === 'jira' && req.method === 'GET' && action === 'options') return send(res, 200, await integrations.jiraChoices(id, url.searchParams.get('project') ?? undefined));
+        if (kind === 'jira' && req.method === 'GET' && action === 'columns') return send(res, 200, await integrations.jiraColumnChoices(id, url.searchParams.get('project') ?? ''));
+        if (kind === 'jira' && req.method === 'GET' && action === 'suggest') return send(res, 200, await integrations.jiraSuggestions(id, url.searchParams.get('kind'), (url.searchParams.get('query') ?? '').slice(0, 200), url.searchParams.get('project') ?? undefined));
+        if (kind === 'jira' && req.method === 'POST' && action === 'preview') return send(res, 200, await integrations.previewJiraRule(id, await body(req, 16384)));
+        if (kind === 'jira' && req.method === 'PUT' && action === 'rule') return send(res, 200, await integrations.saveJiraRule(id, await body(req, 16384)));
       }
       // Saved teams: every mutation is behind the same authentication, CSRF and origin checks as task actions.
       if (req.method === 'GET' && path === '/teams') return send(res, 200, service.teams(z.enum(['active', 'archived', 'all']).parse(url.searchParams.get('filter') ?? 'active')));
@@ -187,8 +239,11 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       }
       if (req.method === 'GET' && path === '/overview') {
         const scheduler = service.scheduling(); const overview = service.store.overview(scheduler.active);
-        return send(res, 200, { ...overview, scheduler, active: overview.active.map(task => ({ ...task, scheduling: service.taskScheduling(task.id) })) });
+        const names = projectNames();
+        return send(res, 200, { ...overview, scheduler, attention: overview.attention.map(task => named(task, names)), recent: overview.recent.map(task => named(task, names)), active: overview.active.map(task => ({ ...named(task, names), scheduling: service.taskScheduling(task.id) })) });
       }
+      if (req.method === 'GET' && path === '/settings/task-concurrency') return send(res, 200, service.taskConcurrency());
+      if (req.method === 'PUT' && path === '/settings/task-concurrency') return send(res, 200, service.setTaskConcurrency(await body(req)));
       if (req.method === 'GET' && path === '/scheduler') return send(res, 200, service.scheduling());
       if (req.method === 'GET' && path === '/status') {
         if (!options.status) throw new AppError('not_found', 'Status reporting is not configured', 404);
@@ -197,7 +252,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       if (req.method === 'GET' && path === '/storage') return send(res, 200, await service.storageStatus());
       if (req.method === 'GET' && path === '/tasks') {
         const states = z.array(State).max(State.options.length).parse(url.searchParams.getAll('state'));
-        const project = url.searchParams.get('projectId'); const projectId = project ? Id.parse(project) : undefined;
+        const project = url.searchParams.get('projectId'); const projectId = project ? ProjectId.parse(project) : undefined;
         const before = url.searchParams.get('before');
         const page = service.store.summaries({
           limit: integer(url.searchParams.get('limit'), 50),
@@ -205,12 +260,13 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
           ...(projectId ? { projectId } : {}),
           ...(states.length ? { states } : {}),
         });
-        return send(res, 200, { ...page, tasks: page.tasks.map(task => ({ ...task, scheduling: service.taskScheduling(task.id) })), counts: service.store.stateCounts(projectId) });
+        const names = projectNames();
+        return send(res, 200, { ...page, tasks: page.tasks.map(task => ({ ...named(task, names), scheduling: service.taskScheduling(task.id) })), counts: service.store.stateCounts(projectId) });
       }
       if (req.method === 'POST' && path === '/tasks') {
         const key = z.string().min(1).max(200).parse(req.headers['idempotency-key']);
         const input = await body(req); assertExecutionReady();
-        return send(res, 201, service.submit(input, key));
+        return send(res, 201, named(service.submit(input, key)));
       }
       const match = /^\/tasks\/([a-f0-9-]{36})(?:\/(events|evidence|items|diff|usage|execution|run|mode|plan|approve|cancel|cleanup|compaction-preview|compact)(?:\/(\d{1,12}))?)?$/.exec(path);
       if (match) {
@@ -222,7 +278,10 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
           return send(res, 200, await service.diff(id));
         }
         if (req.method === 'GET' && action === 'compaction-preview' && !sub) return send(res, 200, await service.compactionPreview(id));
-        if (req.method === 'GET' && !action) return send(res, 200, { ...service.store.task(id), approval: service.store.planApproval(id), scheduling: service.taskScheduling(id) });
+        if (req.method === 'GET' && !action) {
+          const task = service.store.task(id);
+          return send(res, 200, { ...named(task), approval: service.store.planApproval(id), scheduling: service.taskScheduling(id), ...(service.store.project(task.projectId).archivedAt ? { projectArchived: true } : {}) });
+        }
         if (req.method === 'GET' && action === 'events') return send(res, 200, service.store.events(id, integer(url.searchParams.get('after'), 0), Math.min(integer(url.searchParams.get('limit'), 500), 1000)));
         if (req.method === 'GET' && action === 'evidence' && sub) return send(res, 200, boundEvidence(service.store.evidenceEntry(id, Number(sub)), EVIDENCE_ENTRY_BYTES));
         if (req.method === 'GET' && action === 'evidence') return send(res, 200, service.store.evidence(id, integer(url.searchParams.get('after'), 0), Math.min(integer(url.searchParams.get('limit'), 200), 1000)).map(e => boundEvidence(e, EVIDENCE_PREVIEW_BYTES)));

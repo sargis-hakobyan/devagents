@@ -416,3 +416,55 @@ Prevent duplicate authorized execution with stable task identity, transactional 
 Implemented the local portion of the parallel-task plan in four increments: transactional SQLite dispatch, independent task executions/resource admission, generation-checked writes/conservative recovery, then cancellation/cleanup and scheduler visibility. Keep default task capacity one for compatibility, with explicit local/Docker configuration for parallel work. Shared operation capacity defaults to two; per-task DAG/member limits remain separate. Mastra still owns workflow control flow, and a single service owns the local data directory.
 
 Coordinate worktree creation, removal and pruning by canonical Git common-directory identity, including multiple registered linked checkouts. Preserve request order within each checkout; archive creation stays outside the shared metadata lock. Unknown prior worker termination blocks replay and cleanup, with visible recovery attention and no automatic takeover. This delivery does not add distributed workers, general failed-task resume, ticket intake, pushing or merging into managed projects.
+
+
+## Live task concurrency setting — 2026-11-12
+
+Expose the top-level task limit through Settings → Parallel tasks and `config task-concurrency [limit]`. Persist explicitly saved values in SQLite schema 6, with version-bound updates to prevent stale browser edits. Saved values override startup YAML/environment defaults so Docker's default environment value cannot undo a UI change on restart. Until first save, existing startup precedence remains unchanged.
+
+Apply changes through the scheduler's existing per-tick admission check: increasing capacity permits queued work; lowering capacity leaves active executions intact and waits for slots to drain. Shared operation capacity remains startup-only. Task/team snapshots, approval versions and execution gates are unchanged. The compact numeric form extends the original read-only Settings design with loading, pending, validation, error and success states; no other settings become editable.
+
+## Project integrations: configuration first — 2026-11-13
+
+The owner asked for the U8 board (`design/ui/U8-Integrations.dc.html`) to be implemented with the same configuration available from the terminal. Delivered: connect, check, replace and disconnect a GitHub token and a Jira token per project, and save a Jira pick-up rule. Not delivered, and stated on the page itself: opening pull requests and turning tickets into tasks. The broader plan in `docs/GITHUB_INTEGRATION_PLAN.md` stays a proposal.
+
+- **One token per account, shared by its projects.** The first version stored a token per project; the owner rejected that the same day, in line with the 2026-11-13 GitHub decision. A token is stored under a name derived from its account (`github-<login>`; for Jira a hash of kind, site and email or account), and each project's settings name the token they use. There is no accounts table: the saved tokens are the distinct names the projects reference, so reuse, replace-once and delete-with-the-last-project all follow from that reference. A saved-token id is only honoured when a project already uses it. Environment tokens on a native service stay one variable per project.
+- **Settings in the project record, not a new table.** `integrations` is a field of the project's JSON, written in a transaction without changing the project `version`, so a connection check never makes a default-team edit stale. No schema migration.
+- **A service-owned secret store.** Integration tokens are used only by the service, so they are encrypted with the vault's master key and decrypted in memory on demand, never written to the tmpfs runtime like engine credentials. A native service reads them from the environment and refuses a pasted token, as the native Claude key does.
+- **Jira's token decides the form.** Jira Cloud needs site, email and API token; Data Center needs address and personal access token. Atlassian does not report a token's end date, so it is an optional field the user fills in; nothing is invented.
+- **A rule is checked before it is saved**, by running its search in Jira, and it must name a column, an assignee or a label.
+- **Differences from the board.** The tile subtitles and an information note describe what exists today instead of promising pull requests and ticket-driven tasks; the "What you get" cards are left out for the same reason. "Manage" opens the same panel with replace, check and disconnect. The recommended scopes for a scoped Jira token are read-only (`read:jira-work`, `read:jira-user`), because nothing writes to Jira. The label filter is a text field when Jira offers no label list.
+- **Not verified against the real services.** Authenticated connection checks need authorization for the task; the GitHub and Jira calls are tested against fixtures.
+
+## Archive instead of remove or rename — 2026-11-13
+
+The owner had registered a repository under a placeholder name, wanted it under its real name, and found no way to remove or re-register it. Decision: a project is archived, never deleted, in line with the rule that task history is never removed; the same folder may then be registered under a new ID, and an archived project can be restored.
+
+- **One folder, one active project.** Registration and restore are refused while an active project holds the folder. Folder identity is the path or, failing that, the directory's device and inode, because Docker reaches one host folder through a different path per project ID.
+- **The ID stays taken.** Tasks reference it; a new registration picks a new ID. Renaming an ID was rejected: it would rewrite task records, worktree metadata and the mount path.
+- **Archiving does not unmount.** In Docker the old mount stays, so archived tasks keep working diffs and archiving needs no restart. The launcher's duplicate-folder check now ignores mounts that belong to archived projects and names the holder otherwise. (The first proposal detached the folder; that was dropped when the identity check made it unnecessary.)
+- **Open work blocks archiving.** Nothing is cancelled on the user's behalf.
+- **Connections are removed on archive** and not restored; a shared token survives while another project uses it.
+- **Stored in the project record.** `archivedAt` in the JSON, under the existing optimistic `version`. The unique `path` column of an archived row is set to `archived:<id>` so a native install can register the same path again; no schema migration.
+
+## Project IDs are UUIDs; the name is separate and editable — 2026-11-13
+
+The owner found that a project's "name" was its ID: a hand-written string that could never change. Owner decisions the same day: the ID must be a real ID (a UUID), every ID in the database must be a UUID, and the name is what is shown everywhere. The data was declared disposable; it was converted instead of dropped.
+
+- **Generated, never chosen.** The service generates a UUID at registration. The HTTP API refuses any other value as an ID; the launcher asks the service for the UUID (`POST /projects/prepare`) because it needs it for the mount path before registering.
+- **Name: free text, editable, unique among active projects** (case-insensitive), so it can stand in for the ID in terminal commands. An archived project does not hold its name; restoring one whose name is taken asks for a rename first.
+- **Schema 7 converts old rows.** A hand-written project ID becomes the name; the row, its tasks and their stored plans get the UUID in one transaction with the foreign key re-checked. Nothing on disk was keyed by the project ID. Events and evidence are append-only and keep their original text.
+- **Other tables were already compliant**: tasks and teams use UUIDs; events and evidence use integer sequences that are paging cursors, not identities; the dispatch queue is keyed by task ID.
+- **Names travel with responses.** Task summaries and details carry `projectName`, added when a response is built, so a rename shows everywhere without rewriting tasks and without extra requests from the browser.
+- **Launcher messages and checks go by mount path**, because after conversion a project's ID no longer equals the directory name of its mount.
+- **Remaining exception, in tests only:** the in-process test fixture still registers readable IDs such as `fixture`, which about 65 test and smoke files rely on. No user-facing path can create one. Converting the fixtures is mechanical follow-up work.
+
+## Local browser sessions do not time out — 2026-11-14
+
+The owner was signed out after the laptop slept overnight (12 hours idle, 24 hours in total, measured on the wall clock) and judged the rule pointless locally: anyone who can reach the browser on the machine can reach the terminal and mint a sign-in link. Decision: a local sign-in lasts until sign-out.
+
+- **No time limits by default.** `DEVAGENTS_SESSION_IDLE_HOURS` and `DEVAGENTS_SESSION_MAX_HOURS` bring them back for a deployment that is not local.
+- **Sessions survive restarts.** They are stored in `browser-sessions.json` in the data directory with mode `0600`. The CLI token in the same directory already grants more than a browser session, so this adds no new exposure.
+- **Bounded.** The 20 most recent sessions are kept.
+- **Unchanged:** sessions are still created only from a single-use code minted through the CLI, the cookie stays `HttpOnly; SameSite=Strict`, and the loopback-host, same-origin and CSRF checks apply to every request.
+

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
+import type { ProjectIntegrations } from './integrations.js';
 
 export const Id = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 export const Mode = z.enum(['autonomous', 'plan-approval']);
@@ -72,7 +74,7 @@ export const Command = z.strictObject({ executable: z.string().min(1), args: z.a
 export const WorkItem = z.strictObject({
   id: Id, title: z.string().min(1), description: z.string().min(1),
   acceptanceCriteria: z.array(z.string().min(1)).min(1), dependsOn: z.array(Id),
-  requiredCapabilities: z.array(Id).min(1), projectId: Id,
+  requiredCapabilities: z.array(Id).min(1), projectId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/),
   branch: z.string().regex(/^[a-z0-9][a-z0-9/-]*$/),
   validation: z.array(Command), assignedAgent: Id.optional(), ownedPaths: z.array(ScopedPath).min(1).optional(),
 });
@@ -82,9 +84,25 @@ export const ManualChecks = z.array(z.string().min(1).max(1000)).max(10);
 export const Plan = z.strictObject({ summary: z.string().min(1), risks: z.array(z.string()), items: z.array(WorkItem).min(1).max(30), integration: Integration.nullable().optional(), manualChecks: ManualChecks.default([]), verification: z.array(z.string().min(1).max(1000)).max(10).default([]) });
 /** Older persisted plans can lack the advisory manual checks and approval verification prose. */
 export type TaskPlan = Omit<z.infer<typeof Plan>, 'manualChecks' | 'verification'> & { manualChecks?: string[]; verification?: string[] };
-export const ProjectInput = z.strictObject({ id: Id, path: z.string().min(1), defaultMode: Mode.optional() });
+/** A generated UUID, or the hand-written ID of a project registered before IDs were generated (and of scripts and fixtures that still pass one). */
+export const ProjectId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/);
+/** What people call a project. Free text, editable at any time; never used as a key. */
+export const ProjectName = z.string().trim().min(1, 'Give the project a name').max(80, 'Keep the name to 80 characters or fewer').regex(/^[^\u0000-\u001f\u007f]+$/, 'A project name has no line breaks or control characters');
+/**
+ * Registration takes a name and the service generates the ID. An explicit ID is still accepted for
+ * scripts and fixtures; without a name it doubles as the name, as on projects registered before names existed.
+ */
+export const ProjectInput = z.strictObject({ id: ProjectId.optional(), name: ProjectName.optional(), path: z.string().min(1), defaultMode: Mode.optional() })
+  .refine(v => v.id !== undefined || v.name !== undefined, { message: 'Give the project a name' });
+/** A project's ID is a generated UUID. It is a key, never a label: people see and edit the name. */
+export const newProjectId = (): string => randomUUID();
+export const projectName = (project: { id: string; name?: string }): string => project.name ?? project.id;
 /** `version` guards default-team changes against lost updates; legacy rows read as version 0. */
-export type Project = z.infer<typeof ProjectInput> & { baseSha: string; registeredAt: string; defaultTeamId?: string; version?: number };
+export type Project = Omit<z.infer<typeof ProjectInput>, 'id' | 'name'> & { id: string; name?: string; baseSha: string; registeredAt: string; defaultTeamId?: string; version?: number; integrations?: ProjectIntegrations;
+  /** Docker only: the folder on the user's computer that is attached at `path`. Reported by the launcher, shown instead of the internal path. */
+  hostPath?: string;
+  /** An archived project keeps its history but takes no new work, and its folder may be registered again under another ID. */
+  archivedAt?: string };
 
 // Saved teams: explicit member copies, bounded so a whole roster fits one 256 KB request.
 export const TeamId = z.string().uuid();
@@ -112,7 +130,7 @@ export type ProviderSnapshot = { id: string; kind: Provider['kind']; auth: Provi
 export type Provider = z.infer<typeof Provider>;
 /** Everything execution needs, resolved at submission so later team or default edits cannot change this task. */
 export type TaskTeam = { id: string; revision: number; name: string; snapshotAt: string; members: TeamMember[]; providers: ProviderSnapshot[]; defaultModel?: string; modelPinned: boolean };
-export const TaskInput = z.strictObject({ projectId: Id, request: z.string().min(1).max(20000), mode: Mode.optional(), acceptanceCriteria: z.array(z.string().min(1)).default([]), teamId: TeamId.optional() });
+export const TaskInput = z.strictObject({ projectId: ProjectId, request: z.string().min(1).max(20000), mode: Mode.optional(), acceptanceCriteria: z.array(z.string().min(1)).default([]), teamId: TeamId.optional() });
 export type Task = z.infer<typeof TaskInput> & {
   /** Frozen service policy; absent on legacy tasks, which retain strict rules. */
   devagentsRules?: boolean;

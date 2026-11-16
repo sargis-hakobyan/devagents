@@ -16,6 +16,7 @@ import { statusLimits } from '../dist/api/status.js';
 import { BrowserSessions } from '../dist/api/session.js';
 import { runProcess } from '../dist/engines/process.js';
 import { git } from '../dist/workspace/git.js';
+import { ProjectIntegrationService } from '../dist/integrations/service.js';
 
 const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : fallback; };
 const port = Number(arg('port', 4399)); const holdMs = Number(arg('hold', 0));
@@ -85,10 +86,44 @@ const engine = {
 };
 const validator = { async execute(cwd, command, signal, timeoutMs) { const r = await runProcess(process.execPath, command.args, { cwd, env: { PATH: process.env.PATH }, signal, timeoutMs, maxBytes: 1024 * 1024, overflow: 'truncate' }); return { ...command, exitCode: r.exitCode, output: r.stdout + r.stderr, truncated: r.truncated }; } };
 const runner = new TaskRunner(service, engine, validator); service.attachRunner(runner);
+// Integrations: tokens live in memory and a canned GitHub and Jira answer every request, so nothing here
+// reaches the network. Any token containing "rejected" is refused; every other well-formed token works.
+execFileSync('git', ['-C', websiteProject, 'remote', 'add', 'origin', 'https://github.com/example-org/website.git']);
+const fixtureTokens = new Map();
+const fixtureSecrets = { mode: 'vault', variable: name => `DEVAGENTS_${name.toUpperCase().replaceAll('-', '_')}`, locked: async () => false, get: async name => fixtureTokens.get(name), set: async (name, value) => { fixtureTokens.set(name, value); }, remove: async name => { fixtureTokens.delete(name); } };
+const reply = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
+const fixtureRemote = async (input, init = {}) => {
+  const url = new URL(String(input)); const path = url.pathname.replace(/^\/rest\/api\/[23]/, '/api');
+  const credential = String(init.headers?.authorization ?? ''); const decoded = credential.startsWith('Basic ') ? Buffer.from(credential.slice(6), 'base64').toString('utf8') : credential;
+  if (path === '/_edge/tenant_info') return reply({}, 404);
+  if (!credential || decoded.includes('rejected')) return reply({ message: 'Bad credentials' }, 401);
+  if (url.hostname === 'github.fixture.invalid') {
+    if (path === '/user') return reply({ login: 'fixture-user' }, 200, { 'github-authentication-token-expiration': '2099-01-01 00:00:00 UTC' });
+    return path === '/repos/example-org/website' ? reply({ permissions: { push: true } }) : reply({ message: 'Not Found' }, 404);
+  }
+  if (path === '/api/myself') return reply({ displayName: 'DevAgents Bot', accountId: 'acc-bot' });
+  const typed = name => (url.searchParams.get(name) ?? '').toLowerCase(); const has = (value, name) => value.toLowerCase().includes(typed(name));
+  const jiraProjects = [{ key: 'WEB', name: 'Website' }, { key: 'API', name: 'Backend API' }];
+  if (path === '/api/project/search') return reply({ values: jiraProjects.filter(p => has(p.key, 'query') || has(p.name, 'query')) });
+  const oneProject = /^\/api\/project\/([A-Za-z]+)$/.exec(path);
+  if (oneProject) { const project = jiraProjects.find(p => p.key === oneProject[1]); return project ? reply(project) : reply({}, 404); }
+  if (path === '/api/jql/autocompletedata/suggestions') return reply({ results: ['devagents', 'bug'].filter(l => has(l, 'fieldValue')).map(value => ({ value, displayName: value })) });
+  if (path === '/rest/agile/1.0/board') return reply({ values: url.searchParams.get('projectKeyOrId') === 'WEB' ? [{ id: 1 }] : [] });
+  if (path === '/rest/agile/1.0/board/1/configuration') return reply({ columnConfig: { columns: [{ name: 'To do', statuses: [{ id: '10000' }] }, { name: 'Ready for agents', statuses: [{ id: '10001' }] }, { name: 'In review', statuses: [{ id: '10002' }] }] } });
+  if (/^\/api\/project\/[A-Z]+\/statuses$/.test(path)) return reply([{ statuses: [{ id: '1', name: 'To Do' }, { id: '3', name: 'In Progress' }] }]);
+  if (path === '/api/user/assignable/search') return reply([{ accountId: 'acc-bot', displayName: 'DevAgents Bot' }, { accountId: 'acc-sam', displayName: 'Sam Example' }, { accountId: 'acc-anna', displayName: 'Anna Example' }].filter(u => (!url.searchParams.get('accountId') || u.accountId === url.searchParams.get('accountId')) && has(u.displayName, 'query')));
+  if (path === '/api/label') return reply({ values: ['devagents', 'bug'] });
+  const jql = init.body ? String(JSON.parse(init.body).jql ?? '') : '';
+  const found = jql.includes('"bug"') ? [] : jql.includes('status in (10001)') ? ['WEB-12', 'WEB-15', 'WEB-21'] : ['WEB-7'];
+  if (path === '/api/search/approximate-count') return reply({ count: found.length });
+  if (path === '/api/search/jql') return reply({ issues: found.map(key => ({ key })) });
+  return reply({}, 404);
+};
+const integrations = new ProjectIntegrationService(store, fixtureSecrets, { fetch: fixtureRemote, githubApiUrl: 'https://github.fixture.invalid' });
 const token = await accessToken(data); const sessions = new BrowserSessions();
 // Synthetic availability only: browser tests never inspect a host credential store or runtime login.
 const status = { service: { version: '0.1.0-fixture', host: '127.0.0.1', port, platform: process.platform, node: process.version, dataDir: data, executionEnabled: true, startedAt: new Date().toISOString(), checkedAt: new Date().toISOString() }, codex: { installed: true, version: 'fixture', signedIn: false, credentialStore: 'file', vaultLocked: false, modelAccessVerified: false }, claude: { installed: false, enabled: false, note: 'Adapter planned for M4' }, defaults: { devagentsRules: config.devagentsRules, engine: 'codex', provider: 'openai', model: null, providers: [{ id: 'openai', kind: 'openai', auth: 'login', apiKeyConfigured: null, executable: true }] }, limits: statusLimits(config), fixture: { label } };
-const server = createApi(service, token, { sessions, uiRoot: resolve('dist/ui'), status: async () => status });
+const server = createApi(service, token, { sessions, uiRoot: resolve('dist/ui'), status: async () => status, integrations });
 
 // Representative tasks. Each completes (or stops) through the real orchestrator against real Git worktrees.
 // The service starts listening only after they exist, so /health means the fixture is complete.

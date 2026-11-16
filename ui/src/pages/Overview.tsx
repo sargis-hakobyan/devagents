@@ -37,7 +37,7 @@ export function OverviewPage() {
           <div class="strip warn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#B45309" stroke-width="2.5" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>Needs your attention · {attentionCount}</div>
           {overview.attention.map(t => <div key={t.id} style={{ padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', borderTop: '1px solid var(--row)' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
-              <div><b>{taskState(t).label}</b> · <span class="mono">{t.projectId}</span>{t.state === 'awaiting_plan_approval' && <> · v{t.version}</>}</div>
+              <div><b>{taskState(t).label}</b> · <span>{t.projectName ?? t.projectId}</span>{t.state === 'awaiting_plan_approval' && <> · v{t.version}</>}</div>
               <div class="muted wrap-anywhere" style={{ fontSize: '13px' }}>{truncate(t.request, 140)} · {t.items ? `${t.items} item${t.items > 1 ? 's' : ''} · ` : ''}waiting {relative(t.updatedAt, now)} · nothing runs until you decide</div>
             </div>
             <a class="btn primary" href={`/ui/tasks/${t.id}`}>{t.state === 'awaiting_plan_approval' ? 'Review plan' : 'Open task'}</a>
@@ -57,7 +57,7 @@ export function OverviewPage() {
           {overview.recent.length === 0 ? <Empty title="No finished tasks yet" /> : <div class="scroll-x"><table>
             <thead><tr><th>Finished</th><th>Task</th><th>Project</th><th>Outcome</th><th>Result</th></tr></thead>
             <tbody>{overview.recent.map(t => <tr key={t.id} class="row">
-              <td class="muted mono">{relative(t.updatedAt, now)}</td><td><a href={`/ui/tasks/${t.id}`} style={{ fontWeight: 600, color: 'var(--text)', textDecoration: 'none' }}>{truncate(t.request, 80)}</a></td><td class="mono">{t.projectId}</td><td><StateChip task={t} /></td>
+              <td class="muted mono">{relative(t.updatedAt, now)}</td><td><a href={`/ui/tasks/${t.id}`} style={{ fontWeight: 600, color: 'var(--text)', textDecoration: 'none' }}>{truncate(t.request, 80)}</a></td><td class="wrap-anywhere">{t.projectName ?? t.projectId}</td><td><StateChip task={t} /></td>
               <td class={t.commit ? 'mono' : 'muted'}>{t.commit ? `${t.commit.slice(0, 7)} · ${t.branch ?? ''}` : t.error ? truncate(t.error, 90) : 'No commit'}{t.limitations ? <div class="muted" style={{ fontSize: '12px', fontFamily: 'var(--font)' }}>{t.limitationOverflow ? 'At least ' : ''}{t.limitations} check{t.limitations === 1 ? '' : 's'} not run here</div> : null}</td>
             </tr>)}</tbody></table></div>}
         </Card>

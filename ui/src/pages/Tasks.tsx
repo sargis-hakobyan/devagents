@@ -27,7 +27,7 @@ export function TasksPage() {
       <span class="muted" style={{ fontSize: '13px', fontWeight: 600 }}>State</span>
       {(['all', 'attention', 'active', 'finished'] as Group[]).map(g => <button key={g} type="button" class="filter" aria-pressed={group === g} onClick={() => { setGroup(g); setBefore([]); }}>{{ all: 'All', attention: 'Needs you', active: 'Active', finished: 'Finished' }[g]} · {count(g)}</button>)}
       <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 600, color: 'var(--muted)' }}>Project <select value={project} onChange={e => { setProject((e.target as HTMLSelectElement).value); setBefore([]); }} style={{ minHeight: '34px', borderRadius: '999px', border: '1px solid var(--btn-border)', backgroundColor: '#fff', font: 'inherit', paddingBlock: '0', paddingLeft: '10px' }}>
-        <option value="">All</option>{(projects ?? []).map(p => <option key={p.id} value={p.id}>{p.id}</option>)}
+        <option value="">All</option>{(projects ?? []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
       </select></label>
     </div>
     {page.error && !page.data && <ErrorNote message={page.error} />}
@@ -41,7 +41,7 @@ export function TasksPage() {
         <thead><tr><th>Request</th><th>Project</th><th>State</th><th>Items</th><th>Updated</th><th>Branch / result</th></tr></thead>
         <tbody>{tasks.map(t => <tr key={t.id} class="row">
           <td><a href={`/ui/tasks/${t.id}`} style={{ fontWeight: 700, color: 'var(--text)', textDecoration: 'none' }} class="wrap-anywhere">{truncate(t.request, 110)}</a><div class="muted wrap-anywhere" style={{ fontSize: '12.5px' }}>{t.mode ?? 'mode not chosen'} · v{t.version} · <span class="mono">{t.id.slice(0, 8)}</span> · {teamLabel(t.team)}</div></td>
-          <td class="mono">{t.projectId}</td><td><StateChip task={t} />{t.scheduling && ['queued', 'held', 'draining'].includes(t.scheduling.status) && <div class="muted wrap-anywhere" style={{ fontSize: '12px' }}>{t.scheduling.reason}</div>}{t.limitations ? <div class="muted" style={{ fontSize: '12px', marginTop: '4px' }}>{t.limitationOverflow ? 'At least ' : ''}{t.limitations} check{t.limitations === 1 ? '' : 's'} not run here</div> : null}</td><td class="mono">{t.items ? `${t.items} planned` : '—'}</td><td class="muted">{relative(t.updatedAt, now)}</td>
+          <td class="wrap-anywhere">{t.projectName ?? t.projectId}</td><td><StateChip task={t} />{t.scheduling && ['queued', 'held', 'draining'].includes(t.scheduling.status) && <div class="muted wrap-anywhere" style={{ fontSize: '12px' }}>{t.scheduling.reason}</div>}{t.limitations ? <div class="muted" style={{ fontSize: '12px', marginTop: '4px' }}>{t.limitationOverflow ? 'At least ' : ''}{t.limitations} check{t.limitations === 1 ? '' : 's'} not run here</div> : null}</td><td class="mono">{t.items ? `${t.items} planned` : '—'}</td><td class="muted">{relative(t.updatedAt, now)}</td>
           <td class={t.commit ? 'mono' : 'muted'}>{t.commit ? `${t.commit.slice(0, 7)} · ${t.branch ?? ''}` : t.error ? truncate(t.error, 100) : t.branch ? <span class="mono">{t.branch}</span> : '—'}</td>
         </tr>)}</tbody></table></div>}
     </Card>}

@@ -48,5 +48,11 @@ esac
     }
     assert.doesNotMatch(calls, /(?:system|volume|builder) prune/);
     await assert.rejects(run('setup', '--browser', '--test-connection'), /require --terminal/);
+    assert.match(calls, /main\.js projects sync-folders\n/, 'every start reports project folders');
+    await run('project', 'archive', '--name', 'old-project'); await run('project', 'restore', '--name', 'old-project');
+    calls = await readFile(log, 'utf8');
+    assert.match(calls, /main\.js projects archive -- old-project\n/); assert.match(calls, /main\.js projects restore -- old-project\n/);
+    await assert.rejects(run('project', 'archive'), /Pass the project: \.\/devagents project archive --name 'Project name'/);
+    await assert.rejects(run('project', 'remove', '--name', 'old-project'), /Usage:/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

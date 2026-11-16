@@ -1,12 +1,14 @@
 import type { TaskState, TaskSummary } from './api';
 
 export type Tone = 'ok' | 'run' | 'warn' | 'bad' | 'neutral';
-export function taskState(t: Pick<TaskSummary, 'state' | 'error'> & { outcome?: { error?: string } | undefined }): { label: string; tone: Tone; icon: string } {
+export function taskState(t: Pick<TaskSummary, 'state' | 'error' | 'scheduling'> & { outcome?: { error?: string } | undefined }): { label: string; tone: Tone; icon: string } {
   switch (t.state) {
     case 'awaiting_mode': return { label: 'Awaiting mode choice', tone: 'warn', icon: '●' };
     case 'awaiting_plan_approval': return { label: 'Awaiting your approval', tone: 'warn', icon: '●' };
     case 'planning': return { label: 'Planning', tone: 'run', icon: '▶' };
-    case 'ready': return { label: 'Queued', tone: 'neutral', icon: '…' };
+    case 'ready': return t.scheduling?.status === 'running'
+      ? { label: 'Preparing execution', tone: 'run', icon: '▶' }
+      : { label: 'Queued', tone: 'neutral', icon: '…' };
     case 'running': return { label: 'Running', tone: 'run', icon: '▶' };
     case 'validating': return { label: 'Validating', tone: 'run', icon: '▶' };
     case 'reviewing': return { label: 'Reviewing', tone: 'run', icon: '▶' };

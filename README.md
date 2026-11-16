@@ -57,6 +57,8 @@ The starter team includes a **Tech Lead**, **Frontend Developer**, **Backend Dev
 | **Visible execution** | A browser timeline of agent runs, parallel work, automated checks, reviewer findings, and repair attempts. |
 | **Quality gates** | Developer validation and independent, read-only code review. Optional QA verifies acceptance criteria. |
 | **Usage tracking** | Reported tokens by step and attempt. Available cost estimates are labelled; missing data stays unavailable. |
+| **Project connections** | Connect a project to its GitHub repository and to Jira with a token. The connection and a ticket pick-up rule are saved and checked; pull requests and ticket-driven tasks are not implemented yet. |
+| **Project archive** | Take a project out of use and register its repository again under a new name; its task history stays and it can be restored. |
 | **Local results** | Read-only diffs, local branches and commits, persistent task history, and automatic cleanup with recovery snapshots for unfinished work. |
 
 ## Coding engines
@@ -76,7 +78,7 @@ Model choices do not guarantee account access or quota. DevAgents stores task st
 - **QA is opt-in.** `qaEnabled: false` keeps separate agent QA disabled. Developer validation and independent review still run. Read the [QA contract](docs/REFERENCE.md#optional-qa-gate) before enabling it.
 - **Verification has evidence.** Unavailable optional checks are reported as limitations. A required acceptance criterion blocked at the QA gate prevents a final task commit.
 
-DevAgents defaults to one top-level task and supports configurable parallel tasks, with bounded workers inside each task and shared operation limits. See [concurrency configuration](docs/SETUP.md#large-projects-and-execution-budgets). It remains a local, single-user application.
+DevAgents defaults to one top-level task. Change the limit without a restart in **Settings → Parallel tasks**, or run `docker compose exec devagents node dist/cli/main.js config task-concurrency 2` (`npm run cli -- config task-concurrency 2` for native installations). The saved limit persists across restarts. DevAgents supports configurable parallel tasks, with bounded workers inside each task and shared operation limits. See [concurrency configuration](docs/SETUP.md#large-projects-and-execution-budgets). It remains a local, single-user application.
 
 ## Documentation
 

@@ -12,7 +12,7 @@ import { loadConfig, dataDirectory } from '../config.js';
 import { Store } from '../persistence/store.js';
 import { TaskService } from '../orchestration/service.js';
 import { createApi, accessToken } from '../api/server.js';
-import { BrowserSessions } from '../api/session.js';
+import { BrowserSessions, sessionFile, sessionLimits } from '../api/session.js';
 import { findUiRoot } from '../api/static.js';
 import { statusReporter } from '../api/status.js';
 import { spawn } from 'node:child_process';
@@ -34,6 +34,9 @@ import { onboard } from './onboarding.js';
 import type { AuthChoice } from '../domain/auth.js';
 import { selectChoice } from './choice-prompt.js';
 import { configuredVault } from '../security/credential-vault.js';
+import { configuredSecretStore } from '../security/secret-store.js';
+import { hostFolders } from './project-mount.js';
+import { ProjectIntegrationService } from '../integrations/service.js';
 
 const print = (data: unknown) => console.log(JSON.stringify(redactValues(data, environmentSecrets()), null, 2));
 const port = () => z.coerce.number().int().min(1).max(65535).parse(process.env.DEVAGENTS_PORT ?? 4310);
@@ -77,7 +80,8 @@ cli.command('serve').description('Start the local API').action(async () => {
   const setupAuth = new SetupAuth(codexSetupDriver(dataDir), () => assertSignInIdle(store, runner));
   const claudeAuth = new SetupAuth(claudeSetupDriver(dataDir), () => assertSignInIdle(store, runner));
   const server = createApi(service, await accessToken(dataDir), {
-    sessions: new BrowserSessions(), uiRoot, publicPort, setupAuth, claudeAuth, assertSetupIdle,
+    sessions: new BrowserSessions(undefined, sessionLimits(), sessionFile(dataDir)), uiRoot, publicPort, setupAuth, claudeAuth, assertSetupIdle,
+    integrations: new ProjectIntegrationService(store, await configuredSecretStore(dataDir)),
     status: statusReporter({ dataDir, config, version: '0.1.0', host, port: () => publicPort, executionEnabled: true, revision: () => setupAuth.revision + claudeAuth.revision }),
   });
   await service.agents();
@@ -101,7 +105,7 @@ cli.command('serve').description('Start the local API').action(async () => {
 cli.command('ui').description('Create a one-time sign-in link for the browser UI (never exposes the CLI token)').option('--open', 'Open the link with the OS browser').option('--setup', 'Open guided setup').action(async (opts: { open?: boolean; setup?: boolean }) => {
   const link = await request('/ui/bootstrap', 'POST', opts.setup ? { setup: true } : {}) as { url: string; expiresInSeconds: number };
   console.log(link.url);
-  console.error(`Single use, valid for ${Math.round(link.expiresInSeconds / 60)} minutes. Sessions end when the service restarts.`);
+  console.error(`Single use, valid for ${Math.round(link.expiresInSeconds / 60)} minutes. Once opened, the browser stays signed in until you sign out.`);
   if (!opts.open) return;
   const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
   const child = spawn(opener, [link.url], { stdio: 'ignore', detached: true });
@@ -137,20 +141,128 @@ cli.command('doctor').description('Report configuration and engine setup').actio
   const health = await engineHealth(dataDirectory());
   print({ node: process.version, platform: `${process.platform}/${process.arch}`, ...health, providers: config.providers.map(p => ({ id: p.id, kind: p.kind, auth: p.auth, apiKeyConfigured: p.apiKeyEnv ? Boolean(process.env[p.apiKeyEnv]) : null, localExecution: ['ollama', 'openai-compatible'].includes(p.kind) ? 'planned-follow-up' : undefined })), next: 'Start with npm run dev; register a project with npm run cli -- projects add <id> <absolute-path>' });
 });
+type ProjectRow = { id: string; name: string; path: string; version: number; archivedAt?: string };
+/** Commands take a project by its name or its ID. A name is matched without regard to case; an active project wins over an archived one. */
+async function projectRef(ref: string): Promise<ProjectRow> {
+  const all = await request('/projects?filter=all') as ProjectRow[];
+  const byId = all.find(p => p.id === ref); if (byId) return byId;
+  const named = all.filter(p => p.name.toLowerCase() === ref.trim().toLowerCase()); const active = named.filter(p => !p.archivedAt);
+  const found = active.length === 1 ? active[0] : named.length === 1 ? named[0] : undefined;
+  if (found) return found;
+  throw new AppError(named.length ? 'ambiguous_project' : 'not_found', named.length ? `Several projects are named "${ref}". Use the ID instead: ${named.map(p => p.id).join(', ')}` : `No project has the name or ID "${ref}". List them with: projects list`);
+}
+const pid = async (ref: string) => (await projectRef(ref)).id;
+/** API errors arrive as JSON; commands the launcher runs print only the message. */
+const plain = (error: unknown): string => { const text = error instanceof Error ? error.message : String(error); try { return String((JSON.parse(text) as { message?: unknown }).message ?? text); } catch { return text; } };
 const projects = cli.command('projects');
-projects.command('list').action(async () => print(await request('/projects')));
-projects.command('add <id> <path>').option('--mode <mode>', 'Optional project autonomy default').action(async (id: string, path: string, opts: { mode?: string }) => print(await request('/projects', 'POST', { id, path, ...(opts.mode ? { defaultMode: opts.mode } : {}) })));
-projects.command('ensure <id> <path>').description('Register a launcher-mounted checkout, or confirm its existing registration').action(async (id: string, path: string) => {
-  const projects = await request('/projects') as { id: string; path: string }[];
-  const existing = projects.find(p => p.id === id);
-  if (existing && existing.path !== path) throw new AppError('project_conflict', 'That project ID already belongs to another path.');
-  if (!existing) await request('/projects', 'POST', { id, path, defaultMode: 'plan-approval' });
-  console.log(`Project ${id} is registered with plan approval for new registrations.`);
+projects.command('list').option('--archived', 'Only archived projects').option('--all', 'Active and archived projects').action(async (opts: { archived?: boolean; all?: boolean }) => print(await request(`/projects?filter=${opts.all ? 'all' : opts.archived ? 'archived' : 'active'}`)));
+projects.command('add <name> <path>').description('Register an existing checkout under a name; the service generates the project ID').option('--mode <mode>', 'Optional project autonomy default').action(async (name: string, path: string, opts: { mode?: string }) => print(await request('/projects', 'POST', { name, path, ...(opts.mode ? { defaultMode: opts.mode } : {}) })));
+projects.command('rename <project> <name>').description('Change a project\'s name; its ID, history and folder stay as they are').action(async (project: string, name: string) => {
+  const current = await projectRef(project);
+  print(await request(`/projects/${encodeURIComponent(current.id)}/name`, 'PUT', { name, expectedVersion: current.version }));
 });
-projects.command('default-team <project> <team>').description('Set a saved team as the project default, or "none" to clear it').requiredOption('--version <version>', 'Project settings version you looked at').action(async (projectId: string, team: string, opts: { version: string }) => print(await request(`/projects/${encodeURIComponent(projectId)}/default-team`, 'PUT', { teamId: team === 'none' ? null : team, expectedVersion: Number(opts.version) })));
+async function setArchived(ref: string, archived: boolean): Promise<ProjectRow> {
+  const project = await projectRef(ref);
+  await request(`/projects/${encodeURIComponent(project.id)}/archive`, 'POST', { archived, expectedVersion: project.version });
+  return project;
+}
+projects.command('archive <project>').description('Take a project out of use: history and ID are kept, connections are removed, and its folder can be registered again as a new project').action(async (ref: string) => {
+  try { const project = await setArchived(ref, true); console.log(`Project "${project.name}" is archived. Its task history is kept. Restore it with: projects restore ${project.id}`); }
+  catch (error) { console.error(plain(error)); process.exitCode = 1; }
+});
+projects.command('restore <project>').description('Bring an archived project back; refused while an active project uses the same folder').action(async (ref: string) => {
+  try { const project = await setArchived(ref, false); console.log(`Project "${project.name}" is active again. Reconnect GitHub or Jira on its page if you use them.`); }
+  catch (error) { console.error(plain(error)); process.exitCode = 1; }
+});
+// The three commands below serve the Docker launcher, which must know the ID before it can attach the folder.
+projects.command('prepare <name>').description('Check a new project name and print a fresh project ID (used by the launcher)').action(async (name: string) => {
+  try { console.log((await request('/projects/prepare', 'POST', { name }) as { id: string }).id); }
+  catch (error) { console.error(plain(error)); process.exitCode = 1; }
+});
+projects.command('launcher-info').description('Archived project folders and project names by path, as JSON (used by the launcher)').action(async () => {
+  const all = await request('/projects?filter=all') as ProjectRow[];
+  console.log(JSON.stringify({ archived: all.filter(p => p.archivedAt).map(p => p.path), names: Object.fromEntries(all.map(p => [p.path, p.name])) }));
+});
+projects.command('sync-folders').description('Record each project\'s folder on this computer from the Compose configuration on stdin (used by the launcher)').action(async () => {
+  let input = ''; for await (const chunk of process.stdin) { input += chunk; if (input.length > 1024 * 1024) throw new AppError('invalid_input', 'Compose configuration is too large'); }
+  const folders = hostFolders(JSON.parse(input));
+  if (Object.keys(folders).length) await request('/projects/host-folders', 'PUT', { folders });
+});
+projects.command('ensure <id> <path>').description('Register a launcher-mounted checkout, or confirm its existing registration').option('--name <name>', 'Project name; defaults to the ID').action(async (id: string, path: string, opts: { name?: string }) => {
+  const projects = await request('/projects?filter=all') as ProjectRow[];
+  const existing = projects.find(p => p.id === id);
+  if (existing?.archivedAt) throw new AppError('project_archived', `The ID ${id} belongs to an archived project. Restore it or register a new project.`);
+  if (existing && existing.path !== path) throw new AppError('project_conflict', 'That project ID already belongs to another path.');
+  if (!existing) await request('/projects', 'POST', { id, path, defaultMode: 'plan-approval', ...(opts.name ? { name: opts.name } : {}) });
+  console.log(`Project "${opts.name ?? existing?.name ?? id}" is registered with plan approval for new registrations.`);
+});
+projects.command('default-team <project> <team>').description('Set a saved team as the project default, or "none" to clear it').requiredOption('--version <version>', 'Project settings version you looked at').action(async (project: string, team: string, opts: { version: string }) => print(await request(`/projects/${encodeURIComponent(await pid(project))}/default-team`, 'PUT', { teamId: team === 'none' ? null : team, expectedVersion: Number(opts.version) })));
+// Project integrations: the same routes the browser uses. A token is typed into a hidden prompt or read
+// from an environment variable; it is never a command-line argument and never printed.
+async function integrationToken(label: string, opts: { tokenEnv?: string; keepToken?: boolean; savedToken?: string }): Promise<string | undefined> {
+  if (opts.keepToken || opts.savedToken) return undefined;
+  if (opts.tokenEnv) {
+    const value = process.env[opts.tokenEnv];
+    if (!value) throw new AppError('missing_token', 'The selected token environment variable is empty');
+    return value;
+  }
+  if (!process.stdin.isTTY) throw new AppError('terminal_required', 'Token entry needs an interactive terminal. Pass --token-env <NAME> to read it from an environment variable, --saved-token <id> to reuse one, or --keep-token to check the current one.');
+  return readHiddenKey(process.stdin, process.stderr, label);
+}
+const integrationPath = (project: string, rest = '') => `/projects/${encodeURIComponent(project)}/integrations${rest}`;
+const integrations = cli.command('integrations').description('Connect a project to GitHub and Jira. Stores and checks the connection; nothing is pushed and no task is created');
+integrations.command('show <project>').description('Connections, their last check and the saved Jira pick-up rule').action(async (project: string) => print(await request(integrationPath(await pid(project)))));
+const github = integrations.command('github').description('GitHub token for a project whose folder is already cloned');
+github.command('connect <project>').description('Verify and save a GitHub token (starts with github_pat_ or ghp_)')
+  .option('--repository <owner/name>', 'Only needed when the folder has no GitHub remote named origin')
+  .option('--token-env <name>', 'Read the token from this environment variable instead of the hidden prompt')
+  .option('--saved-token <id>', 'Reuse a token already saved for another project on the same account; ids are listed by: integrations show')
+  .option('--keep-token', 'Check the current token again, for example after changing the repository')
+  .action(async (project: string, opts: { repository?: string; tokenEnv?: string; keepToken?: boolean; savedToken?: string }) => {
+    const token = await integrationToken('your GitHub token', opts);
+    print(await request(integrationPath(await pid(project), '/github'), 'PUT', { ...(token ? { token } : {}), ...(opts.savedToken ? { savedToken: opts.savedToken } : {}), ...(opts.repository ? { repository: opts.repository } : {}) }));
+  });
+github.command('check <project>').description('Ask GitHub whether the saved token still works').action(async (project: string) => print(await request(integrationPath(await pid(project), '/github/check'), 'POST', {})));
+github.command('disconnect <project>').description('Forget this project\'s connection; the token is forgotten once no project uses it').action(async (project: string) => print(await request(integrationPath(await pid(project), '/github'), 'DELETE')));
+const jira = integrations.command('jira').description('Jira token and the rule that says which tickets may become tasks');
+jira.command('connect <project>').description('Verify and save a Jira token: an Atlassian API token for Jira Cloud, a personal access token for self-hosted Jira')
+  .option('--site <address>', 'Jira address, for example example.atlassian.net; not needed with --saved-token')
+  .option('--saved-token <id>', 'Reuse a token already saved for another project, with its site and account; ids are listed by: integrations show')
+  .option('--email <email>', 'Jira Cloud: email of the Atlassian account that owns the token')
+  .option('--self-hosted', 'Jira Data Center: personal access token, no email')
+  .option('--expires <date>', 'End date of the token (YYYY-MM-DD), for the reminder; Atlassian does not report it')
+  .option('--token-env <name>', 'Read the token from this environment variable instead of the hidden prompt')
+  .option('--keep-token', 'Check the current token again')
+  .action(async (project: string, opts: { site?: string; email?: string; selfHosted?: boolean; expires?: string; tokenEnv?: string; keepToken?: boolean; savedToken?: string }) => {
+    if (opts.savedToken) { print(await request(integrationPath(await pid(project), '/jira'), 'PUT', { savedToken: opts.savedToken })); return; }
+    if (!opts.site) throw new AppError('invalid_options', 'Pass --site <address>, or --saved-token <id> to reuse a saved token');
+    const token = await integrationToken(opts.selfHosted ? 'your Jira personal access token' : 'your Atlassian API token', opts);
+    print(await request(integrationPath(await pid(project), '/jira'), 'PUT', { kind: opts.selfHosted ? 'data-center' : 'cloud', site: opts.site, ...(opts.email ? { email: opts.email } : {}), ...(opts.expires ? { expiresOn: opts.expires } : {}), ...(token ? { token } : {}) }));
+  });
+jira.command('options <project>').description('Jira projects; with --project also its columns, people and labels').option('--project <key>', 'Jira project key, for example WEB')
+  .action(async (project: string, opts: { project?: string }) => print(await request(integrationPath(await pid(project), `/jira/options${opts.project ? `?project=${encodeURIComponent(opts.project)}` : ''}`))));
+jira.command('search <project> <kind> [text]').description('Look up Jira projects, people or labels by what you type; people need --project')
+  .option('--project <key>', 'Jira project key, for example WEB')
+  .action(async (project: string, kind: string, text: string | undefined, opts: { project?: string }) => {
+    const query = new URLSearchParams({ kind, query: text ?? '', ...(opts.project ? { project: opts.project } : {}) });
+    print(await request(integrationPath(await pid(project), `/jira/suggest?${query}`)));
+  });
+jira.command('rule <project>').description('Save which tickets may become tasks; at least one of --column, --assignee, --label')
+  .requiredOption('--project <key>', 'Jira project key, for example WEB')
+  .option('--column <name>', 'Board column, for example "Ready for agents"')
+  .option('--assignee <name-or-id>', 'Jira user by display name or id')
+  .option('--label <label>', 'Jira label')
+  .addOption(new Option('--start <mode>', 'manual: wait until someone starts it; auto: start on its own').choices(['manual', 'auto']).default('manual'))
+  .option('--preview', 'Only show what the rule matches now; save nothing')
+  .action(async (project: string, opts: { project: string; column?: string; assignee?: string; label?: string; start: string; preview?: boolean }) => {
+    const rule = { project: opts.project, start: opts.start, ...(opts.column ? { column: opts.column } : {}), ...(opts.assignee ? { assignee: opts.assignee } : {}), ...(opts.label ? { label: opts.label } : {}) };
+    print(await request(integrationPath(await pid(project), opts.preview ? '/jira/preview' : '/jira/rule'), opts.preview ? 'POST' : 'PUT', rule));
+  });
+jira.command('check <project>').description('Ask Jira whether the saved token still works').action(async (project: string) => print(await request(integrationPath(await pid(project), '/jira/check'), 'POST', {})));
+jira.command('disconnect <project>').description('Forget this project\'s connection and rule; the token is forgotten once no project uses it').action(async (project: string) => print(await request(integrationPath(await pid(project), '/jira'), 'DELETE')));
 const teams = cli.command('teams').description('Saved teams: named rosters copied from templates or custom roles');
 teams.command('list').option('--archived', 'Only archived teams').option('--all', 'Active and archived teams').action(async (opts: { archived?: boolean; all?: boolean }) => print(await request(`/teams?filter=${opts.all ? 'all' : opts.archived ? 'archived' : 'active'}`)));
-teams.command('templates').description('Registry agents as copyable member templates').option('--project <id>').action(async (opts: { project?: string }) => print(await request(`/teams/templates${opts.project ? `?projectId=${encodeURIComponent(opts.project)}` : ''}`)));
+teams.command('templates').description('Registry agents as copyable member templates').option('--project <name-or-id>').action(async (opts: { project?: string }) => print(await request(`/teams/templates${opts.project ? `?projectId=${encodeURIComponent(await pid(opts.project))}` : ''}`)));
 teams.command('show <id>').action(async (id: string) => print(await request(`/teams/${id}`)));
 teams.command('check <file>').description('Server readiness diagnostics for a team file without saving it').action(async (file: string) => print(await request('/teams/check', 'POST', parse(await readFile(file, 'utf8')))));
 teams.command('create <file>').description('Create a team from a YAML or JSON file (name, description, members)').action(async (file: string) => print(await request('/teams', 'POST', parse(await readFile(file, 'utf8')))));
@@ -158,12 +270,18 @@ teams.command('edit <id> <file>').requiredOption('--revision <revision>', 'Revis
 teams.command('archive <id>').requiredOption('--revision <revision>').action(async (id: string, opts: { revision: string }) => print(await request(`/teams/${id}/archive`, 'POST', { expectedRevision: Number(opts.revision), archived: true })));
 teams.command('restore <id>').requiredOption('--revision <revision>').action(async (id: string, opts: { revision: string }) => print(await request(`/teams/${id}/archive`, 'POST', { expectedRevision: Number(opts.revision), archived: false })));
 teams.command('duplicate <id> <name>').action(async (id: string, name: string) => print(await request(`/teams/${id}/duplicate`, 'POST', { name })));
-cli.command('agents').option('--project <id>').action(async (opts: { project?: string }) => print(await request(`/agents${opts.project ? `?projectId=${encodeURIComponent(opts.project)}` : ''}`)));
+cli.command('agents').option('--project <name-or-id>').action(async (opts: { project?: string }) => print(await request(`/agents${opts.project ? `?projectId=${encodeURIComponent(await pid(opts.project))}` : ''}`)));
+const configCommand = cli.command('config').description('View or update persistent service settings');
+configCommand.command('task-concurrency [limit]').description('Show or set concurrent tasks (1–8); applies without restart').action(async (limit?: string) => {
+  const maxConcurrentTasks = limit === undefined ? undefined : z.coerce.number().int().min(1).max(8).parse(limit);
+  const current = await request('/settings/task-concurrency') as { version: number };
+  print(maxConcurrentTasks === undefined ? current : await request('/settings/task-concurrency', 'PUT', { maxConcurrentTasks, expectedVersion: current.version }));
+});
 cli.command('scheduler').description('Show task capacity, queued work and recovery attention').action(async () => print(await request('/scheduler')));
 const tasks = cli.command('tasks');
 tasks.command('list').description('Summaries of all tasks; use tasks show for the full record').action(async () => print(await request('/tasks')));
-tasks.command('submit <project> <request>').option('--mode <mode>').option('--team <id>', 'Saved team to freeze for this task (default: the project default, else the legacy registry)').option('--key <key>', 'Retry key; reuse it to avoid duplicate submissions').action(async (projectId: string, text: string, opts: { mode?: string; team?: string; key?: string }) => {
-  const task = await request('/tasks', 'POST', { projectId, request: text, ...(opts.mode ? { mode: opts.mode } : {}), ...(opts.team ? { teamId: opts.team } : {}) }, opts.key ?? randomUUID());
+tasks.command('submit <project> <request>').option('--mode <mode>').option('--team <id>', 'Saved team to freeze for this task (default: the project default, else the legacy registry)').option('--key <key>', 'Retry key; reuse it to avoid duplicate submissions').action(async (project: string, text: string, opts: { mode?: string; team?: string; key?: string }) => {
+  const task = await request('/tasks', 'POST', { projectId: await pid(project), request: text, ...(opts.mode ? { mode: opts.mode } : {}), ...(opts.team ? { teamId: opts.team } : {}) }, opts.key ?? randomUUID());
   print(task);
   if ((task as { state: string }).state === 'awaiting_mode') console.error('Choose a mode: devagents tasks mode <task-id> autonomous|plan-approval');
 });

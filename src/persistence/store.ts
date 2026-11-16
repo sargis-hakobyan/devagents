@@ -10,6 +10,7 @@ import { environmentSecrets, redact, redactValues } from '../telemetry/redact.js
 import { limitationCount, normalizeLegacyLimitations, redactReportProse } from '../domain/limitations.js';
 import { STARTER_TEAM_ID } from '../domain/starter-team.js';
 import type { DispatchClaim, DispatchRecord } from '../domain/dispatch.js';
+import type { ProjectIntegrations } from '../domain/integrations.js';
 
 export class Store {
   private readonly db: DatabaseSync;
@@ -22,7 +23,7 @@ export class Store {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
     // Version 4 added optional QA settings. Preserve that table when the QA feature is stashed.
-    if (version > 5) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
+    if (version > 7) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
     if (version === 0) this.db.exec(`
       BEGIN IMMEDIATE;
       CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, data TEXT NOT NULL);
@@ -64,6 +65,50 @@ export class Store {
       PRAGMA user_version=5;
       COMMIT;
     `);
+    if (version < 6) this.db.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS task_concurrency (id INTEGER PRIMARY KEY CHECK (id=1), max_concurrent_tasks INTEGER NOT NULL CHECK (max_concurrent_tasks BETWEEN 1 AND 8), version INTEGER NOT NULL);
+      PRAGMA user_version=6;
+      COMMIT;
+    `);
+    if (version < 7) this.migrateProjectIds();
+  }
+  /**
+   * Schema 7: every project ID is a UUID. A hand-written ID from an earlier version becomes the
+   * project's name, and the project's tasks follow it. Paths, branches and worktrees never used the
+   * ID, so nothing on disk moves. Append-only history keeps the text it was written with.
+   */
+  private migrateProjectIds(): void {
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    // The project row and its tasks change key together; the reference is checked again once both are done.
+    this.db.exec('PRAGMA foreign_keys=OFF');
+    try {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        for (const row of this.db.prepare('SELECT id, data FROM projects').all() as { id: string; data: string }[]) {
+          if (uuid.test(row.id)) continue;
+          const id = randomUUID(); const project = JSON.parse(row.data) as Project;
+          this.db.prepare('UPDATE projects SET id=?, data=? WHERE id=?').run(id, JSON.stringify({ ...project, id, name: project.name ?? row.id }), row.id);
+          for (const task of this.db.prepare('SELECT id, data FROM tasks WHERE project_id=?').all(row.id) as { id: string; data: string }[]) {
+            const data = JSON.parse(task.data) as { projectId: string; plan?: { items?: { projectId?: string }[] } };
+            data.projectId = id;
+            for (const item of data.plan?.items ?? []) if (item.projectId === row.id) item.projectId = id;
+            this.db.prepare('UPDATE tasks SET project_id=?, data=? WHERE id=?').run(id, JSON.stringify(data), task.id);
+          }
+        }
+        if (this.db.prepare('PRAGMA foreign_key_check').all().length) throw new AppError('database_migration', 'Project IDs could not be converted consistently; the database was left unchanged');
+        this.db.exec('PRAGMA user_version=7; COMMIT');
+      } catch (error) { try { this.db.exec('ROLLBACK'); } catch { /* keep the original failure */ } throw error; }
+    } finally { this.db.exec('PRAGMA foreign_keys=ON'); }
+  }
+  taskConcurrency(): { maxConcurrentTasks: number; version: number } | undefined {
+    return this.db.prepare('SELECT max_concurrent_tasks AS maxConcurrentTasks, version FROM task_concurrency WHERE id=1').get() as { maxConcurrentTasks: number; version: number } | undefined;
+  }
+  setTaskConcurrency(maxConcurrentTasks: number, expectedVersion: number): void {
+    this.transaction(() => {
+      if ((this.taskConcurrency()?.version ?? 0) !== expectedVersion) throw new AppError('stale_settings', 'Task concurrency changed; reload before saving again', 409);
+      this.db.prepare(`INSERT INTO task_concurrency VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET max_concurrent_tasks=excluded.max_concurrent_tasks, version=excluded.version`).run(maxConcurrentTasks, expectedVersion + 1);
+    });
   }
   close(): void { this.db.close(); }
   private transaction<T>(fn: () => T): T {
@@ -165,20 +210,91 @@ export class Store {
   /** Events and evidence are logs: apply the heuristic credential redaction as well. */
   private json(value: unknown): string { return JSON.stringify(redact(value, this.secrets)); }
   registerProject(project: Project, starterTeamId?: string): Project {
-    const existing = this.projects().find(p => p.id === project.id || p.path === project.path);
+    // An archived project keeps its ID for its history but no longer holds its folder.
+    const existing = this.projects().find(p => p.id === project.id || (!p.archivedAt && p.path === project.path));
     if (existing) {
+      if (existing.archivedAt) throw new AppError('project_archived', `The ID "${existing.id}" belongs to the archived project "${existing.name}". Restore it or choose another ID.`, 409);
       if (existing.id === project.id && existing.path === project.path && existing.defaultMode === project.defaultMode) return existing;
-      throw new AppError('project_conflict', 'Project ID or path already registered with different settings', 409);
+      throw new AppError('project_conflict', existing.id === project.id ? 'Project ID already registered with different settings' : `This folder is already registered as project "${existing.name}". Use it, or archive it first.`, 409);
     }
+    this.assertNameFree(project.name ?? project.id, project.id, 'Choose another name.');
     if (starterTeamId && !project.defaultTeamId) project = { ...project, defaultTeamId: starterTeamId };
     this.db.prepare('INSERT INTO projects VALUES (?, ?, ?)').run(project.id, project.path, JSON.stringify(project));
     return project;
   }
-  projects(): Project[] { return this.db.prepare('SELECT data FROM projects ORDER BY id').all().map(r => ({ version: 0, ...JSON.parse(r.data as string) }) as Project); }
+  /** Rows written before projects had names read with their ID as the name. */
+  private readProject(data: string): Project { const project = JSON.parse(data) as Project; return { version: 0, ...project, name: project.name ?? project.id }; }
+  projects(): Project[] { return this.db.prepare('SELECT data FROM projects ORDER BY id').all().map(r => this.readProject(r.data as string)); }
+  /** A name is unique among active projects, compared without regard to case, so it can stand in for the ID in commands. */
+  private assertNameFree(name: string, exceptId: string, hint: string): void {
+    const holder = this.projects().find(p => p.id !== exceptId && !p.archivedAt && p.name!.toLowerCase() === name.toLowerCase());
+    if (holder) throw new AppError('project_conflict', `An active project is already named "${holder.name}". ${hint}`, 409);
+  }
+  setProjectName(projectId: string, name: string, expectedVersion: number): Project {
+    return this.transaction(() => {
+      const project = this.project(projectId);
+      if ((project.version ?? 0) !== expectedVersion) throw new AppError('stale_project', 'Project settings changed; reload before retrying', 409);
+      if (project.name === name) return project;
+      if (!project.archivedAt) this.assertNameFree(name, projectId, 'Choose another name.');
+      const updated: Project = { ...project, name, version: (project.version ?? 0) + 1 };
+      this.db.prepare('UPDATE projects SET data=? WHERE id=?').run(JSON.stringify(updated), projectId);
+      return updated;
+    });
+  }
   project(id: string): Project {
     const row = this.db.prepare('SELECT data FROM projects WHERE id=?').get(id);
     if (!row) throw new AppError('not_found', 'Unknown project', 404);
-    return { version: 0, ...JSON.parse(row.data as string) } as Project;
+    return this.readProject(row.data as string);
+  }
+  /**
+   * Replaces a project's integration settings; secrets never pass through here. The project version
+   * is left alone so a connection check cannot make a default-team edit stale.
+   */
+  setProjectIntegrations(projectId: string, change: (current: ProjectIntegrations) => ProjectIntegrations): Project {
+    return this.transaction(() => {
+      const { integrations, ...rest } = this.project(projectId);
+      const next = change(integrations ?? {});
+      const updated: Project = { ...rest, ...(Object.keys(next).length ? { integrations: next } : {}) };
+      this.db.prepare('UPDATE projects SET data=? WHERE id=?').run(JSON.stringify(updated), projectId);
+      return updated;
+    });
+  }
+  /**
+   * Archives or restores a project under its version. Archiving needs every task of the project to be
+   * finished and frees the folder for another registration; the row, its tasks and its ID stay.
+   * Restoring takes the folder back, so it is refused while an active project is registered on it.
+   */
+  setProjectArchived(projectId: string, archived: boolean, expectedVersion: number): Project {
+    return this.transaction(() => {
+      const project = this.project(projectId);
+      if ((project.version ?? 0) !== expectedVersion) throw new AppError('stale_project', 'Project settings changed; reload before retrying', 409);
+      if (Boolean(project.archivedAt) === archived) return project;
+      const { archivedAt: _, ...rest } = project;
+      if (archived) {
+        const open = Number(this.db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE project_id=? AND state NOT IN ('completed','failed','cancelled')").get(projectId)!.n);
+        if (open) throw new AppError('project_active', `Finish or cancel the ${open} open task${open === 1 ? '' : 's'} of this project before archiving it.`, 409);
+      } else {
+        const holder = this.projects().find(p => p.id !== projectId && !p.archivedAt && p.path === project.path);
+        if (holder) throw new AppError('project_conflict', `Project "${holder.name}" uses this folder. Archive it first.`, 409);
+        this.assertNameFree(project.name ?? project.id, projectId, 'Rename one of them first.');
+      }
+      const updated: Project = { ...rest, ...(archived ? { archivedAt: new Date().toISOString() } : {}), version: (project.version ?? 0) + 1 };
+      // The path column is unique; an archived row gives its value up so the folder can be registered again.
+      this.db.prepare('UPDATE projects SET path=?, data=? WHERE id=?').run(archived ? `archived:${projectId}` : project.path, JSON.stringify(updated), projectId);
+      return updated;
+    });
+  }
+  /** Records where each project's folder lives on the user's computer, by the internal path it is attached at. Returns how many records changed. */
+  setProjectHostPaths(folders: Readonly<Record<string, string>>): number {
+    return this.transaction(() => {
+      let changed = 0;
+      for (const project of this.projects()) {
+        const hostPath = folders[project.path];
+        if (!hostPath || hostPath === project.hostPath) continue;
+        this.db.prepare('UPDATE projects SET data=? WHERE id=?').run(JSON.stringify({ ...project, hostPath }), project.id); changed++;
+      }
+      return changed;
+    });
   }
   /** Changes a project's default team under an optimistic version check; `null` clears it. */
   setProjectDefaultTeam(projectId: string, teamId: string | null, expectedVersion: number): Project {
@@ -337,7 +453,7 @@ export class Store {
    */
   createTask(input: unknown, key: string, freeze?: (task: Task) => TaskTeam | undefined, defaultMode?: () => Task['mode'], devagentsRules = true): Task {
     const parsed = TaskInput.parse(input);
-    this.project(parsed.projectId);
+    if (this.project(parsed.projectId).archivedAt) throw new AppError('project_archived', 'This project is archived. Restore it before submitting work.', 409);
     const clean = redactValues(parsed, this.secrets) as typeof parsed;
     const hash = (value: typeof parsed) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
     const fingerprint = `input-v2:${hash(parsed)}`;

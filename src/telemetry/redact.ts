@@ -1,6 +1,6 @@
 const secretKey = /(?:key|token|secret|password|authorization|cookie|credential)/i;
 // Credential shapes that do not occur in ordinary source code or prose.
-const credentialShapes = /\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,})\b/g;
+const credentialShapes = /\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,})\b|\bATATT[A-Za-z0-9_=-]{16,}/g;
 
 /**
  * Value-only redaction for model prompts, task input and plans: removes known secret

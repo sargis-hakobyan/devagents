@@ -5,7 +5,7 @@ import type { TaskSummary } from '../api';
 export function Chip({ tone, children, title }: { tone: Tone; children: ComponentChildren; title?: string }) {
   return <span class={`chip ${tone}`} title={title}>{children}</span>;
 }
-export function StateChip({ task }: { task: Pick<TaskSummary, 'state' | 'error'> }) {
+export function StateChip({ task }: { task: Pick<TaskSummary, 'state' | 'error' | 'scheduling'> }) {
   const s = taskState(task);
   return <Chip tone={s.tone}><span aria-hidden="true">{s.icon}</span>{s.label}</Chip>;
 }

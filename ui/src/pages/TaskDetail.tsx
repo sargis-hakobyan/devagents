@@ -1,4 +1,5 @@
 import { ExecutionWorkflow } from '../components/ExecutionWorkflow';
+import { ProjectRef } from './Project';
 import { TaskUsage } from '../components/TaskUsage';
 import { TaskCompaction } from '../components/TaskCompaction';
 import { TaskDiff } from '../components/TaskDiff';
@@ -58,7 +59,7 @@ export function TaskDetailPage({ id }: { id: string }) {
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}><StateChip task={task} /><span class="muted" style={{ fontSize: '13px' }}>{task.mode ?? 'mode not chosen'} · v{task.version} · started {formatTime(task.createdAt)} · {terminal ? 'took' : 'elapsed'} {elapsed(task.createdAt, finishedAt, now)}</span></div>
             <div class="muted" style={{ fontSize: '13px' }}>Extra DevAgents rules: {(task.devagentsRules ?? true) ? 'on' : 'off · engine sandbox'} · frozen at submission</div>
             <h1 style={{ margin: 0, fontSize: '22px', letterSpacing: '-0.02em', lineHeight: 1.3 }} class="wrap-anywhere">{task.request}</h1>
-            <div class="muted" style={{ fontSize: '13.5px' }}>Project <span class="mono">{task.projectId}</span> · Team: {task.team ? <><a href={`/ui/teams/${task.team.id}`}><b>{task.team.name}</b></a> revision {task.team.revision} · {task.team.members.filter(m => m.enabled).length} enabled members frozen at submission{task.team.modelPinned ? '' : ' · model: runtime default (not pinned)'}</> : <><b>Legacy agent configuration</b>{task.agents ? ` (${task.agents.length} agents snapshotted at worktree creation)` : ' (snapshotted when the worktree is created)'}</>}{task.workspace && tab !== 'plan' && <> · Branch <span class="mono">{task.workspace.branch}</span></>}</div>
+            <div class="muted" style={{ fontSize: '13.5px' }}>Project <ProjectRef id={task.projectId} name={task.projectName ?? task.projectId} archived={task.projectArchived === true} /> · Team: {task.team ? <><a href={`/ui/teams/${task.team.id}`}><b>{task.team.name}</b></a> revision {task.team.revision} · {task.team.members.filter(m => m.enabled).length} enabled members frozen at submission{task.team.modelPinned ? '' : ' · model: runtime default (not pinned)'}</> : <><b>Legacy agent configuration</b>{task.agents ? ` (${task.agents.length} agents snapshotted at worktree creation)` : ' (snapshotted when the worktree is created)'}</>}{task.workspace && tab !== 'plan' && <> · Branch <span class="mono">{task.workspace.branch}</span></>}</div>
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {renderActions()}
@@ -87,7 +88,9 @@ function summarize(task: Task, items: ItemProgress[]): { title: string; detail: 
     case 'awaiting_mode': return { title: 'Waiting for you: choose autonomous or plan-approval', tone: 'warn', detail: 'Nothing runs until a mode is chosen. The choice is asked exactly once for this task.' };
     case 'awaiting_plan_approval': return { title: `Waiting for you: approve plan version ${task.version} or reject it`, tone: 'warn', detail: 'Nothing runs until you decide. The Plan tab explains the proposed change, how it will be checked and any risks.' };
     case 'planning': return { title: 'The Tech Lead is planning', tone: 'info', detail: 'It inspects the project in a read-only sandbox and proposes a DAG of work items.' };
-    case 'ready': return { title: 'Queued', tone: 'info', detail: 'This task starts when the scheduler has capacity.' };
+    case 'ready': return task.scheduling?.status === 'running'
+      ? { title: 'Preparing execution', tone: 'info', detail: task.scheduling.reason }
+      : { title: 'Queued', tone: 'info', detail: 'This task starts when the scheduler has capacity.' };
     case 'running': case 'validating': case 'reviewing': case 'repairing': return { title: current ? `Now: ${itemVerb(current.state)} work item ${current.itemId}${current.agentId ? ` (${current.agentId})` : ''}` : `Now: ${task.state}`, tone: 'info', detail: items.length > 1 ? `${done} of ${items.length} items integrated. After every item is integrated, the combined result is validated and reviewed before one local commit. No merge, push or deployment happens.` : 'Implementation, real validation and an independent review precede one local commit on the task branch. No merge, push or deployment happens.' };
     case 'committing': return { title: 'Creating the reviewed local commit', tone: 'info', detail: 'This boundary cannot be cancelled; the outcome appears in Result.' };
     case 'completed': { const n = limitationCount(task.outcome); return { title: n ? `Completed with ${task.outcome?.limitationOverflow ? 'at least ' : ''}${n} check${n === 1 ? '' : 's'} not run in this environment` : 'Completed: one reviewed local commit on the task branch', tone: n ? 'warn' : 'info', detail: `Commit ${task.outcome?.commit?.slice(0, 7) ?? '—'} on ${task.workspace?.branch ?? 'the task branch'}. Nothing was merged or pushed; you integrate it yourself.${n ? ' The Result tab lists what you should verify yourself.' : ''}` }; }

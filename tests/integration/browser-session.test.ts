@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { request } from 'node:http';
 import { createApi } from '../../src/api/server.js';
-import { BrowserSessions, CODE_TTL_MS, IDLE_TTL_MS } from '../../src/api/session.js';
+import { BrowserSessions, CODE_TTL_MS } from '../../src/api/session.js';
 import { fixture } from '../helpers.js';
 
 async function uiFixture() {
@@ -24,7 +24,7 @@ async function uiFixture() {
     const login = await fetch(link.url, { redirect: 'manual' });
     assert.equal(login.status, 303); assert.equal(login.headers.get('location'), '/ui/');
     const setCookie = login.headers.get('set-cookie')!;
-    assert.match(setCookie, /^devagents_session=[a-f0-9]{64}; Path=\/; HttpOnly; SameSite=Strict; Max-Age=86400$/);
+    assert.match(setCookie, /^devagents_session=[a-f0-9]{64}; Path=\/; HttpOnly; SameSite=Strict; Max-Age=34560000$/);
     return { cookie: setCookie.split(';')[0]!, code: new URL(link.url).searchParams.get('code')! };
   };
   return { ...f, url, port, server, sessions, bearer, cookieFor, tick: (ms: number) => { now += ms; }, close: async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await f.cleanup(); } };
@@ -64,16 +64,19 @@ test('bootstrap links need the CLI token, are single use, expire, and establish 
     const { cookie, code } = await f.cookieFor();
     assert.equal((await fetch(`${f.url}/ui/login?code=${code}`, { redirect: 'manual' })).status, 403, 'replaying a consumed code is rejected');
     const tasks = await fetch(`${f.url}/tasks`, { headers: { cookie } }); assert.equal(tasks.status, 200);
-    const session = await (await fetch(`${f.url}/ui/session`, { headers: { cookie } })).json() as { authenticated: boolean; csrfToken: string; expiresAt: string };
+    const session = await (await fetch(`${f.url}/ui/session`, { headers: { cookie } })).json() as { authenticated: boolean; csrfToken: string; expiresAt: string | null };
     assert.equal(session.authenticated, true); assert.match(session.csrfToken, /^[a-f0-9]{64}$/);
-    assert.equal(session.expiresAt, new Date(Date.parse('2026-10-30T10:00:00Z') + IDLE_TTL_MS).toISOString());
+    assert.equal(session.expiresAt, null, 'a local session has no end time');
     assert.equal((await fetch(`${f.url}/ui/session`, { headers: f.bearer })).status, 403, 'the CLI token has no CSRF token or session');
     // An unused code expires.
     const stale = await (await fetch(`${f.url}/ui/bootstrap`, { method: 'POST', headers: { ...f.bearer, 'content-type': 'application/json' }, body: '{}' })).json() as { url: string };
     f.tick(CODE_TTL_MS + 1);
     assert.equal((await fetch(stale.url, { redirect: 'manual' })).status, 403);
-    // An idle session expires.
-    f.tick(IDLE_TTL_MS + 1);
+    // A local session does not end by itself: a night of sleep, or a month away, changes nothing.
+    f.tick(45 * 24 * 60 * 60 * 1000);
+    assert.equal((await fetch(`${f.url}/tasks`, { headers: { cookie } })).status, 200);
+    // Signing out ends it at once.
+    assert.equal((await fetch(`${f.url}/ui/logout`, { method: 'POST', headers: { cookie, 'content-type': 'application/json', 'x-csrf-token': session.csrfToken }, body: '{}' })).status, 200);
     const expired = await fetch(`${f.url}/tasks`, { headers: { cookie } }); assert.equal(expired.status, 401);
     assert.equal(((await expired.json()) as { error: string }).error, 'session_expired');
   } finally { await f.close(); }

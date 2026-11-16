@@ -28,13 +28,16 @@ test('a schema-2 database upgrades in place and keeps projects, tasks and events
     raw.close();
     const reopened = new Store(join(f.dataDir, 'test.db'));
     try {
-      assert.equal(reopened.project('fixture').version, 0); assert.equal(reopened.project('fixture').defaultTeamId, undefined);
+      // The upgrade also gives the project a UUID; the readable ID it was registered with becomes its name.
+      const [upgraded] = reopened.projects(); assert.match(upgraded!.id, /^[0-9a-f-]{36}$/); assert.equal(upgraded!.name, 'fixture');
+      assert.equal(upgraded!.version, 0); assert.equal(upgraded!.defaultTeamId, undefined);
+      assert.equal(reopened.task(task.id).projectId, upgraded!.id);
       const kept = reopened.task(task.id); assert.equal(kept.request, 'Before upgrade'); assert.equal(kept.team, undefined);
       assert.equal(reopened.events(task.id).length, 1);
       assert.deepEqual(reopened.teams('all'), []);
       const service = new TaskService(reopened, Config.parse({ schemaVersion: 1 }), f.dataDir);
       assert.equal(service.createTeam(await templateTeam(service, ['tech-lead', 'general-developer', 'code-reviewer'])).readiness.ready, true);
-      const legacy = service.submit({ projectId: 'fixture', request: 'Still legacy', mode: 'autonomous' }, 'post-upgrade');
+      const legacy = service.submit({ projectId: upgraded!.id, request: 'Still legacy', mode: 'autonomous' }, 'post-upgrade');
       assert.equal(legacy.team, undefined, 'projects without a default keep the legacy registry path');
     } finally { reopened.close(); }
   } finally { await f.cleanup(); }
@@ -187,7 +190,7 @@ test('opening a version-4 database preserves optional QA settings without downgr
     const raw = new DatabaseSync(join(f.dataDir, 'test.db'));
     raw.exec("CREATE TABLE execution_settings (id INTEGER PRIMARY KEY, data TEXT NOT NULL); INSERT INTO execution_settings VALUES (1, 'preserved-settings'); PRAGMA user_version=4;");
     const reopened = new Store(join(f.dataDir, 'test.db'));
-    try { assert.equal(reopened.project('fixture').id, 'fixture'); assert.equal(raw.prepare('PRAGMA user_version').get()!.user_version, 5); assert.ok(raw.prepare('SELECT data FROM execution_settings WHERE id=1').get()); }
+    try { assert.equal(reopened.projects()[0]!.name, 'fixture'); assert.equal(raw.prepare('PRAGMA user_version').get()!.user_version, 7); assert.ok(raw.prepare('SELECT data FROM execution_settings WHERE id=1').get()); }
     finally { reopened.close(); raw.close(); }
   } finally { await f.cleanup(); }
 });
