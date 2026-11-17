@@ -175,10 +175,9 @@ function JiraRuleEditor({ projectId, jira, onChange }: { projectId: string; jira
   }, [projectId, key, usable, jira.site, jira.checkedAt]);
 
   const rule: JiraRuleInput = { project: key, start, ...(column ? { column } : {}), ...(assignee ? { assignee: assignee.id } : {}), ...(label.trim() ? { label: label.trim() } : {}) };
-  const filtered = Boolean(column || assignee || label.trim());
   useEffect(() => {
     const id = ++sequence.current;
-    if (!usable || !key || !filtered) { setMatches({ state: 'idle' }); return; }
+    if (!usable || !key) { setMatches({ state: 'idle' }); return; }
     setMatches({ state: 'loading' });
     const timer = setTimeout(() => {
       api<{ matches: JiraMatches }>(`${base(projectId)}/jira/preview`, { method: 'POST', body: rule }).then(
@@ -189,10 +188,15 @@ function JiraRuleEditor({ projectId, jira, onChange }: { projectId: string; jira
   }, [projectId, key, column, assignee?.id, label, usable]);
 
   const changeProject = (next: Choice | undefined) => { setProject(next); setColumn(''); setAssignee(undefined); setLabel(''); setNote(''); };
-  const unchanged = Boolean(saved) && saved!.project.key === key && (saved!.column?.name ?? '') === column && (saved!.assignee?.id ?? '') === (assignee?.id ?? '') && (saved!.label ?? '') === label.trim() && saved!.start === start;
+  // Without a saved rule, an empty form has nothing to save; with one, clearing the project is a change like any other.
+  const unchanged = saved ? saved.project.key === key && (saved.column?.name ?? '') === column && (saved.assignee?.id ?? '') === (assignee?.id ?? '') && (saved.label ?? '') === label.trim() && saved.start === start : !key;
   const save = (event: Event) => {
     event.preventDefault(); setNote('');
-    void action.run(async () => { onChange((await api<{ integrations: Integrations }>(`${base(projectId)}/jira/rule`, { method: 'PUT', body: rule })).integrations); setNote('Rule saved.'); });
+    void action.run(async () => {
+      // No project means no rule: saving that removes the saved one, and no tickets come from Jira.
+      if (!key) { onChange(await api<Integrations>(`${base(projectId)}/jira/rule`, { method: 'DELETE' })); setStart('manual'); setNote('Saved. No tickets come from Jira.'); return; }
+      onChange((await api<{ integrations: Integrations }>(`${base(projectId)}/jira/rule`, { method: 'PUT', body: rule })).integrations); setNote('Rule saved.');
+    });
   };
   if (!usable) return <div class="integ-col"><div class="h">2 · Which tickets</div><span class="muted" style={{ fontSize: '13.5px' }}>Tickets can be chosen again once the token works.{saved ? ` The saved rule for ${saved.project.key} is kept.` : ''}</span></div>;
   const kind = columns?.columnsFrom === 'statuses' ? 'status' : 'column';
@@ -200,7 +204,7 @@ function JiraRuleEditor({ projectId, jira, onChange }: { projectId: string; jira
     <div class="h">2 · Which tickets</div>
     <div class="field"><label for="integ-rule-project">Pick up tickets from project</label>
       <Autocomplete id="integ-rule-project" what="project" value={project} onChange={changeProject} search={suggest('projects')} placeholder="Type a project name or key" disabled={action.busy} describe={c => `${c.id} · ${c.name}`} /></div>
-    {!project ? <span class="muted" style={{ fontSize: '13.5px' }}>Choose the Jira project, then narrow it down by column, assignee or label.</span> : <>
+    {!project ? <span class="muted" style={{ fontSize: '13.5px' }}>No project chosen: no tickets come from Jira. Choose a project to pick up its tickets; column, assignee and label are optional.</span> : <>
       {loadError && <div class="note bad" role="alert">{loadError}</div>}
       <div class="integ-rule" role="group" aria-label="Filters, all optional">
         <label for="integ-rule-column">in {kind}</label>
@@ -210,16 +214,16 @@ function JiraRuleEditor({ projectId, jira, onChange }: { projectId: string; jira
         <label for="integ-rule-label">with label</label>
         <Autocomplete id="integ-rule-label" what="label" free value={label ? { id: label, name: label } : undefined} onChange={next => { setLabel(next?.id ?? ''); setNote(''); }} search={suggest('labels')} placeholder="any label" disabled={action.busy} />
       </div>
-      <MatchLine filtered={filtered} preview={matches} approximate={jira.kind === 'cloud'} />
+      <MatchLine filtered preview={matches} approximate={jira.kind === 'cloud'} />
       <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <legend style={{ fontSize: '13px', fontWeight: 700, padding: 0, marginBottom: '6px' }}>When a ticket matches</legend>
         <label class="integ-radio"><input type="radio" name="integ-rule-start" checked={start === 'manual'} disabled={action.busy} onChange={() => { setStart('manual'); setNote(''); }} /><span><b>Wait until someone starts it</b> <span class="muted">· recommended</span></span></label>
         <label class="integ-radio"><input type="radio" name="integ-rule-start" checked={start === 'auto'} disabled={action.busy} onChange={() => { setStart('auto'); setNote(''); }} /><span>Start on its own</span></label>
       </fieldset>
-      <div class="integ-actions"><button type="submit" class="btn primary" disabled={action.busy || !filtered || unchanged}>{action.busy ? 'Saving…' : 'Save rule'}</button>
-        <span class="muted" style={{ fontSize: '13px' }} role="status">{note || (unchanged ? `Saved ${formatTime(saved!.savedAt)}` : '')}</span></div>
-      {action.error && <div class="note bad" role="alert">{action.error}</div>}
     </>}
+    <div class="integ-actions"><button type="submit" class="btn primary" disabled={action.busy || unchanged}>{action.busy ? 'Saving…' : 'Save rule'}</button>
+      <span class="muted" style={{ fontSize: '13px' }} role="status">{note || (saved && unchanged ? `Saved ${formatTime(saved.savedAt)}` : '')}</span></div>
+    {action.error && <div class="note bad" role="alert">{action.error}</div>}
   </form>;
 }
 
@@ -290,14 +294,27 @@ function JiraPanel({ projectId, view, onChange }: { projectId: string; view: Int
   </section>;
 }
 
-/** Tickets of an added tool that may become tasks. The tool offers only the filters its mapping can answer. */
+/** Several values for one part of a rule: the chosen ones as removable chips, and a field that adds another. */
+function MultiPick({ id, what, values, onChange, choices, placeholder, free, disabled }: { id: string; what: string; values: Choice[]; onChange: (next: Choice[]) => void; choices: Choice[]; placeholder: string; free?: boolean; disabled: boolean }) {
+  const left = choices.filter(c => !values.some(v => v.id === c.id));
+  const search = async (query: string) => left.filter(c => `${c.name} ${c.id}`.toLowerCase().includes(query.toLowerCase())).slice(0, 20);
+  return <div class="integ-multi">
+    {values.length > 0 && <span class="integ-chips">{values.map(v => <span key={v.id} class="integ-pick">{v.name}<button type="button" aria-label={`Remove ${what} ${v.name}`} disabled={disabled} onClick={() => onChange(values.filter(x => x.id !== v.id))}>×</button></span>)}</span>}
+    {/* The field is recreated after each choice, so it is empty again and ready for the next one. */}
+    <Autocomplete key={values.map(v => v.id).join('|')} id={id} what={what} value={undefined} onChange={next => { if (next && !values.some(v => v.id === next.id)) onChange([...values, next]); }} search={search} placeholder={values.length ? `add another ${what}` : placeholder} disabled={disabled} {...(free ? { free: true } : {})} />
+  </div>;
+}
+const sameIds = (a: { id: string }[] | undefined, b: { id: string }[]) => (a ?? []).map(x => x.id).join('|') === b.map(x => x.id).join('|');
+const named = (values: string[] | undefined): Choice[] => (values ?? []).map(v => ({ id: v, name: v }));
+
+/** Tickets of an added tool that may become tasks. Every filter is optional and takes several values; the tool offers only the filters its mapping can answer. */
 function ToolRuleEditor({ projectId, connection, onChange }: { projectId: string; connection: ToolConnection; onChange: (next: ProjectTool) => void }) {
   const saved = connection.rule; const action = useAction(); const name = connection.tracker.name; const path = `${base(projectId)}/trackers/${connection.trackerId}`;
-  const [project, setProject] = useState<Choice | undefined>(saved?.project); const [column, setColumn] = useState(saved?.column ?? '');
-  const [assignee, setAssignee] = useState<Choice | undefined>(saved?.assignee); const [label, setLabel] = useState(saved?.label ?? '');
+  const [projects, setProjects] = useState<Choice[]>(saved?.projects ?? []); const [columns, setColumns] = useState<Choice[]>(named(saved?.columns));
+  const [assignees, setAssignees] = useState<Choice[]>(saved?.assignees ?? []); const [labels, setLabels] = useState<Choice[]>(named(saved?.labels));
   const [start, setStart] = useState<'manual' | 'auto'>(saved?.start ?? 'manual');
   const [options, setOptions] = useState<ToolOptions>(); const [loadError, setLoadError] = useState('');
-  const [found, setFound] = useState<{ state: 'idle' | 'loading' } | { state: 'ok'; value: ToolMatches } | { state: 'bad'; text: string }>({ state: 'idle' });
+  const [found, setFound] = useState<{ state: 'loading' } | { state: 'ok'; value: ToolMatches } | { state: 'bad'; text: string }>({ state: 'loading' });
   const [note, setNote] = useState(''); const sequence = useRef(0);
   const usable = connection.tracker.state === 'connected';
   useEffect(() => {
@@ -306,13 +323,12 @@ function ToolRuleEditor({ projectId, connection, onChange }: { projectId: string
     api<ToolOptions>(`${path}/options`).then(next => { if (current) setOptions(next); }, e => { if (!current) return; if (e instanceof SignedOutError) onSignedOut(); else setLoadError(message(e)); });
     return () => { current = false; };
   }, [projectId, usable, connection.trackerId, connection.tracker.checkedAt]);
-  // A tool's lists are loaded once, so the fields search them here.
-  const within = (items: Choice[]) => async (query: string) => items.filter(i => `${i.name} ${i.id}`.toLowerCase().includes(query.toLowerCase())).slice(0, 20);
-  const rule = { start, ...(project ? { project: project.id } : {}), ...(column ? { column } : {}), ...(assignee ? { assignee: assignee.id } : {}), ...(label.trim() ? { label: label.trim() } : {}) };
-  const filtered = Boolean(column || assignee || label.trim());
+  const ids = (values: Choice[]) => values.map(v => v.id);
+  const rule = { start, projects: ids(projects), columns: ids(columns), assignees: ids(assignees), labels: ids(labels) };
+  const signature = JSON.stringify([rule.projects, rule.columns, rule.assignees, rule.labels]);
   useEffect(() => {
     const id = ++sequence.current;
-    if (!usable || !filtered) { setFound({ state: 'idle' }); return; }
+    if (!usable) return;
     setFound({ state: 'loading' });
     const timer = setTimeout(() => {
       api<{ matches: ToolMatches }>(`${path}/preview`, { method: 'POST', body: rule }).then(
@@ -320,8 +336,9 @@ function ToolRuleEditor({ projectId, connection, onChange }: { projectId: string
         e => { if (id !== sequence.current) return; if (e instanceof SignedOutError) onSignedOut(); else setFound({ state: 'bad', text: message(e) }); });
     }, 400);
     return () => clearTimeout(timer);
-  }, [projectId, project?.id, column, assignee?.id, label, usable]);
-  const unchanged = Boolean(saved) && (saved!.project?.id ?? '') === (project?.id ?? '') && (saved!.column ?? '') === column && (saved!.assignee?.id ?? '') === (assignee?.id ?? '') && (saved!.label ?? '') === label.trim() && saved!.start === start;
+  }, [projectId, signature, usable]);
+  const unchanged = Boolean(saved) && sameIds(saved!.projects, projects) && sameIds(named(saved!.columns), columns) && sameIds(saved!.assignees, assignees) && sameIds(named(saved!.labels), labels) && saved!.start === start;
+  const change = <T,>(set: (next: T) => void) => (next: T) => { set(next); setNote(''); };
   const save = (event: Event) => {
     event.preventDefault(); setNote('');
     void action.run(async () => { onChange(await api<ProjectTool>(`${path}/rule`, { method: 'PUT', body: rule })); setNote('Rule saved.'); });
@@ -329,33 +346,33 @@ function ToolRuleEditor({ projectId, connection, onChange }: { projectId: string
   if (!usable) return <div class="integ-col"><div class="h">2 · Which tickets</div><span class="muted" style={{ fontSize: '13.5px' }}>Tickets can be chosen again once {name} is reachable with a working token.{saved ? ' The saved rule is kept.' : ''}</span></div>;
   if (!options) return <div class="integ-col"><div class="h">2 · Which tickets</div>{loadError ? <div class="note bad" role="alert">{loadError}</div> : <Skeleton rows={3} label={`Asking ${name} what a rule can name`} />}</div>;
   const can = (part: ToolOptions['filters'][number]) => options.filters.includes(part);
-  const matched = found.state === 'ok' ? found.value : undefined;
+  const matched = found.state === 'ok' ? found.value : undefined; const filtered = Boolean(projects.length || columns.length || assignees.length || labels.length);
   return <form class="integ-col" onSubmit={save} aria-label="Which tickets">
     <div class="h">2 · Which tickets</div>
-    <div class="integ-rule" role="group" aria-label="Filters">
-      {can('project') && <><label for="integ-tool-project">from project</label>
-        <Autocomplete id="integ-tool-project" what="project" value={project} onChange={next => { setProject(next); setNote(''); }} search={within(options.projects)} placeholder="any project" disabled={action.busy} /></>}
-      {can('column') && <><label for="integ-tool-column">in column</label>
-        <select id="integ-tool-column" value={column} disabled={action.busy} onChange={e => { setColumn((e.target as HTMLSelectElement).value); setNote(''); }}><option value="">any column</option>{[...new Set([...(column ? [column] : []), ...options.columns])].map(c => <option key={c} value={c}>{c}</option>)}</select></>}
+    <div class="integ-rule" role="group" aria-label="Filters, all optional">
+      {can('project') && <><label for="integ-tool-project">from projects</label>
+        <MultiPick id="integ-tool-project" what="project" values={projects} onChange={change(setProjects)} choices={options.projects} placeholder="any project" disabled={action.busy} /></>}
+      {can('column') && <><label for="integ-tool-column">in columns</label>
+        <MultiPick id="integ-tool-column" what="column" values={columns} onChange={change(setColumns)} choices={named(options.columns)} placeholder="any column" disabled={action.busy} /></>}
       {can('assignee') && <><label for="integ-tool-assignee">assigned to</label>
-        <Autocomplete id="integ-tool-assignee" what="assignee" value={assignee} onChange={next => { setAssignee(next); setNote(''); }} search={within(options.people)} placeholder="anyone" disabled={action.busy} /></>}
-      {can('label') && <><label for="integ-tool-label">with label</label>
-        <Autocomplete id="integ-tool-label" what="label" free value={label ? { id: label, name: label } : undefined} onChange={next => { setLabel(next?.id ?? ''); setNote(''); }} search={within(options.labels.map(l => ({ id: l, name: l })))} placeholder="any label" disabled={action.busy} /></>}
+        <MultiPick id="integ-tool-assignee" what="assignee" values={assignees} onChange={change(setAssignees)} choices={options.people} placeholder="anyone" disabled={action.busy} /></>}
+      {can('label') && <><label for="integ-tool-label">with labels</label>
+        <MultiPick id="integ-tool-label" what="label" free values={labels} onChange={change(setLabels)} choices={named(options.labels)} placeholder="any label" disabled={action.busy} /></>}
     </div>
     <div class={`integ-match${matched?.total ? ' ok' : found.state === 'bad' ? ' bad' : ''}`} role="status" aria-live="polite">
-      {!filtered ? <span>Choose a column, an assignee or a label. A rule never means every ticket.</span>
-        : found.state === 'bad' ? <span>{found.text}</span>
+      {found.state === 'bad' ? <span>{found.text}</span>
         : !matched ? <span>Asking {name} what this matches…</span>
         : matched.total === 0 ? <span><b>No tickets match right now.</b> The rule can still be saved.</span>
-        : <><span aria-hidden="true">✓</span><span><b>Matches {matched.total} ticket{matched.total === 1 ? '' : 's'} now:</b> {matched.sample.map(t => t.key).join(', ')}{matched.total > matched.sample.length ? ', …' : ''}</span></>}
+        : <><span aria-hidden="true">✓</span><span><b>{filtered ? 'Matches' : 'No filter: all'} {matched.total} ticket{matched.total === 1 ? '' : 's'} now:</b> {matched.sample.map(t => t.key).join(', ')}{matched.total > matched.sample.length ? ', …' : ''}</span></>}
     </div>
     <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
       <legend style={{ fontSize: '13px', fontWeight: 700, padding: 0, marginBottom: '6px' }}>When a ticket matches</legend>
       <label class="integ-radio"><input type="radio" name="integ-tool-start" checked={start === 'manual'} disabled={action.busy} onChange={() => { setStart('manual'); setNote(''); }} /><span><b>Wait until someone starts it</b> <span class="muted">· recommended</span></span></label>
       <label class="integ-radio"><input type="radio" name="integ-tool-start" checked={start === 'auto'} disabled={action.busy} onChange={() => { setStart('auto'); setNote(''); }} /><span>Start on its own</span></label>
     </fieldset>
-    <div class="integ-actions"><button type="submit" class="btn primary" disabled={action.busy || !filtered || unchanged}>{action.busy ? 'Saving…' : 'Save rule'}</button>
-      <span class="muted" style={{ fontSize: '13px' }} role="status">{note || (unchanged ? `Saved ${formatTime(saved!.savedAt)}` : '')}</span></div>
+    <div class="integ-actions"><button type="submit" class="btn primary" disabled={action.busy || unchanged}>{action.busy ? 'Saving…' : 'Save rule'}</button>
+      {saved && <button type="button" class="btn small quiet" disabled={action.busy} onClick={() => { setNote(''); void action.run(async () => { onChange(await api<ProjectTool>(`${path}/rule`, { method: 'DELETE' })); setProjects([]); setColumns([]); setAssignees([]); setLabels([]); setStart('manual'); setNote(`Rule removed. No tickets come from ${name} until you save a rule.`); }); }}>Remove rule</button>}
+      <span class="muted" style={{ fontSize: '13px' }} role="status">{note || (unchanged ? `Saved ${formatTime(saved!.savedAt)}` : !saved ? `No rule saved: no tickets come from ${name} yet.` : '')}</span></div>
     {action.error && <div class="note bad" role="alert">{action.error}</div>}
   </form>;
 }
@@ -422,7 +439,7 @@ export function ProjectIntegrations({ projectId }: { projectId: string }) {
         line={jira && (jira.rule ? <>project <b>{jira.rule.project.key}</b>{jira.rule.column ? <>, column <b>{jira.rule.column.name}</b></> : null}</> : 'no ticket rule yet')}
         foot={jira ? `as ${jira.account}${jira.expiresOn ? ` · token valid until ${day(`${jira.expiresOn}T00:00:00Z`)}` : ''}` : 'You write requests yourself'} />
       {tool.connections.map(c => <Tile key={c.trackerId} kind="tool" name={c.tracker.name} what="Ticket tool, through its MCP server" connection={c.tracker} open={open === `tool:${c.trackerId}`} onOpen={() => toggle(`tool:${c.trackerId}`)}
-        line={c.rule ? <>{c.rule.project ? <>project <b>{c.rule.project.name}</b>{c.rule.column ? ', ' : ''}</> : null}{c.rule.column ? <>column <b>{c.rule.column}</b></> : null}{!c.rule.project && !c.rule.column ? 'ticket rule saved' : null}</> : 'no ticket rule yet'}
+        line={c.rule ? ([c.rule.projects?.length ? `project ${c.rule.projects.map(p => p.name).join(', ')}` : '', c.rule.columns?.length ? `column ${c.rule.columns.join(', ')}` : '', c.rule.labels?.length ? `label ${c.rule.labels.join(', ')}` : '', c.rule.assignees?.length ? `assigned to ${c.rule.assignees.map(a => a.name).join(', ')}` : ''].filter(Boolean).join(' · ') || 'every ticket') : 'no ticket rule yet'}
         foot={c.tracker.account ? `as ${c.tracker.account}` : 'connected'} />)}
       <Tile kind="tool" name={tool.connections.length ? 'Another ticket tool' : 'Ticket tool'} what="Any Jira-like tool with an MCP server" connection={null} open={open === 'tool:new'} onOpen={() => toggle('tool:new')}
         line={null} foot={more > 0 ? `${more} added tool${more === 1 ? '' : 's'} to choose from` : tool.trackers.length ? 'Every added tool is in use here' : 'Add a tool first'} />

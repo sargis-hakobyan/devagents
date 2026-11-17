@@ -37,12 +37,18 @@ export type TrackerMapping = z.infer<typeof TrackerMapping>;
 
 export const TrackerAddInput = z.strictObject({ name: TrackerName, url: z.string().min(1).max(500), token: Token.optional() });
 export const TrackerUpdateInput = z.strictObject({ name: TrackerName.optional(), url: z.string().min(1).max(500).optional(), token: Token.optional() }).refine(v => v.name !== undefined || v.url !== undefined || v.token !== undefined, { message: 'Send a new name, address or token' });
+const Several = (item: z.ZodString) => z.array(item).max(50).transform(values => [...new Set(values.map(v => v.trim()).filter(Boolean))]).optional();
+/**
+ * Which tickets come in. Every part is optional and takes several values: a ticket matches a part
+ * when it has any one of its values, and it must match every part that is filled in. With no part
+ * filled in, the rule means every ticket the account can see.
+ */
 export const TrackerRuleInput = z.strictObject({
-  /** Project, column and person by id or exact name, as the options call lists them. */
-  project: z.string().min(1).max(200).optional(), column: z.string().min(1).max(100).optional(),
-  assignee: z.string().min(1).max(320).optional(), label: z.string().min(1).max(255).optional(),
+  /** Projects and people by id or exact name, as the options call lists them. */
+  projects: Several(z.string().min(1).max(200)), columns: Several(z.string().min(1).max(100)),
+  assignees: Several(z.string().min(1).max(320)), labels: Several(z.string().min(1).max(255)),
   start: z.enum(['manual', 'auto']).default('manual'),
-}).refine(v => v.column || v.assignee || v.label, { message: 'Choose a column, an assignee or a label, so the rule cannot mean every ticket' });
+});
 
 /** `match` lists every value a ticket may use to refer to this entry (its id, key, email or name), lowercased. */
 export type TrackerChoice = { id: string; name: string; match?: string[] };
@@ -57,7 +63,7 @@ export type Tracker = {
   mapping?: TrackerMapping;
   connectedAt: string; checkedAt: string; problem?: IntegrationProblem;
 };
-export type TrackerRule = { project?: TrackerChoice; column?: string; assignee?: TrackerChoice; label?: string; start: 'manual' | 'auto'; savedAt: string };
+export type TrackerRule = { projects?: TrackerChoice[]; columns?: string[]; assignees?: TrackerChoice[]; labels?: string[]; start: 'manual' | 'auto'; savedAt: string };
 /** A project's use of one tracker. The tracker itself, with its address and token, is shared. */
 export type TrackerConnection = { trackerId: string; connectedAt: string; rule?: TrackerRule };
 export type TrackerTicket = { key: string; title: string; column?: string; project?: string; assignee?: string; labels: string[]; url?: string };

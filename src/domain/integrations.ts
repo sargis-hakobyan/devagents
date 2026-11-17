@@ -31,6 +31,7 @@ export const JiraConnectInput = z.strictObject({
   if (v.kind === 'data-center' && v.email) c.addIssue({ code: 'custom', path: ['email'], message: 'A personal access token needs no email' });
 });
 export const JiraProjectKey = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,49}$/, 'Use a Jira project key such as WEB');
+/** A rule names one Jira project. Column, assignee and label are optional; without them it means the project's open tickets. */
 export const JiraRuleInput = z.strictObject({
   project: JiraProjectKey,
   /** Board column by name; resolved to its statuses when the rule is saved. */
@@ -39,7 +40,7 @@ export const JiraRuleInput = z.strictObject({
   assignee: z.string().min(1).max(200).optional(),
   label: z.string().min(1).max(255).regex(/^\S+$/, 'A Jira label has no spaces').optional(),
   start: z.enum(['manual', 'auto']).default('manual'),
-}).refine(v => v.column || v.assignee || v.label, { message: 'Choose a column, an assignee or a label, so the rule cannot mean every ticket in the project' });
+});
 
 export type IntegrationProblem = { code: 'token_missing' | 'token_rejected' | 'not_reachable'; message: string; at: string };
 export type GitHubIntegration = {

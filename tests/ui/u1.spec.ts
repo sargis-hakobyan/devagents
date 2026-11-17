@@ -41,7 +41,7 @@ test('one-time link signs in; the overview shows measured counts, attention item
   expect(dialogs).toEqual([]);
 });
 test('the task list filters by state group and project and pages without duplicates', async ({ page }) => {
-  await signIn(page); await page.goto(`${base}/ui/tasks`);
+  await signIn(page); await page.goto(`${base}/ui/tasks?view=list`);
   await expect(page.getByRole('heading', { name: 'All tasks' })).toBeVisible();
   const rows = page.locator('tbody tr');
   await expect(rows).toHaveCount(8);

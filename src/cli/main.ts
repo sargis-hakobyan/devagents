@@ -249,7 +249,7 @@ jira.command('search <project> <kind> [text]').description('Look up Jira project
     const query = new URLSearchParams({ kind, query: text ?? '', ...(opts.project ? { project: opts.project } : {}) });
     print(await request(integrationPath(await pid(project), `/jira/suggest?${query}`)));
   });
-jira.command('rule <project>').description('Save which tickets may become tasks; at least one of --column, --assignee, --label')
+jira.command('rule <project>').description('Save which tickets may become tasks; --column, --assignee and --label are optional, and without them the open tickets of the project match')
   .requiredOption('--project <key>', 'Jira project key, for example WEB')
   .option('--column <name>', 'Board column, for example "Ready for agents"')
   .option('--assignee <name-or-id>', 'Jira user by display name or id')
@@ -260,6 +260,7 @@ jira.command('rule <project>').description('Save which tickets may become tasks;
     const rule = { project: opts.project, start: opts.start, ...(opts.column ? { column: opts.column } : {}), ...(opts.assignee ? { assignee: opts.assignee } : {}), ...(opts.label ? { label: opts.label } : {}) };
     print(await request(integrationPath(await pid(project), opts.preview ? '/jira/preview' : '/jira/rule'), opts.preview ? 'POST' : 'PUT', rule));
   });
+jira.command('remove-rule <project>').description('Forget the pick-up rule and keep the connection; no tickets come from Jira until a rule is saved again').action(async (project: string) => print(await request(integrationPath(await pid(project), '/jira/rule'), 'DELETE')));
 jira.command('check <project>').description('Ask Jira whether the saved token still works').action(async (project: string) => print(await request(integrationPath(await pid(project), '/jira/check'), 'POST', {})));
 // Ticket tools reached through their MCP server: added once, then used by projects.
 const toolRef = async (ref: string): Promise<string> => {
@@ -269,6 +270,7 @@ const toolRef = async (ref: string): Promise<string> => {
   if (found.length !== 1) throw new AppError('tracker_not_found', `No tool named "${ref}". List them with: devagents tools list`, 404);
   return found[0]!.id;
 };
+cli.command('tickets').description('Tickets that match a project\'s pick-up rule and have no task yet; nothing is started').action(async () => print(await request('/tickets/available')));
 const tools = cli.command('tools').description('Ticket tools with an MCP server (any Jira-like tool). Add one once, then connect projects to it. Stores and checks configuration; no task is created');
 tools.command('list').description('Added tools, their state and the projects that use them').action(async () => print(await request('/trackers')));
 tools.command('add <name> <url>').description('Sign in to a tool\'s MCP server and show its tools with a proposed mapping')
@@ -301,17 +303,18 @@ const toolPath = async (project: string, tool: string, rest = '') => integration
 tracker.command('list <project>').description('The tools this project uses, with their rules, and every added tool').action(async (project: string) => print(await request(integrationPath(await pid(project), '/trackers'))));
 tracker.command('connect <project> <tool>').description('Use an added tool for this project; its address and token are already saved').action(async (project: string, tool: string) => print(await request(await toolPath(project, tool), 'PUT', {})));
 tracker.command('options <project> <tool>').description('Projects, columns, people and labels a rule can name').action(async (project: string, tool: string) => print(await request(await toolPath(project, tool, '/options'))));
-tracker.command('rule <project> <tool>').description('Save which tickets may become tasks; at least one of --column, --assignee, --label')
-  .option('--project <name-or-id>', 'Project in the tool')
-  .option('--column <name>', 'Board column')
-  .option('--assignee <name-or-id>', 'Person the tickets are assigned to')
-  .option('--label <label>', 'Label on the ticket')
+tracker.command('rule <project> <tool>').description('Save which tickets may become tasks. Every filter is optional and takes several values; with none, every ticket the account can see matches')
+  .option('--project <name-or-id...>', 'Projects in the tool; a ticket of any of them matches')
+  .option('--column <name...>', 'Board columns; a ticket in any of them matches')
+  .option('--assignee <name-or-id...>', 'People; a ticket assigned to any of them matches')
+  .option('--label <label...>', 'Labels; a ticket with any of them matches')
   .addOption(new Option('--start <mode>', 'manual: wait until someone starts it; auto: start on its own').choices(['manual', 'auto']).default('manual'))
   .option('--preview', 'Only show what the rule matches now; save nothing')
-  .action(async (project: string, tool: string, opts: { project?: string; column?: string; assignee?: string; label?: string; start: string; preview?: boolean }) => {
-    const rule = { start: opts.start, ...(opts.project ? { project: opts.project } : {}), ...(opts.column ? { column: opts.column } : {}), ...(opts.assignee ? { assignee: opts.assignee } : {}), ...(opts.label ? { label: opts.label } : {}) };
+  .action(async (project: string, tool: string, opts: { project?: string[]; column?: string[]; assignee?: string[]; label?: string[]; start: string; preview?: boolean }) => {
+    const rule = { start: opts.start, ...(opts.project ? { projects: opts.project } : {}), ...(opts.column ? { columns: opts.column } : {}), ...(opts.assignee ? { assignees: opts.assignee } : {}), ...(opts.label ? { labels: opts.label } : {}) };
     print(await request(await toolPath(project, tool, opts.preview ? '/preview' : '/rule'), opts.preview ? 'POST' : 'PUT', rule));
   });
+tracker.command('remove-rule <project> <tool>').description('Forget the pick-up rule and keep the connection; no tickets come from the tool until a rule is saved again').action(async (project: string, tool: string) => print(await request(await toolPath(project, tool, '/rule'), 'DELETE')));
 tracker.command('disconnect <project> <tool>').description('Stop using one tool for this project; the tool itself stays').action(async (project: string, tool: string) => print(await request(await toolPath(project, tool), 'DELETE')));
 jira.command('disconnect <project>').description('Forget this project\'s connection and rule; the token is forgotten once no project uses it').action(async (project: string) => print(await request(integrationPath(await pid(project), '/jira'), 'DELETE')));
 const teams = cli.command('teams').description('Saved teams: named rosters copied from templates or custom roles');

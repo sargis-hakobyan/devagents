@@ -20,6 +20,6 @@ test('a check that could not run is reported with a completed task, not retried'
   await expect(page.getByText('Completed with 1 check not run in this environment', { exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Result', exact: true }).click();
   await expect(page.getByRole('list', { name: 'Checks not run in this environment' })).toContainText('no browser is available in this sandbox');
-  await page.goto(`${base}/ui/tasks`);
+  await page.goto(`${base}/ui/tasks?view=list`);
   await expect(page.locator('tr', { hasText: '[blocked-check]' })).toContainText('1 check not run here');
 });

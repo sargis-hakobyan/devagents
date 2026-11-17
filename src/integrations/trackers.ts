@@ -193,12 +193,12 @@ export class TrackerService {
     return { found, options: options(mapping, answer, found) };
   }
   /** Projects, columns, people and labels a rule can name. */
-  async choices(projectId: string, trackerId: string): Promise<Omit<TrackerOptions, 'projects' | 'people'> & { projects: { id: string; name: string }[]; people: { id: string; name: string }[]; filters: (keyof RuleParts)[] }> {
+  async choices(projectId: string, trackerId: string): Promise<Omit<TrackerOptions, 'projects' | 'people'> & { projects: { id: string; name: string }[]; people: { id: string; name: string }[]; filters: (keyof typeof PARTS)[] }> {
     const { mapping, session } = await this.load(projectId, trackerId); const { options: all } = await this.everything(mapping, session);
     const plain = (entries: Choice[]) => entries.map(({ id, name }) => ({ id, name }));
-    const fields: Record<keyof RuleParts, string | undefined> = { project: mapping.ticket.project, column: mapping.ticket.column, assignee: mapping.ticket.assignee, label: mapping.ticket.labels };
+    const fields: Record<keyof typeof PARTS, string | undefined> = { project: mapping.ticket.project, column: mapping.ticket.column, assignee: mapping.ticket.assignee, label: mapping.ticket.labels };
     // Only the filters this tool can answer are offered, so a rule never names something that cannot be checked.
-    const filters = (Object.keys(PARTS) as (keyof RuleParts)[]).filter(part => mapping.list.filters[part] || fields[part]);
+    const filters = (Object.keys(PARTS) as (keyof typeof PARTS)[]).filter(part => mapping.list.filters[part] || fields[part]);
     return { ...all, projects: plain(all.projects), people: plain(all.people), filters };
   }
   private async resolve(projectId: string, trackerId: string, input: unknown): Promise<{ rule: TrackerRule; matches: TrackerMatches }> {
@@ -212,21 +212,41 @@ export class TrackerService {
       throw new AppError('invalid_rule', `${tracker.name} has no ${what} "${value}". Available: ${entries.slice(0, 20).map(e => e.name).join(', ')}.`, 422);
     };
     const parts: RuleParts = {};
-    if (parsed.project !== undefined) parts.project = named('project', all.projects, parsed.project);
-    if (parsed.column !== undefined) {
-      const column = all.columns.find(c => same(c, parsed.column!));
-      if (!column && all.columns.length) throw new AppError('invalid_rule', `${tracker.name} has no column "${parsed.column}". Available: ${all.columns.join(', ')}.`, 422);
-      parts.column = column ?? parsed.column;
-    }
-    if (parsed.assignee !== undefined) parts.assignee = named('person', all.people, parsed.assignee);
-    if (parsed.label !== undefined) parts.label = all.labels.find(l => same(l, parsed.label!)) ?? parsed.label.trim();
+    if (parsed.projects?.length) parts.projects = parsed.projects.map(value => named('project', all.projects, value));
+    if (parsed.columns?.length) parts.columns = parsed.columns.map(value => {
+      const column = all.columns.find(c => same(c, value));
+      if (!column && all.columns.length) throw new AppError('invalid_rule', `${tracker.name} has no column "${value}". Available: ${all.columns.join(', ')}.`, 422);
+      return column ?? value;
+    });
+    if (parsed.assignees?.length) parts.assignees = parsed.assignees.map(value => named('person', all.people, value));
+    if (parsed.labels?.length) parts.labels = parsed.labels.map(value => all.labels.find(l => same(l, value)) ?? value);
     const blind = unfilterable(mapping, parts);
     if (blind.length) throw new AppError('invalid_rule', `${tracker.name} is not mapped to filter by ${blind.join(' or ')}. Add the argument or the ticket field to its mapping.`, 422);
     const hits = tickets(mapping, await session.call(mapping.list.tool, listArguments(mapping, parts))).filter(ticket => matches(mapping, ticket, parts));
     return {
-      rule: { ...parts, start: parsed.start, savedAt: this.stamp() },
+      rule: { ...(parts.projects ? { projects: parts.projects } : {}), ...(parts.columns ? { columns: parts.columns } : {}), ...(parts.assignees ? { assignees: parts.assignees } : {}), ...(parts.labels ? { labels: parts.labels } : {}), start: parsed.start, savedAt: this.stamp() },
       matches: { total: hits.length, sample: hits.slice(0, 5).map(({ key, title, url }) => ({ key, title, ...(url ? { url } : {}) })) },
     };
+  }
+  /** Forgets one tool's pick-up rule and keeps the connection, so no tickets come from it until a rule is saved again. */
+  async removeRule(projectId: string, trackerId: string): Promise<ProjectTrackerView> {
+    const id = TrackerId.parse(trackerId);
+    this.store.setProjectIntegrations(projectId, current => {
+      if (!current.trackers?.some(c => c.trackerId === id)) throw new AppError('not_connected', 'This tool is not connected for this project', 404);
+      return { ...current, trackers: current.trackers.map(c => { if (c.trackerId !== id) return c; const { rule: _, ...rest } = c; return rest; }) };
+    });
+    return this.projectView(projectId);
+  }
+  /** The tickets a project's saved rule for one tool matches now, for the board's Available column. */
+  async ruleTickets(projectId: string, trackerId: string): Promise<{ source: { kind: 'tool'; name: string }; key: string; title: string; url?: string; why: string; start: 'manual' | 'auto' }[]> {
+    const rule = this.store.project(projectId).integrations?.trackers?.find(c => c.trackerId === trackerId)?.rule;
+    if (!rule) return [];
+    const { tracker, mapping, session } = await this.load(projectId, trackerId);
+    const entries = (values: { id: string; name: string; match?: string[] }[] | undefined): Choice[] => (values ?? []).map(value => ({ ...value, match: value.match ?? [value.id.toLowerCase(), value.name.toLowerCase()] }));
+    const parts: RuleParts = { projects: entries(rule.projects), columns: rule.columns ?? [], assignees: entries(rule.assignees), labels: rule.labels ?? [] };
+    const why = [rule.columns?.join(', '), rule.labels?.length ? `label ${rule.labels.join(', ')}` : undefined, rule.assignees?.length ? `assigned to ${rule.assignees.map(a => a.name).join(', ')}` : undefined].filter(Boolean).join(' · ');
+    return tickets(mapping, await session.call(mapping.list.tool, listArguments(mapping, parts))).filter(ticket => matches(mapping, ticket, parts))
+      .map(({ key, title, url }) => ({ source: { kind: 'tool' as const, name: tracker.name }, key, title, ...(url ? { url } : {}), why, start: rule.start }));
   }
   /** What a rule would match right now, without saving it. */
   async preview(projectId: string, trackerId: string, input: unknown): Promise<{ rule: TrackerRule; matches: TrackerMatches }> { return this.resolve(projectId, trackerId, input); }

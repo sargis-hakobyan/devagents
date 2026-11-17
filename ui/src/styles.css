@@ -399,3 +399,56 @@ pre.diff-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:650px;overf
 .ac-list li.on{background:var(--row)}
 .ac-list .ac-note{cursor:default;color:var(--muted)}
 .ac-list .ac-note.bad{color:var(--bad-text)}
+/* Tasks as a board (design/ui/U10-Tasks-Board.dc.html) */
+.kb-seg{display:inline-flex;padding:3px;border-radius:999px;background:var(--row);gap:2px}
+.kb-seg button{font:inherit;font-size:13px;font-weight:700;color:var(--muted);border:0;background:transparent;border-radius:999px;padding:5px 14px;cursor:pointer}
+.kb-seg button[aria-pressed="true"]{background:#fff;color:var(--text);box-shadow:0 1px 2px rgba(28,26,51,.12)}
+.kb-you{background:#FFF1DB;border:1px solid #F3D9A6;border-radius:16px;padding:14px 16px 16px;display:flex;flex-direction:column;gap:12px;margin-bottom:16px}
+.kb-you-head{display:flex;align-items:center;gap:8px;font-size:16px}
+.kb-you .kb-count{color:#7A4A00}
+.kb-you-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.kb-ycard{background:#fff;border:1px solid #F3D9A6;border-radius:12px;padding:12px 14px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 14px;align-items:center}
+.kb-ytitle{font-weight:700;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kb-ycard .btn{grid-row:1/span 3;grid-column:2}
+.kb-why{font-size:13px;font-weight:600;color:#7A4A00}
+.kb-ymeta{font-size:12.5px;color:var(--muted)}
+.kb-board{display:flex;gap:14px;align-items:flex-start;overflow-x:auto;padding-bottom:8px}
+.kb-col{flex:1 1 0;min-width:190px;background:#EBEDF6;border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:10px}
+.kb-col-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 6px 0;font-size:14px}
+.kb-head-end{display:flex;align-items:center;gap:6px}
+.kb-count{font-size:12.5px;font-weight:700;color:var(--muted);background:#fff;border-radius:999px;padding:1px 9px}
+.kb-cards{display:flex;flex-direction:column;gap:10px;min-width:0}
+.kb-card{background:#fff;border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px;text-decoration:none;color:inherit;box-shadow:0 1px 2px rgba(28,26,51,.05);min-width:0}
+a.kb-card:hover{border-color:#B9BCD0;color:inherit}
+.kb-title{font-weight:700;font-size:14px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.kb-card .chip{font-size:12px;padding:3px 9px;align-self:flex-start;max-width:100%}
+.kb-line{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kb-meta{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;color:var(--muted)}
+.kb-project{font-weight:700;color:var(--neutral-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kb-none{font-size:12.5px;color:#8E92AD;padding:14px 6px;text-align:center;border:1px dashed #C9CCDD;border-radius:12px}
+.kb-problem{font-size:12.5px;color:#7A4A00;background:#FFF1DB;border-radius:10px;padding:8px 10px}
+.kb-more{font:inherit;font-size:12.5px;font-weight:700;color:var(--link);background:transparent;border:0;padding:2px 6px;text-align:left;cursor:pointer}
+/* Available: tickets, not tasks yet */
+.kb-avail{background:transparent;outline:2px dashed #C9CCDD;outline-offset:-2px}
+.kb-ticket{border-style:dashed;box-shadow:none;background:#FBFBFE;cursor:pointer}
+.kb-ticket:hover{border-color:#B9BCD0}
+.kb-src{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--neutral-text);flex-wrap:wrap}
+.kb-src i{font-style:normal;display:inline-grid;place-items:center;width:18px;height:18px;border-radius:5px;color:#fff;font-size:10px;font-weight:800;background:var(--ink)}
+.kb-src i.jira{background:var(--run-icon)}
+.kb-src a{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600}
+.kb-start{align-self:flex-start;border-color:var(--ink);color:var(--ink)}
+.kb-pin{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:8px;border:1px solid var(--btn-border);background:#fff;color:var(--muted);cursor:pointer;padding:0}
+.kb-pin.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.kb-rail-wrap{position:relative;flex:0 0 44px;align-self:stretch}
+.kb-rail{width:44px;min-height:230px;height:100%;border:0;border-radius:14px;outline:2px dashed #C9CCDD;outline-offset:-2px;background:transparent;padding:10px 0;display:flex;flex-direction:column;align-items:center;gap:10px;cursor:pointer;font:inherit}
+.kb-rail-name{writing-mode:vertical-rl;transform:rotate(180deg);font-weight:800;font-size:13px;color:var(--neutral-text)}
+.kb-over{position:absolute;left:0;top:0;z-index:5;width:250px;background:#FBFBFE;box-shadow:8px 0 24px rgba(28,26,51,.18);max-height:70vh;overflow-y:auto}
+.kb-pin:focus-visible,.kb-rail:focus-visible,.kb-seg button:focus-visible,.kb-more:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+/* Several values in one rule field */
+.integ-multi{display:flex;flex-direction:column;gap:6px;min-width:0}
+.integ-chips{display:flex;flex-wrap:wrap;gap:6px}
+.integ-pick{display:inline-flex;align-items:center;gap:4px;padding:3px 4px 3px 10px;border-radius:999px;background:var(--row);font-size:13px;font-weight:600;color:var(--text);max-width:100%}
+.integ-pick button{font:inherit;font-size:15px;line-height:1;border:0;background:transparent;color:var(--muted);cursor:pointer;border-radius:50%;width:20px;height:20px;padding:0}
+.integ-pick button:hover{background:#fff;color:var(--text)}
+.integ-rule>label{align-self:start;padding-top:9px}
+

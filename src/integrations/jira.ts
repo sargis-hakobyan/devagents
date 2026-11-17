@@ -194,6 +194,12 @@ export async function jiraOptions(fetcher: Fetch, access: JiraAccess, key: strin
 }
 
 /** How many tickets the rule matches now, and the first few keys. Jira Cloud only offers an approximate count. */
+/** The tickets a rule's search returns, with their titles, oldest first as the rule orders them. */
+export async function jiraTickets(fetcher: Fetch, access: JiraAccess, jql: string, limit = 50): Promise<{ key: string; title: string }[]> {
+  const { api } = roots(access);
+  const json = ok(await call(fetcher, access, access.kind === 'data-center' ? `${api}/search` : `${api}/search/jql`, { jql, maxResults: limit, fields: ['summary'] }), access, 'search tickets');
+  return list(record(json).issues).map(issue => ({ key: text(record(issue).key, 60), title: text(record(record(issue).fields).summary, 300) })).filter(t => t.key && t.title).slice(0, limit);
+}
 export async function jiraMatches(fetcher: Fetch, access: JiraAccess, jql: string): Promise<JiraMatches> {
   const { api } = roots(access);
   const keys = (json: unknown) => list(record(json).issues).map(i => text(record(i).key, 60)).filter(Boolean).slice(0, 5);

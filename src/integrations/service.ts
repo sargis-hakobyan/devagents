@@ -5,7 +5,7 @@ import type { Store } from '../persistence/store.js';
 import type { SecretStore } from '../security/secret-store.js';
 import { GITHUB_API, folderRepository, tokenKind, verifyGitHub } from './github.js';
 import type { Fetch } from './http.js';
-import { jiraAssignee, jiraColumns, jiraMatches, jiraOptions, jiraProject, jiraProjects, jiraSuggest, normalizeSite, ruleJql, verifyJira, type JiraAccess, type JiraMatches, type JiraOptions, type JiraSuggestion } from './jira.js';
+import { jiraAssignee, jiraColumns, jiraMatches, jiraTickets, jiraOptions, jiraProject, jiraProjects, jiraSuggest, normalizeSite, ruleJql, verifyJira, type JiraAccess, type JiraMatches, type JiraOptions, type JiraSuggestion } from './jira.js';
 
 type Kind = 'github' | 'jira';
 type Shown<T> = T & { state: ConnectionState; expiresInDays?: number };
@@ -264,6 +264,21 @@ export class ProjectIntegrationService {
       return { ...current, jira: { ...current.jira, rule } };
     });
     return { integrations: await this.view(projectId), matches };
+  }
+  /** Forgets the pick-up rule and keeps the connection, so no tickets come from Jira until a rule is saved again. */
+  async removeJiraRule(projectId: string): Promise<IntegrationsView> {
+    this.store.setProjectIntegrations(projectId, current => {
+      if (!current.jira) throw new AppError('not_connected', 'Jira is not connected for this project', 404);
+      const { rule: _, ...jira } = current.jira; return { ...current, jira };
+    });
+    return this.view(projectId);
+  }
+  /** The tickets the saved Jira rule matches now, for the board's Available column. */
+  async jiraTickets(projectId: string): Promise<{ source: { kind: 'jira'; name: string }; key: string; title: string; url: string; why: string; start: 'manual' | 'auto' }[]> {
+    const { saved, access } = await this.jiraAccess(projectId); const rule = saved.rule;
+    if (!rule) return [];
+    const why = [rule.column?.name, rule.label ? `label ${rule.label}` : undefined, rule.assignee ? `assigned to ${rule.assignee.name}` : undefined].filter(Boolean).join(' · ');
+    return (await jiraTickets(this.fetcher, access, rule.jql)).map(ticket => ({ source: { kind: 'jira' as const, name: 'Jira' }, ...ticket, url: `${saved.site}/browse/${encodeURIComponent(ticket.key)}`, why, start: rule.start }));
   }
   /** Removes this project's connection. The token itself stays while another project still uses it. */
   async disconnect(projectId: string, kind: Kind): Promise<IntegrationsView> {

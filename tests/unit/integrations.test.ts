@@ -39,7 +39,7 @@ test('a pick-up rule becomes bounded JQL with quoted values', () => {
   assert.equal(ruleJql({ project, assignee: { id: 'o"brien\\x', name: 'Odd' } }), 'project = "WEB" AND statusCategory != Done AND assignee = "o\\"brien\\\\x" ORDER BY created ASC');
 });
 
-test('connection input is strict and a rule cannot mean every ticket', () => {
+test('connection input is strict and a Jira rule needs only its project', () => {
   assert.equal(GitHubConnectInput.safeParse({ token: 'has whitespace inside' }).success, false);
   assert.equal(GitHubConnectInput.safeParse({ repository: 'https://github.com/a/b' }).success, false);
   assert.equal(GitHubConnectInput.safeParse({ repository: 'example-org/website', extra: true }).success, false);
@@ -47,7 +47,8 @@ test('connection input is strict and a rule cannot mean every ticket', () => {
   assert.equal(JiraConnectInput.safeParse({ kind: 'data-center', site: 'jira.example.com', email: 'someone@example.com' }).success, false);
   assert.equal(JiraConnectInput.safeParse({ kind: 'cloud', site: 'example.atlassian.net', email: 'someone@example.com', expiresOn: '2027-02-30x' }).success, false);
   assert.equal(JiraConnectInput.safeParse({ kind: 'cloud', site: 'example.atlassian.net', email: 'someone@example.com', expiresOn: '2027-11-12' }).success, true);
-  assert.equal(JiraRuleInput.safeParse({ project: 'WEB' }).success, false);
+  assert.deepEqual(JiraRuleInput.parse({ project: 'WEB' }), { project: 'WEB', start: 'manual' }, 'column, assignee and label are optional');
+  assert.equal(JiraRuleInput.safeParse({}).success, false, 'a rule names a project; no project means no rule');
   assert.equal(JiraRuleInput.safeParse({ project: 'WEB', label: 'two words' }).success, false);
   assert.deepEqual(JiraRuleInput.parse({ project: 'WEB', label: 'devagents' }), { project: 'WEB', label: 'devagents', start: 'manual' });
 });

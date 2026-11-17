@@ -57,7 +57,7 @@ test('overview keeps old running work visible and links to all attention tasks b
   await expect(page.locator('tbody tr')).toHaveCount(50);
 });
 test('state filters query across pages and reset the cursor when switching groups', async ({ page }) => {
-  await signIn(page, '/ui/tasks');
+  await signIn(page, '/ui/tasks?view=list');
   await page.getByRole('button', { name: 'Needs you · 52' }).click();
   await expect(page.locator('tbody tr')).toHaveCount(50);
   await page.getByRole('button', { name: 'Older →' }).click();

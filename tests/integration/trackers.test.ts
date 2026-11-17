@@ -105,27 +105,47 @@ test('a project uses an added tool: options, a rule the tool or DevAgents filter
     assert.deepEqual(options.labels, ['bug', 'devagents', 'feedback'], 'labels that are only on tickets are offered too');
     assert.deepEqual(options.filters, ['project', 'column', 'assignee', 'label']);
 
-    assert.equal((await s.call(`${one}/preview`, 'POST', { project: 'Website' })).status, 400, 'a rule cannot mean every ticket');
-    assert.match((await s.call(`${one}/preview`, 'POST', { column: 'Ready' })).data.message, /no column "Ready". Available: backlog, todo/);
-    assert.match((await s.call(`${one}/preview`, 'POST', { project: 'Shop', label: 'devagents' })).data.message, /no project "Shop". Available: Website, Backend API/);
+    // Every part is optional. With none, the rule means every ticket the account can see.
+    const everything = await s.call(`${one}/preview`, 'POST', {});
+    assert.equal(everything.status, 200, everything.text); assert.equal(everything.data.matches.total, 5);
+    assert.deepEqual(s.calls.at(-1)!.params!.arguments, { assignment: 'all' });
+    assert.equal((await s.call(`${one}/preview`, 'POST', { project: 'Website' })).status, 400, 'the old single-value names are refused');
+    assert.match((await s.call(`${one}/preview`, 'POST', { columns: ['Ready'] })).data.message, /no column "Ready". Available: backlog, todo/);
+    assert.match((await s.call(`${one}/preview`, 'POST', { projects: ['Shop'], labels: ['devagents'] })).data.message, /no project "Shop". Available: Website, Backend API/);
 
-    const preview = await s.call(`${one}/preview`, 'POST', { project: 'website', column: 'Ready-For-Development', label: 'devagents' });
+    // One value per part: the tool filters by itself wherever it has an argument.
+    const preview = await s.call(`${one}/preview`, 'POST', { projects: ['website'], columns: ['Ready-For-Development'], labels: ['devagents'] });
     assert.equal(preview.status, 200, preview.text);
     assert.deepEqual(preview.data.matches, { total: 2, sample: [{ key: 'FX-1', title: 'Add a contact form', url: 'https://tracker.fixture.invalid/board?task=FX-1' }, { key: 'FX-2', title: 'Fix the footer links', url: 'https://tracker.fixture.invalid/board?task=FX-2' }] });
     assert.deepEqual(s.calls.at(-1)!.params!.arguments, { assignment: 'all', projectId: 'p-web', statuses: ['ready-for-development'], labels: ['devagents'] }, 'mapped filters are sent to the tool');
     assert.equal((await s.call(s.project)).data.connections[0].rule, undefined, 'a preview saves nothing');
 
-    // The tool has no assignee argument, so DevAgents filters by the ticket's assignee, which is an email there.
-    const person = await s.call(`${one}/preview`, 'POST', { assignee: 'Sam Example' });
-    assert.deepEqual(person.data.matches.sample.map((t: { key: string }) => t.key), ['FX-2', 'FX-4']);
-    assert.deepEqual(s.calls.at(-1)!.params!.arguments, { assignment: 'all' });
-    assert.deepEqual(person.data.rule.assignee.name, 'Sam Example');
-    assert.equal((await s.call(`${one}/preview`, 'POST', { label: 'feedback' })).data.matches.total, 1);
+    // Several values per part: any value of a part matches, and every filled part must match.
+    const several = await s.call(`${one}/preview`, 'POST', { projects: ['Website', 'Backend API'], columns: ['todo', 'in-progress'], labels: ['feedback', 'bug'] });
+    assert.deepEqual(several.data.matches.sample.map((t: { key: string }) => t.key), ['FX-5'], 'todo or in-progress, and feedback or bug');
+    // Several columns go to the tool as its list; several projects and labels do not, because a tool may read a list there as "all of these".
+    assert.deepEqual(s.calls.at(-1)!.params!.arguments, { assignment: 'all', statuses: ['todo', 'in-progress'] });
+    const eitherLabel = await s.call(`${one}/preview`, 'POST', { labels: ['bug', 'feedback'] });
+    assert.deepEqual(eitherLabel.data.matches.sample.map((t: { key: string }) => t.key), ['FX-2', 'FX-5'], 'a ticket with either label matches');
 
-    const saved = await s.call(`${one}/rule`, 'PUT', { project: 'p-api', column: 'ready-for-development', start: 'auto' });
+    // The tool has no assignee argument, so DevAgents filters by the ticket's assignee, which is an email there.
+    const person = await s.call(`${one}/preview`, 'POST', { assignees: ['Sam Example', 'DevAgents Bot'] });
+    assert.deepEqual(person.data.matches.sample.map((t: { key: string }) => t.key), ['FX-1', 'FX-2', 'FX-4']);
+    assert.deepEqual(s.calls.at(-1)!.params!.arguments, { assignment: 'all' });
+    assert.deepEqual(person.data.rule.assignees.map((a: { name: string }) => a.name), ['Sam Example', 'DevAgents Bot']);
+    assert.equal((await s.call(`${one}/preview`, 'POST', { labels: ['feedback'] })).data.matches.total, 1);
+
+    const saved = await s.call(`${one}/rule`, 'PUT', { projects: ['p-api'], columns: ['ready-for-development', 'todo'], start: 'auto' });
     assert.equal(saved.status, 200, saved.text); assert.equal(saved.data.matches.total, 1);
-    assert.deepEqual({ ...saved.data.connections[0].rule, project: { id: 'p-api', name: 'Backend API' } }, { project: { id: 'p-api', name: 'Backend API' }, column: 'ready-for-development', start: 'auto', savedAt: '2026-11-17T12:00:00.000Z' });
-    assert.equal(s.f.store.project('fixture').integrations?.trackers?.[0]?.rule?.project?.id, 'p-api');
+    const rule = saved.data.connections[0].rule;
+    assert.deepEqual({ projects: rule.projects.map((p: { id: string; name: string }) => [p.id, p.name]), columns: rule.columns, start: rule.start, savedAt: rule.savedAt, assignees: rule.assignees, labels: rule.labels }, { projects: [['p-api', 'Backend API']], columns: ['ready-for-development', 'todo'], start: 'auto', savedAt: '2026-11-17T12:00:00.000Z', assignees: undefined, labels: undefined });
+    assert.equal(s.f.store.project('fixture').integrations?.trackers?.[0]?.rule?.projects?.[0]?.id, 'p-api');
+    // A rule can be removed while the tool stays connected; then no tickets come from it.
+    const removed = await s.call(`${one}/rule`, 'DELETE');
+    assert.equal(removed.status, 200); assert.equal(removed.data.connections.length, 1); assert.equal(removed.data.connections[0].rule, undefined);
+    assert.deepEqual((await s.call('/tickets/available')).data.tickets, []);
+    // A rule with nothing chosen can be saved too.
+    assert.equal((await s.call(`${one}/rule`, 'PUT', {})).data.matches.total, 5);
 
     // The tool cannot be removed while the project uses it; disconnecting keeps the tool and drops the rule.
     const inUse = await s.call(`/trackers/${id}`, 'DELETE');
@@ -196,8 +216,8 @@ test('a project uses several tools, each with its own rule, and a tool added onc
     const board = await s.added('Team board'); const support = await s.added('Support desk');
     await s.call(`${s.project}/${board}`, 'PUT', {}); const both = await s.call(`${s.project}/${support}`, 'PUT', {});
     assert.deepEqual(both.data.connections.map((c: { tracker: { name: string } }) => c.tracker.name), ['Team board', 'Support desk']);
-    await s.call(`${s.project}/${board}/rule`, 'PUT', { label: 'devagents' }); await s.call(`${s.project}/${support}/rule`, 'PUT', { column: 'todo', start: 'auto' });
-    const rules = (await s.call(s.project)).data.connections.map((c: { rule: { label?: string; column?: string; start: string } }) => [c.rule.label ?? c.rule.column, c.rule.start]);
+    await s.call(`${s.project}/${board}/rule`, 'PUT', { labels: ['devagents'] }); await s.call(`${s.project}/${support}/rule`, 'PUT', { columns: ['todo'], start: 'auto' });
+    const rules = (await s.call(s.project)).data.connections.map((c: { rule: { labels?: string[]; columns?: string[]; start: string } }) => [(c.rule.labels ?? c.rule.columns)![0], c.rule.start]);
     assert.deepEqual(rules, [['devagents', 'manual'], ['todo', 'auto']], 'the rules do not touch each other');
 
     // A second project selects the tool that is already added: no address and no token are entered again.
@@ -208,9 +228,23 @@ test('a project uses several tools, each with its own rule, and a tool added onc
     assert.equal((s.secrets as ReturnType<typeof memorySecrets>).values.size, before);
     assert.deepEqual((await s.call(`/trackers/${board}`)).data.usedBy.map((p: { id: string }) => p.id).sort(), ['fixture', 'second']);
 
+    // Available tickets: what the rules match now, per project, without the ones that already have a task.
+    const available = await s.call('/tickets/available');
+    assert.equal(available.status, 200, available.text); assert.deepEqual(available.data.problems, []);
+    const listed = available.data.tickets.map((t: { source: { name: string }; key: string; projectId: string; why: string; start: string }) => `${t.source.name}/${t.projectId}/${t.key}/${t.why}/${t.start}`);
+    assert.deepEqual(listed, ['Team board/fixture/FX-1/label devagents/manual', 'Team board/fixture/FX-2/label devagents/manual', 'Team board/fixture/FX-3/label devagents/manual', 'Support desk/fixture/FX-5/todo/auto']);
+    assert.equal(available.data.tickets[0].url, 'https://tracker.fixture.invalid/board?task=FX-1'); assert.equal(available.data.tickets[0].title, 'Add a contact form');
+    await s.f.service.submit({ projectId: 'fixture', request: 'FX-2: Fix the footer links\n\nTicket: https://tracker.fixture.invalid/board?task=FX-2' }, 'available-start');
+    assert.deepEqual((await s.call('/tickets/available')).data.tickets.map((t: { key: string }) => t.key), ['FX-1', 'FX-3', 'FX-5'], 'a ticket named by a task of the project is started');
+    // A source that cannot be read is reported and does not hide the others.
+    s.state.revoked = true;
+    const broken = await s.call('/tickets/available');
+    assert.equal(broken.status, 200); assert.deepEqual(broken.data.tickets, []); assert.equal(broken.data.problems.length, 2); assert.match(broken.data.problems[0].message, /did not accept this token/);
+    s.state.revoked = false;
+
     // Disconnecting one tool keeps the other and its rule.
     const left = await s.call(`${s.project}/${board}`, 'DELETE');
-    assert.deepEqual(left.data.connections.map((c: { tracker: { name: string }; rule: { column: string } }) => [c.tracker.name, c.rule.column]), [['Support desk', 'todo']]);
+    assert.deepEqual(left.data.connections.map((c: { tracker: { name: string }; rule: { columns: string[] } }) => [c.tracker.name, c.rule.columns[0]]), [['Support desk', 'todo']]);
     assert.equal((await s.call(`${s.project}/${board}/options`)).data.error, 'not_connected');
     assert.equal((await s.call(`/projects/second/integrations/trackers/${board}/options`)).status, 200);
   } finally { await s.close(); }

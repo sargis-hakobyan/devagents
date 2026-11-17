@@ -68,26 +68,43 @@ export function options(mapping: TrackerMapping, answer: unknown, found: Tracker
   };
 }
 
-export type RuleParts = { project?: Choice; column?: string; assignee?: Choice; label?: string };
+export type RuleParts = { projects?: Choice[]; columns?: string[]; assignees?: Choice[]; labels?: string[] };
+type Part = 'project' | 'column' | 'assignee' | 'label';
+const wanted = (rule: RuleParts): Record<Part, string[]> => ({ project: (rule.projects ?? []).map(p => p.id), column: rule.columns ?? [], assignee: (rule.assignees ?? []).map(a => a.id), label: rule.labels ?? [] });
+/**
+ * Which rule parts the tool filters by itself. One value is always safe to send. Several values are
+ * sent only for the column, where a list means "any of these" in every tool; for the other parts a
+ * tool may mean "all of these", so DevAgents filters them on the returned tickets.
+ */
+function sent(mapping: TrackerMapping, rule: RuleParts): Partial<Record<Part, unknown>> {
+  const out: Partial<Record<Part, unknown>> = {}; const values = wanted(rule);
+  for (const part of Object.keys(values) as Part[]) {
+    const filter = mapping.list.filters[part]; const chosen = values[part];
+    if (!filter || !chosen.length) continue;
+    if (chosen.length === 1) out[part] = filter.many ? chosen : chosen[0];
+    else if (part === 'column' && filter.many) out[part] = chosen;
+  }
+  return out;
+}
 /** Arguments for the list tool: the fixed ones, plus every rule value the server can filter by itself. */
 export function listArguments(mapping: TrackerMapping, rule: RuleParts = {}): Record<string, unknown> {
   const args: Record<string, unknown> = { ...mapping.list.fixed };
-  const put = (filter: { name: string; many: boolean } | undefined, value: string | undefined) => { if (filter && value) args[filter.name] = filter.many ? [value] : value; };
-  put(mapping.list.filters.project, rule.project?.id); put(mapping.list.filters.column, rule.column);
-  put(mapping.list.filters.label, rule.label); put(mapping.list.filters.assignee, rule.assignee?.id);
+  for (const [part, value] of Object.entries(sent(mapping, rule))) args[mapping.list.filters[part as Part]!.name] = value;
   return args;
 }
 /** Rule parts that neither the server filters nor a ticket field can answer. */
-export function unfilterable(mapping: TrackerMapping, rule: RuleParts): string[] {
-  const fields: Record<keyof RuleParts, string | undefined> = { project: mapping.ticket.project, column: mapping.ticket.column, assignee: mapping.ticket.assignee, label: mapping.ticket.labels };
-  return (Object.keys(fields) as (keyof RuleParts)[]).filter(part => rule[part] !== undefined && !mapping.list.filters[part] && !fields[part]);
+export function unfilterable(mapping: TrackerMapping, rule: RuleParts): Part[] {
+  const fields: Record<Part, string | undefined> = { project: mapping.ticket.project, column: mapping.ticket.column, assignee: mapping.ticket.assignee, label: mapping.ticket.labels };
+  const served = sent(mapping, rule); const values = wanted(rule);
+  return (Object.keys(fields) as Part[]).filter(part => values[part].length > 0 && !(part in served) && !fields[part]);
 }
 /** The same rule applied to the returned tickets, wherever the ticket field is mapped. It also covers what the server did not filter. */
 export function matches(mapping: TrackerMapping, ticket: TrackerTicket, rule: RuleParts): boolean {
-  if (rule.project && mapping.ticket.project && !(ticket.project && rule.project.match.includes(fold(ticket.project)))) return false;
-  if (rule.column && mapping.ticket.column && fold(ticket.column ?? '') !== fold(rule.column)) return false;
-  if (rule.assignee && mapping.ticket.assignee && !(ticket.assignee && rule.assignee.match.includes(fold(ticket.assignee)))) return false;
-  if (rule.label && mapping.ticket.labels && !ticket.labels.some(l => fold(l) === fold(rule.label!))) return false;
+  const any = <T>(values: T[] | undefined, test: (value: T) => boolean) => !values?.length || values.some(test);
+  if (mapping.ticket.project && !any(rule.projects, p => Boolean(ticket.project) && p.match.includes(fold(ticket.project!)))) return false;
+  if (mapping.ticket.column && !any(rule.columns, c => fold(ticket.column ?? '') === fold(c))) return false;
+  if (mapping.ticket.assignee && !any(rule.assignees, a => Boolean(ticket.assignee) && a.match.includes(fold(ticket.assignee!)))) return false;
+  if (mapping.ticket.labels && !any(rule.labels, l => ticket.labels.some(have => fold(have) === fold(l)))) return false;
   return true;
 }
 

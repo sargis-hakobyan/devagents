@@ -75,16 +75,24 @@ test('rule values go to the tool where it filters and are checked on the tickets
   const mapping = TrackerMapping.parse({ list: { tool: 'list', fixed: { scope: 'all' }, filters: { column: { name: 'states', many: true } } }, result: { tickets: 'items' }, ticket: { key: 'id', title: 'name', column: 'state', assignee: 'owner', labels: 'tags' } });
   const sam = choice({ id: 'u1', email: 'Sam@Example.com', name: 'Sam' })!;
   assert.deepEqual(sam, { id: 'u1', name: 'Sam', match: ['u1', 'sam@example.com', 'sam'] });
-  assert.deepEqual(listArguments(mapping, { column: 'Doing', assignee: sam, label: 'bug' }), { scope: 'all', states: ['Doing'] });
+  assert.deepEqual(listArguments(mapping, { columns: ['Doing'], assignees: [sam], labels: ['bug'] }), { scope: 'all', states: ['Doing'] });
+  assert.deepEqual(listArguments(mapping, { columns: ['Doing', 'Review'] }), { scope: 'all', states: ['Doing', 'Review'] }, 'several columns use the tool\'s list');
+  assert.deepEqual(listArguments(mapping, {}), { scope: 'all' });
   const [mine, other] = tickets(mapping, { items: [{ id: 1, name: 'A', state: 'doing', owner: 'sam@example.com', tags: ['Bug'] }, { id: 2, name: 'B', state: 'Doing', owner: 'kim@example.com', tags: [] }, { name: 'no id' }, { id: 4, name: 'C', link: 'javascript:alert(1)' }] });
-  assert.equal(matches(mapping, mine!, { column: 'Doing', assignee: sam, label: 'bug' }), true);
-  assert.equal(matches(mapping, other!, { column: 'Doing', assignee: sam }), false);
-  assert.equal(matches(mapping, other!, { label: 'bug' }), false);
+  assert.equal(matches(mapping, mine!, { columns: ['Doing'], assignees: [sam], labels: ['bug'] }), true);
+  assert.equal(matches(mapping, mine!, { columns: ['Review', 'DOING'], labels: ['feature', 'bug'] }), true, 'any value of a part matches');
+  assert.equal(matches(mapping, other!, { columns: ['Doing'], assignees: [sam] }), false, 'every filled part must match');
+  assert.equal(matches(mapping, other!, { labels: ['bug'] }), false);
+  assert.equal(matches(mapping, other!, {}), true, 'an empty rule matches every ticket');
+  // A single-value argument cannot carry several columns, so they are left to the ticket check.
+  const single = TrackerMapping.parse({ list: { tool: 'list', filters: { column: { name: 'state', many: false } } }, result: { tickets: 'items' }, ticket: { key: 'id', title: 'name', column: 'state' } });
+  assert.deepEqual(listArguments(single, { columns: ['Doing'] }), { state: 'Doing' }); assert.deepEqual(listArguments(single, { columns: ['Doing', 'Review'] }), {});
 });
 
 test('tracker input is strict', () => {
-  assert.equal(TrackerRuleInput.safeParse({ project: 'Website' }).success, false, 'a rule cannot mean every ticket');
-  assert.deepEqual(TrackerRuleInput.parse({ label: 'devagents' }), { label: 'devagents', start: 'manual' });
+  assert.equal(TrackerRuleInput.safeParse({ project: 'Website' }).success, false, 'single-value names are not part of a rule');
+  assert.deepEqual(TrackerRuleInput.parse({}), { start: 'manual' }, 'every part is optional');
+  assert.deepEqual(TrackerRuleInput.parse({ labels: [' devagents ', 'devagents', 'bug'] }), { labels: ['devagents', 'bug'], start: 'manual' });
   assert.equal(TrackerMapping.safeParse({ list: { tool: 'list' }, result: { tickets: 'a..b' }, ticket: { key: 'id', title: 'name' } }).success, false);
   assert.equal(TrackerMapping.safeParse({ list: { tool: 'list', extra: 1 }, result: { tickets: 'items' }, ticket: { key: 'id', title: 'name' } }).success, false);
   assert.equal(TrackerMapping.safeParse({ list: { tool: 'list' }, result: { tickets: 'items' }, ticket: { key: 'id', title: 'name' } }).success, true);

@@ -15,6 +15,7 @@ import { securityHeaders, serveUi } from './static.js';
 import { evidenceMetadata } from './evidence.js';
 import type { ProjectIntegrationService } from '../integrations/service.js';
 import type { TrackerService } from '../integrations/trackers.js';
+import { availableTickets } from '../integrations/available.js';
 
 export async function accessToken(dataDir: string): Promise<string> {
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
@@ -229,6 +230,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
           if (tool && action === 'options' && req.method === 'GET') return send(res, 200, await trackers.choices(id, tool));
           if (tool && action === 'preview' && req.method === 'POST') return send(res, 200, await trackers.preview(id, tool, await body(req, 16384)));
           if (tool && action === 'rule' && req.method === 'PUT') return send(res, 200, await trackers.saveRule(id, tool, await body(req, 16384)));
+          if (tool && action === 'rule' && req.method === 'DELETE') return send(res, 200, await trackers.removeRule(id, tool));
         }
       }
       // Project integrations: tokens are write-only; responses carry settings and the last check, never a secret.
@@ -246,6 +248,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
         if (kind === 'jira' && req.method === 'GET' && action === 'suggest') return send(res, 200, await integrations.jiraSuggestions(id, url.searchParams.get('kind'), (url.searchParams.get('query') ?? '').slice(0, 200), url.searchParams.get('project') ?? undefined));
         if (kind === 'jira' && req.method === 'POST' && action === 'preview') return send(res, 200, await integrations.previewJiraRule(id, await body(req, 16384)));
         if (kind === 'jira' && req.method === 'PUT' && action === 'rule') return send(res, 200, await integrations.saveJiraRule(id, await body(req, 16384)));
+        if (kind === 'jira' && req.method === 'DELETE' && action === 'rule') return send(res, 200, await integrations.removeJiraRule(id));
       }
       // Saved teams: every mutation is behind the same authentication, CSRF and origin checks as task actions.
       if (req.method === 'GET' && path === '/teams') return send(res, 200, service.teams(z.enum(['active', 'archived', 'all']).parse(url.searchParams.get('filter') ?? 'active')));
@@ -280,6 +283,8 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
         return send(res, 200, { ...await options.status() as object, scheduler: service.scheduling() });
       }
       if (req.method === 'GET' && path === '/storage') return send(res, 200, await service.storageStatus());
+      // Tickets that match a project's rule and have no task yet. Read only; starting one is a normal task submission.
+      if (req.method === 'GET' && path === '/tickets/available') return send(res, 200, await availableTickets(service.store, { integrations: options.integrations, trackers: options.trackers }));
       if (req.method === 'GET' && path === '/tasks') {
         const states = z.array(State).max(State.options.length).parse(url.searchParams.getAll('state'));
         const project = url.searchParams.get('projectId'); const projectId = project ? ProjectId.parse(project) : undefined;

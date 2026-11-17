@@ -80,20 +80,36 @@ test('a ticket tool is added by its MCP address, mapped, and used by a project w
     // A project can use more tools; this one is taken, so the next tile says there is none left to choose.
     await expect(page.getByRole('article', { name: /^Another ticket tool/ })).toContainText('Every added tool is in use here');
     const rule = panel.getByRole('form', { name: 'Which tickets' });
-    await expect(rule).toContainText('A rule never means every ticket');
-    await expect(rule.getByRole('button', { name: 'Save rule' })).toBeDisabled();
-    await rule.getByLabel('from project').fill('web');
+    // Every filter is optional: with none chosen, the rule means every ticket, and it can be saved like that.
+    await expect(rule).toContainText('No filter: all 5 tickets now');
+    await expect(rule.getByRole('button', { name: 'Save rule' })).toBeEnabled();
+    // Several values can be chosen for each filter, and removed again.
+    await rule.getByLabel('from projects').fill('web');
     await rule.locator('.ac-list [role="option"]', { hasText: 'Website' }).click();
-    await rule.getByLabel('in column').selectOption('ready-for-development');
+    await rule.getByLabel('in columns').fill('ready');
+    await rule.locator('.ac-list [role="option"]', { hasText: 'ready-for-development' }).click();
     await expect(rule).toContainText('Matches 2 tickets now: FX-1, FX-2');
-    await rule.getByLabel('with label').fill('bug');
+    await rule.getByLabel('in columns').fill('in-pro');
+    await rule.locator('.ac-list [role="option"]', { hasText: 'in-progress' }).click();
+    await expect(rule).toContainText('Matches 3 tickets now: FX-1, FX-2, FX-4');
+    await rule.getByRole('button', { name: 'Remove column in-progress' }).click();
+    await expect(rule).toContainText('Matches 2 tickets now: FX-1, FX-2');
+    await rule.getByLabel('with labels').fill('bug');
     await rule.locator('.ac-list [role="option"]', { hasText: 'bug' }).click();
+    await expect(rule).toContainText('Matches 1 ticket now: FX-2');
+    await rule.getByLabel('with labels').fill('feed');
+    await rule.locator('.ac-list [role="option"]', { hasText: 'feedback' }).click();
     await expect(rule).toContainText('Matches 1 ticket now: FX-2');
     await page.screenshot({ path: join(shots, 'u10-tools-project-rule.png'), fullPage: true });
     await rule.getByRole('button', { name: 'Save rule' }).click();
     await expect(rule).toContainText('Rule saved.');
     const connected = page.getByRole('article', { name: /^Team board/ });
-    await expect(connected).toContainText('project Website'); await expect(connected).toContainText('column ready-for-development');
+    await expect(connected).toContainText('project Website · column ready-for-development · label bug, feedback');
+
+    // The rule can be removed without disconnecting the tool.
+    await rule.getByRole('button', { name: 'Remove rule' }).click();
+    await expect(rule).toContainText('Rule removed. No tickets come from Team board until you save a rule.');
+    await expect(connected).toContainText('no ticket rule yet');
 
     // The tool cannot be removed while the project uses it.
     await page.goto(`${base}/ui/tools`);

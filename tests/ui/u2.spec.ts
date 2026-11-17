@@ -164,7 +164,7 @@ test('tasks show the frozen team or the legacy configuration, and the editor wor
   const { json: list } = await apiCall<{ tasks: { id: string; request: string; team?: { name: string; revision: number } }[] }>('/tasks?limit=50');
   const teamTask = list.tasks.find(t => t.request.startsWith('Fix the greeting'))!; const legacyTask = list.tasks.find(t => t.request.includes('[multi]'))!;
   expect(teamTask.team).toEqual({ id: expect.any(String), name: 'Website team', revision: 1 });
-  await page.goto(`${base}/ui/tasks`);
+  await page.goto(`${base}/ui/tasks?view=list`);
   await expect(page.locator('tr', { hasText: 'Fix the greeting' })).toContainText('Website team · revision 1');
   await expect(page.locator('tr', { hasText: '[multi]' })).toContainText('Legacy agent configuration');
   await page.goto(`${base}/ui/tasks/${teamTask.id}`);

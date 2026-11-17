@@ -68,8 +68,9 @@ test('a project connects GitHub and Jira with tokens, saves a ticket rule and di
     await expect(suggestions).toHaveCount(1);
     await suggestions.filter({ hasText: 'WEB · Website' }).click();
     await expect(project).toHaveValue('WEB · Website');
-    await expect(rule.getByRole('status').first()).toContainText('Choose a column, an assignee or a label');
-    await expect(rule.getByRole('button', { name: 'Save rule' })).toBeDisabled();
+    // A project alone is a rule: column, assignee and label are optional.
+    await expect(rule.getByRole('status').first()).toContainText('Matches');
+    await expect(rule.getByRole('button', { name: 'Save rule' })).toBeEnabled();
     await rule.getByLabel('in column').selectOption('Ready for agents');
     await expect(rule.getByRole('status').first()).toContainText('Matches 3 tickets now: WEB-12, WEB-15, WEB-21');
     // Labels: typing narrows the list; the keyboard chooses.
@@ -93,6 +94,18 @@ test('a project connects GitHub and Jira with tokens, saves a ticket rule and di
     const saved = await (await fetch(integrations, { headers })).json() as { jira: { rule: { start: string; jql: string }; expiresOn: string } };
     expect(saved.jira.rule.start).toBe('auto'); expect(saved.jira.rule.jql).toBe('project = "WEB" AND status in (10001) ORDER BY created ASC'); expect(saved.jira.expiresOn).toBe('2099-06-30');
     expect(JSON.stringify(saved)).not.toContain(JIRA);
+    // Every field can be emptied, the project included, and saved: then no tickets come from Jira and it stays connected.
+    await rule.getByLabel('in column').selectOption('');
+    await expect(rule).toContainText('Matches'); await expect(rule.getByRole('button', { name: 'Save rule' })).toBeEnabled();
+    await rule.getByRole('button', { name: 'Save rule' }).click();
+    await expect(rule).toContainText('Rule saved.'); await expect(jira).toContainText('project WEB');
+    await rule.getByRole('button', { name: 'Clear project' }).click();
+    await expect(rule).toContainText('No project chosen: no tickets come from Jira.');
+    await rule.getByRole('button', { name: 'Save rule' }).click();
+    await expect(rule).toContainText('Saved. No tickets come from Jira.');
+    await expect(jira).toContainText('no ticket rule yet'); await expect(jira).toContainText('Connected');
+    await expect(rule.getByRole('button', { name: 'Save rule' })).toBeDisabled();
+    await fetch(`${integrations}/jira/rule`, { method: 'PUT', headers, body: JSON.stringify({ project: 'WEB', column: 'Ready for agents', start: 'auto' }) });
 
     // A second project reuses both saved tokens without pasting anything.
     await page.goto(`${base}/ui/projects/fixture`);

@@ -65,7 +65,7 @@ test('a project is archived and restored from the browser; open work blocks it a
     await page.screenshot({ path: join(process.cwd(), 'test-results', 'ui-screenshots', 'u9-project-renamed.png'), fullPage: true });
     await page.goto(`${base}/ui/tasks/${task.id}`);
     await expect(page.getByRole('link', { name: renamed })).toHaveAttribute('href', `/ui/projects/${id}`);
-    await page.goto(`${base}/ui/tasks`);
+    await page.goto(`${base}/ui/tasks?view=list`);
     await expect(page.getByRole('cell', { name: renamed }).first()).toBeVisible();
     const restored = (await (await fetch(`${base}/projects`, { headers })).json() as { id: string; archivedAt?: string }[]).find(p => p.id === id);
     expect(restored).toBeTruthy(); expect(restored!.archivedAt).toBeUndefined();

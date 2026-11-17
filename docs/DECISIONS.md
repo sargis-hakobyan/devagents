@@ -483,3 +483,24 @@ The owner wants DevAgents to connect to any Jira-like tool, with the in-house bo
 - **A token is enough for the first tool.** Its MCP route accepts a personal key as a bearer token, so browser sign-in is not needed to integrate it.
 - **The setup a user sees is seven ticket fields.** The first build showed the whole mapping as a form; the owner found it too much and asked for only what brings a ticket in: status, project, assignee, label, plus the ticket number and link. Board `design/ui/U9-Tools.dc.html` (2026-11-17) shows those with the title, which Claude kept because a ticket cannot be shown or named without it. The rest of the mapping is filled in automatically and folded away. Each row shows the value from one real ticket, returned by the inspection for the signed-in owner only.
 
+## Tasks are shown as a board, with available tickets — 2026-11-17
+
+The owner asked for a kanban-like Tasks page with columns by state, then refined the design on board `design/ui/U10-Tasks-Board.dc.html`: what needs the user is separate from the stages, tickets that are not started appear as "available", that column can be pinned or left to collapse and open on hover, and the page carries no explanatory text.
+
+- **Six columns from fourteen states,** with the exact state on each card. Claude chose the grouping; the owner accepted the board.
+- **Needs you is a band, not a column.** A decision can be due before planning or after it, so it fits no single stage. A waiting task is shown only in the band.
+- **Cards are not dragged.** The stage is recorded by the workflow, not chosen.
+- **Available lists tickets read live** from each project's Jira rule and ticket-tool rules. It is read-only.
+- **"Start task" fills the submit form; it does not start a task.** Starting tasks from tickets automatically is the ticket processor, which is not designed yet. For the same reason a rule set to "start on its own" starts nothing, and the board does not show the "starts on its own" line that the design board draws.
+- **Started tickets are recognised by their key in a task's request.** This is a stopgap until a task records the ticket it came from; a ticket whose key is typed into an unrelated request of the same project would also be hidden.
+- **The list stays** behind a Board / List switch. Existing links with `?group=` open it.
+
+## A ticket-tool rule takes several values and none is required — 2026-11-17
+
+After connecting the first real tool the owner asked that the rule allow several projects, several columns, several assignees and several labels, all optional. This replaces the first build, which took one value each and required a column, an assignee or a label so that a rule could not mean every ticket.
+
+- **Any value of a part matches; every filled part must match.** Two labels mean "either label", not "both".
+- **An empty rule is allowed** and means every ticket the account can see. The editor says so in its match line.
+- **Several labels, projects and people are filtered by DevAgents,** not by the tool: a tool may read such a list as "all of these" (the first connected tool does for labels), which would silently drop tickets. Several columns are sent to the tool, where a list means "any of these".
+- **The Jira rule needs only its project** (changed the same day, after the owner could not clear a saved rule). Column, assignee and label are optional; a project alone means its open tickets. Emptying the project and saving removes the rule, so no tickets come from Jira while it stays connected. A Jira rule still names one project.
+

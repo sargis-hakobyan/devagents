@@ -299,6 +299,19 @@ API: `GET /projects/:id/integrations`; `PUT`/`DELETE /projects/:id/integrations/
 
 The GitHub and Jira calls are covered by deterministic fixtures only. They have not been run against the real services.
 
+## Task board and available tickets
+
+The Tasks page (`/ui/tasks`) opens as a board; a **Board / List** switch keeps the table, and the choice is remembered per browser. `?view=list` or `?view=board` picks one, and a link with `?group=…` opens the list.
+
+- **Needs you** is a band above the board: tasks waiting for a mode choice, a plan approval or an external approval, each with its one action. A task is in the band or in a column, never both, and the band is absent when nothing waits.
+- **Columns** group the task states: Planning (`draft`, `planning`), Queued (`ready`), Working (`running`, `validating`, `reviewing`, `repairing`, `committing`), Done (`completed`), Stopped (`failed`, `cancelled`). The chip on a card names the exact state. Done and Stopped show the newest eight and link to the list for older ones. Cards are not dragged: the stage is what happened to the task.
+- **Available** is the first column and holds tickets, not tasks: every ticket that a project's saved Jira rule or ticket-tool rule matches now and that has no task yet. A card names its source and ticket number (a link to the ticket), the rule values it matched and the project it is for.
+- **The pin** in the corner of Available keeps the column open. Unpinned, it folds to a strip that opens over the board while the pointer or the keyboard focus is on it; Escape closes it.
+- **Clicking a ticket** (or its "Start task" button) opens the Submit work form with everything preselected: the request as `<key>: <title>` with the ticket link, the project's default team and its usual autonomy mode. The request, team and mode can be changed. The project is shown but not offered as a choice, because the ticket's rule belongs to that project. Nothing starts until the form is submitted. A rule set to "start on its own" does not start anything yet.
+- **A ticket counts as started** when a task of the same project names its key in the request, which is what "Start task" writes. Tasks carry no ticket reference of their own yet.
+
+`GET /tickets/available` returns `{ tickets, problems, checkedAt }`; a source that cannot be read is listed under `problems` and does not hide the others. At most 50 tickets per source are read. The board asks once a minute. Terminal: `devagents tickets`.
+
 ## Ticket tools (any Jira-like tool with an MCP server)
 
 Besides the built-in Jira connection, any ticket tool that offers an MCP server can be connected. DevAgents knows no particular tool: a **mapping** says which of the server's tools lists tickets and where the ticket fields are in its answer. **This stores and checks configuration only**, like the other integrations: no task is created from a ticket and nothing is written to the tool.
@@ -307,7 +320,7 @@ A tool is added **once** (Tools in the sidebar, `/ui/tools`) and then used by an
 
 1. **Add the tool.** Give it a name, the https address of its MCP server and a token (a personal API key or access token of the tool, sent as a bearer token). DevAgents signs in, lists the server's tools and calls the one that looks like a ticket list.
 2. **Confirm seven fields.** The page shows what DevAgents reads from a ticket: ticket number, title and link (to name the ticket and link back), and project, status, assignee and label (to choose which tickets come in). Each row shows the tool's field and its value on one real ticket, so a wrong guess is visible; a field that is not chosen says what stops working. Everything else in the mapping is filled in automatically and folded under "How the tool is called". Saving calls the tool again through the mapping, so a saved mapping is one that works.
-3. **Connect a project and set its rule.** Choose project, column, assignee and label, as far as the tool supports them, with a live count of matching tickets.
+3. **Connect a project and set its rule.** Choose any number of projects, columns, assignees and labels, as far as the tool supports them, with a live count of matching tickets. Every choice is optional.
 
 The mapping has four parts:
 
@@ -323,9 +336,11 @@ Rules of the connection:
 
 - **The address must be https** without credentials, query or fragment, and redirects are not followed, so the token is only ever sent encrypted and to that address. **Plain http is accepted only for a tool on this computer:** `localhost`, `*.localhost`, `127.x.x.x`, `[::1]` and `host.docker.internal` (the host as the Docker service sees it). Any other host, such as a staging or production address, needs https.
 - **The token is write-only** and stored like the other integration tokens, under `tracker-<name>`. Native installs read it from `DEVAGENTS_TRACKER_TOKEN_<NAME>`; a pasted token is refused there.
-- **A rule only offers filters the mapping can answer**, by an argument or by a ticket field, and it needs at least one of column, assignee or label.
+- **A rule has four optional parts, each with several values:** projects, columns, assignees and labels. A ticket matches a part when it has any one of its values, and it must match every part that is filled in. With nothing filled in, the rule means every ticket the account can see.
+- **A rule only offers filters the mapping can answer**, by an argument or by a ticket field. One value goes to the tool's own filter; several columns go to it as a list; several projects, people or labels are checked by DevAgents on the returned tickets, because a tool may read a list there as "all of these".
 - **Labels on tickets count as choices** even when the tool does not list them.
 - **A tool must return structured data.** One that answers only with prose cannot be mapped.
+- **A rule can be removed** ("Remove rule", or `remove-rule` in the terminal) while the connection stays; without a rule no tickets come from that source. The Jira rule can be removed the same way: `devagents integrations jira remove-rule <project>`. In the Jira rule every field can be emptied: a project alone means its open tickets, and saving with no project removes the rule.
 - **A tool cannot be removed while a project uses it.** Archiving a project drops its connection.
 - Everything a server sends is treated as remote content: only mapped fields are read, as short plain text.
 
@@ -337,11 +352,12 @@ devagents tools list | show | check | rename | address | token | remove
 devagents integrations tool list <project>
 devagents integrations tool connect <project> "Team board"
 devagents integrations tool options <project> "Team board"
-devagents integrations tool rule <project> "Team board" --project Website --column todo --label devagents [--preview] [--start auto]
+devagents integrations tool rule <project> "Team board" --project Website Shop --column todo in-progress --label devagents [--preview] [--start auto]
+devagents integrations tool remove-rule <project> "Team board"   # keep the connection, bring in no tickets
 devagents integrations tool disconnect <project> "Team board"
 ```
 
-API: `GET|POST /trackers`; `GET|PUT|DELETE /trackers/:id` (`PUT` takes any of `{ name, url, token }`; a new address or token is verified before it is saved, and the mapping is kept); `GET /trackers/:id/inspect`; `PUT /trackers/:id/mapping`; `POST /trackers/:id/check`; and per project `GET /projects/:id/integrations/trackers`, `PUT|DELETE …/trackers/:toolId`, `GET …/trackers/:toolId/options`, `POST …/trackers/:toolId/preview`, `PUT …/trackers/:toolId/rule`. Tools are stored in the `trackers` table (database schema 8).
+API: `GET|POST /trackers`; `GET|PUT|DELETE /trackers/:id` (`PUT` takes any of `{ name, url, token }`; a new address or token is verified before it is saved, and the mapping is kept); `GET /trackers/:id/inspect`; `PUT /trackers/:id/mapping`; `POST /trackers/:id/check`; and per project `GET /projects/:id/integrations/trackers`, `PUT|DELETE …/trackers/:toolId`, `GET …/trackers/:toolId/options`, `POST …/trackers/:toolId/preview`, `PUT|DELETE …/trackers/:toolId/rule`. The Jira rule has `DELETE /projects/:id/integrations/jira/rule`. Tools are stored in the `trackers` table (database schema 8).
 
 Not included yet: browser sign-in (OAuth) for servers that do not accept a token, starting tasks from tickets, and writing comments or column changes back.
 

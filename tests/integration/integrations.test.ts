@@ -169,7 +169,9 @@ test('Jira Cloud: email and API token connect, the rule is resolved against live
     // A person chosen from the list is saved by ID, also when two people share the name.
     assert.deepEqual((await s.call('/jira/preview', 'POST', { project: 'WEB', assignee: 'acc-2' })).data.rule.assignee, { id: 'acc-2', name: 'Sam Example' });
 
-    assert.equal((await s.call('/jira/rule', 'PUT', { project: 'WEB' })).status, 400, 'a rule needs at least one filter');
+    assert.equal((await s.call('/jira/rule', 'PUT', {})).status, 400, 'a rule names a project');
+    const open = await s.call('/jira/preview', 'POST', { project: 'WEB' });
+    assert.equal(open.status, 200, open.text); assert.equal(open.data.rule.jql, 'project = "WEB" AND statusCategory != Done ORDER BY created ASC', 'without filters a rule means the project\'s open tickets');
     const unknown = await s.call('/jira/preview', 'POST', { project: 'WEB', column: 'Nowhere' });
     assert.equal(unknown.data.error, 'invalid_rule'); assert.match(unknown.data.message, /Ready for agents, Done/);
     assert.match((await s.call('/jira/preview', 'POST', { project: 'WEB', assignee: 'Sam Example' })).data.message, /Several people/);
@@ -184,6 +186,11 @@ test('Jira Cloud: email and API token connect, the rule is resolved against live
     const saved = await s.call('/jira/rule', 'PUT', { project: 'WEB', column: 'Ready for agents', label: 'devagents', start: 'auto' });
     assert.equal(saved.status, 200);
     assert.deepEqual({ ...saved.data.integrations.jira.rule, savedAt: 0 }, { project: { key: 'WEB', name: 'Website' }, column: { name: 'Ready for agents', statusIds: ['10001', '10002'] }, label: 'devagents', start: 'auto', jql: 'project = "WEB" AND status in (10001, 10002) AND labels = "devagents" ORDER BY created ASC', savedAt: 0 });
+
+    // The rule can be removed and saved again; the connection and its token stay.
+    const removed = await s.call('/jira/rule', 'DELETE');
+    assert.equal(removed.status, 200); assert.equal(removed.data.jira.rule, undefined); assert.equal(removed.data.jira.state, 'connected');
+    assert.equal((await s.call('/jira/rule', 'PUT', { project: 'WEB', column: 'Ready for agents', label: 'devagents', start: 'auto' })).status, 200);
 
     // Replacing the token for the same site keeps the rule; another site drops it.
     const replaced = await s.call('/jira', 'PUT', { kind: 'cloud', site: 'https://example.atlassian.net/', email: 'agents@example.com', token: JIRA_TOKEN });
