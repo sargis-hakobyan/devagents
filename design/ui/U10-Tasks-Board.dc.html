@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — Tasks as a board (U10)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#3B3F5E;text-decoration:none;font-weight:600;font-size:14px}
+.nav a:hover{background:#E6E8F3;color:#1C1A33}.nav a.on{background:#231F4A;color:#FFFFFF}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}
+.filter{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;border-radius:999px;border:1px solid #D1D4E4;background:#FFFFFF;font:inherit;font-size:13px;font-weight:600;color:#3B3F5E;cursor:pointer}
+.filter.on{background:#231F4A;color:#FFFFFF;border-color:#231F4A}
+.btn:focus-visible,.nav a:focus-visible,.filter:focus-visible,input:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+table{border-collapse:collapse;width:100%}th{text-align:left;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#5A5F78;padding:10px 14px;border-bottom:1px solid #E0E2EE}td{padding:14px;border-bottom:1px solid #EAECF5;vertical-align:top}
+tr.row:hover td{background:#FAFBFE}
+
+/* U10: tasks as a board */
+.board{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px;align-items:start}
+.col{background:#EBEDF6;border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.col.you{background:#FFF1DB;outline:1px solid #F3D9A6}
+.col-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 6px 0}
+.col-head b{font-size:14px;letter-spacing:.01em}
+.col-head .n{font-size:12.5px;font-weight:700;color:#5A5F78;background:#FFFFFF;border-radius:999px;padding:1px 9px}
+.col-sub{font-size:12px;color:#5A5F78;padding:0 6px;margin-top:-6px}
+.tcard{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px;text-decoration:none;color:inherit;box-shadow:0 1px 2px rgba(28,26,51,.05)}
+.tcard:hover{border-color:#B9BCD0}
+.tcard .t{font-weight:700;font-size:14px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tcard .meta{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;color:#5A5F78}
+.tcard .proj{font-weight:700;color:#3B3F5E;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tcard .line{font-size:12.5px;color:#5A5F78;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tcard .chip{font-size:12px;padding:3px 9px;align-self:flex-start}
+.bar{height:5px;border-radius:999px;background:#EAECF5;overflow:hidden}.bar i{display:block;height:100%;background:#2457C5;border-radius:999px}
+.act{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:0 12px;border-radius:9px;background:#231F4A;color:#FFFFFF;font-size:12.5px;font-weight:700;align-self:flex-start}
+.more{font-size:12.5px;font-weight:700;color:#0B7A75;padding:2px 6px}
+.none{font-size:12.5px;color:#8E92AD;padding:14px 6px;text-align:center;border:1px dashed #C9CCDD;border-radius:12px}
+.seg{display:inline-flex;padding:3px;border-radius:999px;background:#EAECF5;gap:2px}
+.seg span{padding:5px 14px;border-radius:999px;font-size:13px;font-weight:700;color:#5A5F78}
+.seg span.on{background:#FFFFFF;color:#1C1A33;box-shadow:0 1px 2px rgba(28,26,51,.12)}
+.c-warn{background:#FFF1DB;color:#7A4A00}.c-run{background:#E3ECFF;color:#1C3F99}.c-ok{background:#E1F5EA;color:#135E38}.c-bad{background:#FDE8E6;color:#8A1C14}.c-n{background:#EAECF5;color:#3B3F5E}
+/* Available can be pinned open or left to collapse */
+.pin{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:8px;border:1px solid #D1D4E4;background:#FFFFFF;color:#5A5F78;cursor:pointer}
+.pin.on{background:#231F4A;border-color:#231F4A;color:#FFFFFF}
+.rail{width:44px;flex:0 0 44px;border-radius:14px;outline:2px dashed #C9CCDD;outline-offset:-2px;padding:8px 0;display:flex;flex-direction:column;align-items:center;gap:10px;min-height:230px}
+.rail .v{writing-mode:vertical-rl;transform:rotate(180deg);font-weight:800;font-size:13px;letter-spacing:.02em;color:#3B3F5E}
+.rail .n{font-size:12px;font-weight:700;color:#5A5F78;background:#FFFFFF;border:1px solid #E0E2EE;border-radius:999px;padding:1px 7px}
+.demo{display:flex;gap:10px;align-items:stretch;position:relative;background:#F2F3FA;border:1px solid #E0E2EE;border-radius:12px;padding:10px;min-height:250px;overflow:hidden}
+.demo .col{flex:1 1 0;padding:8px;gap:8px}.demo .col.fixed{flex:0 0 190px}
+.demo .tcard{padding:9px 10px;gap:5px}.demo .tcard .t{font-size:12.5px}.demo .col-head b{font-size:13px}
+.ghostcard{height:46px;border-radius:10px;background:#FFFFFF;border:1px solid #E0E2EE}
+.demo .over{position:absolute;left:10px;top:10px;bottom:10px;width:200px;background:#FBFBFE;border-radius:14px;outline:2px dashed #C9CCDD;outline-offset:-2px;box-shadow:8px 0 24px rgba(28,26,51,.18);padding:8px;display:flex;flex-direction:column;gap:8px}
+.cursor{position:absolute;left:150px;top:120px}
+.cap{font-size:13.5px}
+/* Needs you: a band of its own, above the flow */
+.you-band{background:#FFF1DB;border:1px solid #F3D9A6;border-radius:16px;padding:14px 16px 16px;display:flex;flex-direction:column;gap:12px}
+.you-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.you-head b{font-size:16px}.you-head .n{font-size:12.5px;font-weight:700;color:#7A4A00;background:#FFFFFF;border-radius:999px;padding:1px 9px;margin-left:8px}
+.you-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.ycard{background:#FFFFFF;border:1px solid #F3D9A6;border-radius:12px;padding:12px 14px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 14px;align-items:center}
+.ycard .t{font-weight:700;font-size:14.5px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ycard .why{font-size:13px;color:#7A4A00;font-weight:600}
+.ycard .meta{font-size:12.5px;color:#5A5F78}
+.ycard .act{grid-row:1 / span 3;grid-column:2;align-self:center}
+/* Available: tickets, not tasks yet */
+.col.avail{background:transparent;outline:2px dashed #C9CCDD;outline-offset:-2px}
+.tcard.ticket{border-style:dashed;box-shadow:none;background:#FBFBFE}
+.src{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#3B3F5E;align-self:flex-start}
+.src i{font-style:normal;display:inline-grid;place-items:center;width:18px;height:18px;border-radius:5px;color:#FFFFFF;font-size:10px;font-weight:800}
+.src .jira{background:#2457C5}.src .tool{background:#231F4A}
+.src a{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600}
+.act.ghost{background:#FFFFFF;color:#231F4A;border:1px solid #231F4A}
+.auto{font-size:12.5px;font-weight:700;color:#1C3F99}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+  <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 18px">
+      <div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div>
+      <div style="width: 1px; height: 36px; background: rgba(255,255,255,0.18)"></div>
+      <div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #B9B6D9">Local workspace</span><span style="font-weight: 700; font-size: 16px">~/Projects · native</span></div>
+    </div>
+    <span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6EE7A8" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Service connected · updated 1 s ago</span>
+  </header>
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD">
+      <a href="Main.dc.html">Overview</a>
+      <a href="A-Tasks.dc.html" class="on" aria-current="page">Tasks</a>
+      <a href="A-Teams.dc.html">Teams</a>
+      <a href="A-Projects.dc.html">Projects</a>
+      <a href="U9-Tools.dc.html">Tools</a>
+      <a href="A-Settings.dc.html">Settings</a>
+    </nav>
+    <main style="flex: 999 1 560px; min-width: 0; padding: 32px 36px 48px; display: flex; flex-direction: column; gap: 20px">
+      <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap">
+        <div>
+          <div style="font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #5A5F78; font-weight: 700">Tasks</div>
+          <h1 style="margin: 4px 0 0; font-size: 40px; letter-spacing: -0.03em; line-height: 1.1">All tasks</h1>
+          <p class="muted" style="margin: 6px 0 0">36 tasks across 4 projects · 2 waiting for you · 7 tickets available</p>
+        </div>
+        <span class="btn primary">Submit work</span>
+      </div>
+      <div role="group" aria-label="View and filters" style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center">
+        <span class="seg" role="group" aria-label="View"><span class="on">Board</span><span>List</span></span>
+        <label style="display: flex; align-items: center; gap: 8px; border: 1px solid #D1D4E4; background: #FFFFFF; border-radius: 999px; padding: 0 12px; min-height: 36px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5A5F78" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input type="search" placeholder="Search request text" style="border: 0; font: inherit; font-size: 14px; width: 200px; background: transparent"></label>
+        <span class="muted" style="font-size: 13px; font-weight: 600; margin-left: 6px">Project</span>
+        <button class="filter on" type="button">All · 36</button><button class="filter" type="button">website · 12</button><button class="filter" type="button">api · 15</button><button class="filter" type="button">fixture · 7</button><button class="filter" type="button">shop · 2</button>
+      </div>
+
+      <!-- Needs you: separate from the flow, because a decision can be due at any stage -->
+      <section class="you-band" aria-label="Needs you, 2 tasks">
+        <div class="you-head"><span><b>Needs you</b><span class="n">2</span></span></div>
+        <div class="you-cards"><div class="ycard"><span class="t">Add input validation to the API</span><span class="act">Review the plan</span><span class="why">● The plan waits for your approval</span><span class="meta">website · planned, not started · 14 min ago</span></div><div class="ycard"><span class="t">Translate the onboarding emails</span><span class="act">Choose the mode</span><span class="why">● Choose how it should run</span><span class="meta">shop · not planned yet · 1 h ago</span></div></div>
+      </section>
+
+      <div class="board" role="list" aria-label="Tickets and tasks by stage"><section class="col avail" aria-label="Available, 7"><div class="col-head"><b>Available</b><span style="display:flex;align-items:center;gap:6px"><span class="n">7</span><span class="pin on" role="button" aria-pressed="true" aria-label="Pinned: Available stays open. Press to let it collapse" title="Pinned · stays open"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3z"/><path d="M12 14v7" fill="none" stroke-linecap="round"/></svg></span></span></div><div class="tcard ticket"><span class="src"><i class="tool">T</i>Team board · <a href="#">BRD-128</a></span><span class="t">Add a contact form to the landing page</span><span class="line">Ready for development · label devagents</span><span class="act ghost">Start task</span><span class="meta"><span class="proj">for website</span><span></span></span></div><div class="tcard ticket"><span class="src"><i class="jira">J</i>Jira · <a href="#">WEB-142</a></span><span class="t">Cookie banner overlaps the footer</span><span class="line">Ready for agents · assigned to DevAgents Bot</span><span class="act ghost">Start task</span><span class="meta"><span class="proj">for website</span><span></span></span></div><div class="tcard ticket"><span class="src"><i class="tool">T</i>Team board · <a href="#">BRD-131</a></span><span class="t">Paginate the orders endpoint</span><span class="line">Ready for development · label devagents</span><span class="auto">▶ Starts on its own when a slot is free</span><span class="meta"><span class="proj">for api</span><span></span></span></div><span class="more">Show 4 more →</span></section><section class="col" aria-label="Planning, 1"><div class="col-head"><b>Planning</b><span class="n">1</span></div><a class="tcard" href="A-Task.dc.html"><span class="src"><i class="tool">T</i>Team board · <a href="#">BRD-119</a></span><span class="t">Rework the pricing table for mobile</span><span class="chip c-run">▶ Planning</span><span class="line">Tech Lead is writing the plan</span><span class="meta"><span class="proj">website</span><span>40 s ago</span></span></a></section><section class="col" aria-label="Queued, 2"><div class="col-head"><b>Queued</b><span class="n">2</span></div><a class="tcard" href="A-Task.dc.html"><span class="t">Rate-limit the search API</span><span class="chip c-n">… Queued</span><span class="line">Starts when a slot is free · 2 of 2 running</span><span class="meta"><span class="proj">api</span><span>3 min ago</span></span></a><a class="tcard" href="A-Task.dc.html"><span class="t">Rename the billing module</span><span class="chip c-n">… Queued</span><span class="line">Waits for “Rate-limit the search API”</span><span class="meta"><span class="proj">api</span><span>9 min ago</span></span></a></section><section class="col" aria-label="Working, 3"><div class="col-head"><b>Working</b><span class="n">3</span></div><a class="tcard" href="A-Task.dc.html"><span class="t">Three modules</span><span class="chip c-run">▶ Building · item c</span><span class="bar" aria-hidden="true"><i style="width:67%"></i></span><span class="line">2 of 3 items done</span><span class="meta"><span class="proj">fixture</span><span>2 s ago</span></span></a><a class="tcard" href="A-Task.dc.html"><span class="src"><i class="jira">J</i>Jira · <a href="#">WEB-137</a></span><span class="t">Fix the footer links</span><span class="chip c-run">▶ Reviewing</span><span class="bar" aria-hidden="true"><i style="width:100%"></i></span><span class="line">Built · Code Reviewer is checking</span><span class="meta"><span class="proj">website</span><span>1 min ago</span></span></a><a class="tcard" href="A-Task.dc.html"><span class="t">Speed up the nightly export</span><span class="chip c-run">↻ Repairing · round 1</span><span class="bar" aria-hidden="true"><i style="width:50%"></i></span><span class="line">Review asked for a change</span><span class="meta"><span class="proj">api</span><span>5 min ago</span></span></a></section><section class="col" aria-label="Done, 26"><div class="col-head"><b>Done</b><span class="n">26</span></div><a class="tcard" href="A-Task.dc.html"><span class="t">Fix greeting so the test passes</span><span class="chip c-ok">✓ Completed</span><span class="line mono">a81f3c2 · 1 commit</span><span class="meta"><span class="proj">fixture</span><span>32 min ago</span></span></a><a class="tcard" href="A-Task.dc.html"><span class="src"><i class="tool">T</i>Team board · <a href="#">BRD-112</a></span><span class="t">Add a newsletter sign-up</span><span class="chip c-ok">✓ Completed</span><span class="line mono">9d04e7b · 1 commit</span><span class="meta"><span class="proj">website</span><span>2 h ago</span></span></a><a class="tcard" href="A-Task.dc.html"><span class="t">Update the README badges</span><span class="chip c-ok">✓ Completed</span><span class="line mono">51c2a90 · 1 commit</span><span class="meta"><span class="proj">fixture</span><span>yesterday</span></span></a><span class="more">Show 23 older →</span></section><section class="col" aria-label="Stopped, 2"><div class="col-head"><b>Stopped</b><span class="n">2</span></div><a class="tcard" href="A-Task.dc.html"><span class="t">Migrate the session store</span><span class="chip c-bad">✕ Failed</span><span class="line">Validation failed: 2 tests did not pass</span><span class="meta"><span class="proj">api</span><span>3 h ago</span></span></a><a class="tcard" href="A-Task.dc.html"><span class="t">Try the new date picker</span><span class="chip c-n">⊘ Cancelled by you</span><span class="meta"><span class="proj">website</span><span>yesterday</span></span></a></section></div>
+
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1640,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
