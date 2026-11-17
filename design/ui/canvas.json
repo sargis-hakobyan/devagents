@@ -201,6 +201,14 @@
       "h": 2590,
       "title": "U8 · Project integrations: GitHub and Jira, both optional",
       "expand": "fill"
+    },
+    "U9-Tools.dc.html": {
+      "x": 0,
+      "y": 19900,
+      "w": 1360,
+      "h": 1500,
+      "title": "U9 · Ticket tools: what is read from a ticket",
+      "expand": "fill"
     }
   },
   "order": [
@@ -227,7 +235,8 @@
     "U7-GitHub-Publish.dc.html",
     "U7-GitHub-PR.dc.html",
     "U7-GitHub-States.dc.html",
-    "U8-Integrations.dc.html"
+    "U8-Integrations.dc.html",
+    "U9-Tools.dc.html"
   ],
   "notes": {
     "rowA": {
@@ -327,6 +336,20 @@
       "text": "U8 — Integrations per project: Jira is where work comes from, GitHub is where the result goes; either, both or neither (design only)",
       "kind": "title1",
       "maxW": 10000
+    },
+    "rowU9": {
+      "x": 0,
+      "y": 19600,
+      "text": "U9 — Ticket tools: the only setup a user sees is the seven fields DevAgents reads from a ticket (design only)",
+      "kind": "title1",
+      "maxW": 10000
+    },
+    "legendU9": {
+      "x": 1440,
+      "y": 19900,
+      "w": 440,
+      "text": "Replaces the long mapping form. A tool is added with name, address and token. DevAgents then reads one real ticket and shows seven rows: ticket number, title and link (to name the ticket and link back), and project, status, assignee and label (to choose which tickets come in). Each row shows the tool's field and the value from that ticket, so a wrong guess is visible. Everything else (which tool lists tickets, where the lists are, fixed arguments) is filled in automatically and folded away. Which project, status, assignee and label to pick is chosen per project, on the project page.",
+      "fill": "blue"
     }
   },
   "designSystems": []

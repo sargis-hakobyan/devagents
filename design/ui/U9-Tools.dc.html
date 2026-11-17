@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — Ticket tools: what is read from a ticket (U9)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#3B3F5E;text-decoration:none;font-weight:600;font-size:14px}
+.nav a.on{background:#231F4A;color:#FFFFFF}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:16px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.c-ok{background:#E1F5EA;color:#135E38}.c-n{background:#EAECF5;color:#3B3F5E}.c-warn{background:#FFF1DB;color:#7A4A00}.c-bad{background:#FDE8E6;color:#8A1C14}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}.btn.small{min-height:36px;font-size:13px;padding:0 14px}.btn.quiet{border-color:transparent;background:transparent;color:#5A5F78;padding:0 8px}
+.btn:focus-visible,input:focus-visible,select:focus-visible,.radio:focus-visible,.seg span:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5A5F78}
+.hint{font-size:13px;color:#5A5F78}
+/* Integration tiles */
+.tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.tile{padding:22px;display:flex;flex-direction:column;gap:14px}
+.tile.off{border-style:dashed;background:#FBFBFE}
+.tile .top{display:flex;gap:14px;align-items:center}
+.logo{flex:0 0 48px;width:48px;height:48px;border-radius:12px;display:grid;place-items:center;color:#FFFFFF}
+.logo.gh{background:#231F4A}.logo.jira{background:#2457C5}
+.logo.s{flex-basis:36px;width:36px;height:36px;border-radius:10px}
+.tile.off .logo{background:#C9CCDD}
+.tile b.name{font-size:19px;line-height:1.2;display:block}.tile .what{font-size:14px;color:#5A5F78}
+.state{display:flex;align-items:center;gap:8px;font-size:14.5px;min-height:24px}
+.led{width:10px;height:10px;border-radius:50%;background:#B9BCD0;flex:0 0 auto}.led.on{background:#1E9A5B}
+.tile .foot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:auto}
+/* Connect panels */
+.panel{padding:24px;display:flex;flex-direction:column;gap:18px}
+.cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px;align-items:start}
+.col{display:flex;flex-direction:column;gap:12px;min-width:0}
+.field{display:flex;flex-direction:column;gap:6px;font-size:13.5px;font-weight:700}
+.field input,.field select{min-height:46px;border:1px solid #D1D4E4;border-radius:12px;padding:0 12px;font:inherit;font-weight:500;background:#FFFFFF;color:#1C1A33}
+.field input::placeholder{color:#8E92AD}
+.ro{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:46px;border:1px solid #E0E2EE;border-radius:12px;padding:0 12px;background:#F6F6FC;font-weight:500}
+.seg{display:inline-flex;align-self:flex-start;padding:3px;border-radius:12px;background:#EAECF5;gap:2px}
+.seg span{padding:7px 14px;border-radius:9px;font-size:13.5px;font-weight:700;color:#5A5F78}
+.seg span.on{background:#FFFFFF;color:#1C1A33;box-shadow:0 1px 2px rgba(28,26,51,.12)}
+.rule{display:grid;grid-template-columns:96px minmax(0,1fr);gap:8px 12px;align-items:center;font-size:14px;color:#3B3F5E}
+.rule select{min-height:42px;border:1px solid #D1D4E4;border-radius:12px;padding:0 12px;font:inherit;font-weight:600;background:#FFFFFF;color:#1C1A33;min-width:0}
+.match{display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border-radius:12px;background:#E1F5EA;color:#135E38;font-size:13.5px}
+.field select,.rule select{appearance:none;-webkit-appearance:none;padding:0 42px 0 14px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%235A5F78' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;background-size:16px 16px;cursor:pointer}
+.radio{display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid #E0E2EE;border-radius:12px;font-size:14.5px}
+.radio.on{border-color:#231F4A;background:#F6F6FC}
+.dot{flex:0 0 18px;width:18px;height:18px;border-radius:50%;border:2px solid #B9BCD0;display:grid;place-items:center}
+.radio.on .dot{border-color:#231F4A}.radio.on .dot::after{content:"";width:8px;height:8px;border-radius:50%;background:#231F4A}
+.steps{display:flex;gap:8px;align-items:center;font-size:13px;font-weight:700;color:#5A5F78}
+.steps i{font-style:normal;width:22px;height:22px;border-radius:50%;display:inline-grid;place-items:center;background:#EAECF5;color:#3B3F5E;font-size:12px}
+.steps .on i{background:#231F4A;color:#FFFFFF}.steps .on{color:#1C1A33}
+/* "Where do I get the token?" */
+.how{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:16px 18px;border-radius:12px;background:#F6F6FC;border:1px solid #EAECF5}
+.how > div{display:flex;gap:10px;align-items:flex-start;font-size:13.5px}
+.how i{font-style:normal;flex:0 0 22px;width:22px;height:22px;border-radius:50%;display:inline-grid;place-items:center;background:#FFFFFF;border:1px solid #D1D4E4;color:#3B3F5E;font-size:12px;font-weight:700}
+.rows > div{display:grid;grid-template-columns:190px minmax(0,1fr) auto;gap:6px 18px;align-items:center;padding:12px 22px}
+.rows > div + div{border-top:1px solid #EAECF5}
+.check{display:flex;gap:10px;align-items:center;font-size:14.5px}
+.box{flex:0 0 20px;width:20px;height:20px;border-radius:6px;border:2px solid #B9BCD0;display:grid;place-items:center;font-size:13px;font-weight:800;color:#FFFFFF}
+.box.on{background:#231F4A;border-color:#231F4A}
+.four{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.four > div{padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+.pair{display:flex;gap:6px}
+.pair span{font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px;background:#EAECF5;color:#8E92AD}
+.pair span.on{background:#231F4A;color:#FFFFFF}
+
+/* U9: the fields DevAgents reads from a ticket */
+.fields{display:grid;grid-template-columns:150px minmax(0,230px) minmax(0,1fr) auto;gap:0 16px;align-items:center}
+.fields > *{padding:9px 0;border-top:1px solid #EAECF5;min-width:0}
+.fields .hd{border-top:0;padding:0 0 6px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5A5F78}
+.fields .grp{grid-column:1 / -1;border-top:0;padding:16px 0 2px;font-size:13.5px;font-weight:800;color:#1C1A33}
+.fields .need{font-weight:700;font-size:14.5px}
+.fields select{width:100%;min-height:40px;border:1px solid #D1D4E4;border-radius:10px;padding:0 38px 0 12px;font:inherit;font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:#1C1A33;background-color:#FFFFFF;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%235A5F78' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:16px 16px}
+.fields select.missing{border-color:#E0A64A;background-color:#FFFBF2;font-family:inherit;color:#7A4A00}
+.fields .eg{font-size:13.5px;color:#3B3F5E;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;background:#EAECF5;font-size:12.5px;font-weight:600;color:#3B3F5E;margin-right:4px}
+.fold{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;color:#5A5F78}
+.sentence{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;font-size:14.5px;color:#3B3F5E}
+.pick{display:inline-flex;align-items:center;gap:8px;min-height:38px;padding:0 12px;border:1px solid #D1D4E4;border-radius:10px;background:#FFFFFF;font-weight:700;color:#1C1A33}
+.pick.any{font-weight:500;color:#8E92AD}
+.pick svg{flex:0 0 auto}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+  <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px">
+    <div style="display: flex; align-items: center; gap: 18px"><div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div><div style="width: 1px; height: 36px; background: rgba(255,255,255,0.18)"></div><div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #B9B6D9">Local workspace</span><span style="font-weight: 700; font-size: 16px">127.0.0.1:4310 · docker</span></div></div>
+    <span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF">✓ Service connected</span>
+  </header>
+  <div style="display: flex; flex: 1">
+    <nav class="nav" aria-label="Main" style="flex: 0 0 220px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD">
+      <a href="Main.dc.html">Overview</a><a href="A-Tasks.dc.html">Tasks</a><a href="A-Teams.dc.html">Teams</a><a href="U7-GitHub-Projects.dc.html">Projects</a><a href="U9-Tools.dc.html" class="on" aria-current="page">Tools</a><a href="U7-GitHub-Connect.dc.html">Settings</a>
+    </nav>
+    <main style="flex: 1; min-width: 0; padding: 32px 40px 56px; display: flex; flex-direction: column; gap: 22px; max-width: 940px">
+
+      <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 20px">
+        <div>
+          <div class="h">Tools</div>
+          <h1 style="margin: 6px 0 0; font-size: 36px; letter-spacing: -0.03em; line-height: 1.1">Ticket tools</h1>
+          <div class="muted" style="margin-top: 6px">Add a tool once. Each project then says which of its tickets come to DevAgents.</div>
+        </div>
+        <span class="btn primary">Add a tool</span>
+      </div>
+
+      <!-- One tool, open -->
+      <section class="card panel" aria-label="Team board">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px">
+          <div style="display: flex; align-items: center; gap: 12px"><span class="logo gh s"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v5M15 3v5M6 8h12v4a6 6 0 0 1-12 0zM12 18v3"/></svg></span><b style="font-size: 20px">Team board</b><span class="chip c-ok">✓ Connected</span></div>
+          <span class="btn small">Close</span>
+        </div>
+
+        <!-- 1 · Connection: three values, nothing else -->
+        <div class="col">
+          <div class="h">1 · Connection</div>
+          <div class="ro"><span style="display: flex; gap: 10px; align-items: baseline; min-width: 0"><span class="mono" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">https://board.example.com/mcp</span><span class="muted" style="font-size: 13px; white-space: nowrap">· acts as sam@example.com · token saved</span></span><span class="btn small" style="min-height: 32px">Edit</span></div>
+        </div>
+
+        <!-- 2 · The only mapping the user sees -->
+        <div class="col">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap">
+            <div class="h">2 · What DevAgents reads from a ticket</div>
+            <span class="hint">Read from ticket <b style="color: #1C1A33">BRD-128</b> just now</span>
+          </div>
+          <div class="match"><span aria-hidden="true">✓</span><span><b>DevAgents found all seven by itself.</b> Change one only if the example on the right looks wrong.</span></div>
+
+          <div class="fields" role="table" aria-label="Fields read from a ticket">
+            <span class="hd">DevAgents needs</span><span class="hd">Field in Team board</span><span class="hd">From a real ticket</span><span class="hd"></span>
+
+            <span class="grp">To name the ticket and link back to it</span>
+            <span class="need">Ticket number</span><select><option>key</option></select><span class="eg">BRD-128</span><span><span class="chip c-ok">✓ Found</span></span>
+            <span class="need">Title</span><select><option>title</option></select><span class="eg">Add a contact form to the landing page</span><span><span class="chip c-ok">✓ Found</span></span>
+            <span class="need">Link</span><select><option>url</option></select><span class="eg"><a href="#">board.example.com/board?task=BRD-128</a></span><span><span class="chip c-ok">✓ Found</span></span>
+
+            <span class="grp">To choose which tickets come to DevAgents</span>
+            <span class="need">Project</span><select><option>projectId</option></select><span class="eg">Website</span><span><span class="chip c-ok">✓ Found</span></span>
+            <span class="need">Status</span><select><option>status</option></select><span class="eg">Ready for development</span><span><span class="chip c-ok">✓ Found</span></span>
+            <span class="need">Assignee</span><select><option>assignee</option></select><span class="eg">sam@example.com</span><span><span class="chip c-ok">✓ Found</span></span>
+            <span class="need">Label</span><select><option>labels</option></select><span class="eg"><span class="tag">devagents</span><span class="tag">bug</span></span><span><span class="chip c-ok">✓ Found</span></span>
+          </div>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-top: 6px">
+            <div style="display: flex; gap: 10px; align-items: center"><span class="btn primary">Save</span><span class="hint">Saved today 14:02 · 42 tickets read</span></div>
+            <span class="fold"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg>How the tool is called · filled in automatically</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- State: one field could not be found -->
+      <section class="card panel" aria-label="A field was not found" style="gap: 14px">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 16px"><div style="font-weight: 800; font-size: 17px">When a field is not found</div><span class="hint">The row asks for it; everything else stays as it is</span></div>
+        <div class="fields" role="table" aria-label="A field that was not found">
+          <span class="need" style="border-top: 0">Label</span><select class="missing" style="margin: 0"><option>Choose a field…</option></select><span class="eg" style="border-top: 0; color: #7A4A00; white-space: normal">Not found on the ticket. Until it is chosen, tickets cannot be picked by label.</span><span style="border-top: 0"><span class="chip c-warn">⚠ Missing</span></span>
+        </div>
+      </section>
+
+      <!-- Where the four choosing fields are used -->
+      <section class="card panel" aria-label="Used on the project page" style="gap: 14px; background: #FBFBFE; border-style: dashed">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap"><div style="font-weight: 800; font-size: 17px">Used on each project</div><span class="hint">Projects → website → Team board · not on this page</span></div>
+        <div class="sentence">
+          <span>Bring tickets from project</span><span class="pick">Website</span>
+          <span>in status</span><span class="pick">Ready for development</span>
+          <span>assigned to</span><span class="pick any">anyone</span>
+          <span>with label</span><span class="pick">devagents</span>
+        </div>
+        <div class="match"><span aria-hidden="true">✓</span><span><b>2 tickets match now:</b> <a href="#">BRD-128</a> Add a contact form to the landing page · <a href="#">BRD-131</a> Fix the footer links</span></div>
+        <span class="hint">The four fields above make these four choices possible. The ticket number, title and link are what the match line shows.</span>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
