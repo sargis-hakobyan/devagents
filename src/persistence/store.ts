@@ -11,6 +11,7 @@ import { limitationCount, normalizeLegacyLimitations, redactReportProse } from '
 import { STARTER_TEAM_ID } from '../domain/starter-team.js';
 import type { DispatchClaim, DispatchRecord } from '../domain/dispatch.js';
 import type { ProjectIntegrations } from '../domain/integrations.js';
+import type { Tracker } from '../domain/trackers.js';
 
 export class Store {
   private readonly db: DatabaseSync;
@@ -23,7 +24,7 @@ export class Store {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
     // Version 4 added optional QA settings. Preserve that table when the QA feature is stashed.
-    if (version > 7) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
+    if (version > 8) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
     if (version === 0) this.db.exec(`
       BEGIN IMMEDIATE;
       CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, data TEXT NOT NULL);
@@ -72,7 +73,28 @@ export class Store {
       COMMIT;
     `);
     if (version < 7) this.migrateProjectIds();
+    // Schema 8: ticket tools added by their MCP address. Shared by projects, so they are not project rows.
+    if (version < 8) this.db.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS trackers (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+      PRAGMA user_version=8;
+      COMMIT;
+    `);
   }
+  trackers(): Tracker[] {
+    return (this.db.prepare('SELECT data FROM trackers').all() as { data: string }[]).map(row => JSON.parse(row.data) as Tracker).sort((a, b) => a.name.localeCompare(b.name));
+  }
+  tracker(id: string): Tracker {
+    const row = this.db.prepare('SELECT data FROM trackers WHERE id=?').get(id) as { data: string } | undefined;
+    if (!row) throw new AppError('tracker_not_found', 'No tool with this id. List them with: devagents tools list', 404);
+    return JSON.parse(row.data) as Tracker;
+  }
+  /** Adds or replaces a tool. Its token never passes through here. */
+  saveTracker(tracker: Tracker): Tracker {
+    this.db.prepare('INSERT INTO trackers VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(tracker.id, JSON.stringify(tracker));
+    return tracker;
+  }
+  removeTracker(id: string): void { this.db.prepare('DELETE FROM trackers WHERE id=?').run(id); }
   /**
    * Schema 7: every project ID is a UUID. A hand-written ID from an earlier version becomes the
    * project's name, and the project's tasks follow it. Paths, branches and worktrees never used the

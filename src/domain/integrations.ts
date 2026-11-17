@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { TrackerConnection } from './trackers.js';
 
 /**
  * Per-project GitHub and Jira connections. Only settings and the last check live here; a token is
@@ -57,7 +58,7 @@ export type JiraIntegration = {
   /** Cloud id when the token only works through Atlassian's gateway (a token created "with scopes"). */
   gateway?: string; expiresOn?: string; connectedAt: string; checkedAt: string; problem?: IntegrationProblem; rule?: JiraRule;
 };
-export type ProjectIntegrations = { github?: GitHubIntegration; jira?: JiraIntegration };
+export type ProjectIntegrations = { github?: GitHubIntegration; jira?: JiraIntegration; /** Ticket tools this project uses, one entry per tool. */ trackers?: TrackerConnection[] };
 
 export type ConnectionState = 'connected' | 'expiring' | 'expired' | 'rejected' | 'unreachable' | 'locked';
 /** Days before the end date from which a token is shown as expiring. */

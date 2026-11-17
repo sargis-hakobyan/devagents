@@ -17,6 +17,8 @@ import { BrowserSessions } from '../dist/api/session.js';
 import { runProcess } from '../dist/engines/process.js';
 import { git } from '../dist/workspace/git.js';
 import { ProjectIntegrationService } from '../dist/integrations/service.js';
+import { TrackerService } from '../dist/integrations/trackers.js';
+import { fakeTracker } from './fake-tracker.mjs';
 
 const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : fallback; };
 const port = Number(arg('port', 4399)); const holdMs = Number(arg('hold', 0));
@@ -120,10 +122,12 @@ const fixtureRemote = async (input, init = {}) => {
   return reply({}, 404);
 };
 const integrations = new ProjectIntegrationService(store, fixtureSecrets, { fetch: fixtureRemote, githubApiUrl: 'https://github.fixture.invalid' });
+// A made-up ticket tool with an MCP server; its token is the one exported by fake-tracker.mjs.
+const trackers = new TrackerService(store, fixtureSecrets, { fetch: fakeTracker().fetcher });
 const token = await accessToken(data); const sessions = new BrowserSessions();
 // Synthetic availability only: browser tests never inspect a host credential store or runtime login.
 const status = { service: { version: '0.1.0-fixture', host: '127.0.0.1', port, platform: process.platform, node: process.version, dataDir: data, executionEnabled: true, startedAt: new Date().toISOString(), checkedAt: new Date().toISOString() }, codex: { installed: true, version: 'fixture', signedIn: false, credentialStore: 'file', vaultLocked: false, modelAccessVerified: false }, claude: { installed: false, enabled: false, note: 'Adapter planned for M4' }, defaults: { devagentsRules: config.devagentsRules, engine: 'codex', provider: 'openai', model: null, providers: [{ id: 'openai', kind: 'openai', auth: 'login', apiKeyConfigured: null, executable: true }] }, limits: statusLimits(config), fixture: { label } };
-const server = createApi(service, token, { sessions, uiRoot: resolve('dist/ui'), status: async () => status, integrations });
+const server = createApi(service, token, { sessions, uiRoot: resolve('dist/ui'), status: async () => status, integrations, trackers });
 
 // Representative tasks. Each completes (or stops) through the real orchestrator against real Git worktrees.
 // The service starts listening only after they exist, so /health means the fixture is complete.

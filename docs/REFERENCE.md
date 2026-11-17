@@ -263,7 +263,7 @@ Browser: the project page (Projects → **Integrations →**) has "Archive proje
 
 ## Project integrations
 
-Each project can be connected to GitHub and to Jira. Both are optional and independent. **This stores and checks configuration only**: DevAgents does not push, open pull requests, comment on tickets or create tasks from tickets, and tasks still end in a local commit. The browser page is Projects → **Integrations** (`/ui/projects/<id>`).
+Each project can be connected to GitHub and to Jira. Both are optional and independent. Other ticket tools are connected through their MCP server; see [Ticket tools](#ticket-tools-any-jira-like-tool-with-an-mcp-server). **This stores and checks configuration only**: DevAgents does not push, open pull requests, comment on tickets or create tasks from tickets, and tasks still end in a local commit. The browser page is Projects → **Integrations** (`/ui/projects/<id>`).
 
 | | GitHub | Jira |
 | --- | --- | --- |
@@ -298,6 +298,52 @@ devagents integrations jira check|disconnect <project>
 API: `GET /projects/:id/integrations`; `PUT`/`DELETE /projects/:id/integrations/github|jira`; `POST …/github|jira/check`; `GET …/jira/options[?project=KEY]`; `POST …/jira/preview`; `PUT …/jira/rule`. They use the same bearer or session-plus-CSRF rules as every other route. Settings live in the project's record; the project `version` is not changed by them.
 
 The GitHub and Jira calls are covered by deterministic fixtures only. They have not been run against the real services.
+
+## Ticket tools (any Jira-like tool with an MCP server)
+
+Besides the built-in Jira connection, any ticket tool that offers an MCP server can be connected. DevAgents knows no particular tool: a **mapping** says which of the server's tools lists tickets and where the ticket fields are in its answer. **This stores and checks configuration only**, like the other integrations: no task is created from a ticket and nothing is written to the tool.
+
+A tool is added **once** (Tools in the sidebar, `/ui/tools`) and then used by any number of projects, each with its own pick-up rule (Projects → **Integrations** → Ticket tool). A project can use several tools, next to the optional Jira connection; an added tool is chosen from a list, so its address and token are never entered again.
+
+1. **Add the tool.** Give it a name, the https address of its MCP server and a token (a personal API key or access token of the tool, sent as a bearer token). DevAgents signs in, lists the server's tools and calls the one that looks like a ticket list.
+2. **Confirm seven fields.** The page shows what DevAgents reads from a ticket: ticket number, title and link (to name the ticket and link back), and project, status, assignee and label (to choose which tickets come in). Each row shows the tool's field and its value on one real ticket, so a wrong guess is visible; a field that is not chosen says what stops working. Everything else in the mapping is filled in automatically and folded under "How the tool is called". Saving calls the tool again through the mapping, so a saved mapping is one that works.
+3. **Connect a project and set its rule.** Choose project, column, assignee and label, as far as the tool supports them, with a live count of matching tickets.
+
+The mapping has four parts:
+
+| Part | Meaning |
+| --- | --- |
+| `list.tool`, `list.fixed` | The tool that lists tickets, and arguments sent with every call (for example `assignment: all` where the tool defaults to the caller's own tickets). |
+| `list.filters` | Which argument takes the rule's project, column, label or assignee, and whether it expects a list. A filter with no argument is applied by DevAgents to the returned tickets. |
+| `result` | Where the answer holds the tickets and, when present, projects, labels, people and the signed-in account. Paths are field names joined by dots (`data.tasks`). |
+| `ticket` | Fields of one ticket: `key` and `title` are required; `column`, `project`, `assignee`, `labels` and `url` are optional. |
+| `columns` | Columns a rule can name, in board order. Left empty, the columns seen on tickets are offered. |
+
+Rules of the connection:
+
+- **The address must be https** without credentials, query or fragment, and redirects are not followed, so the token is only ever sent encrypted and to that address. **Plain http is accepted only for a tool on this computer:** `localhost`, `*.localhost`, `127.x.x.x`, `[::1]` and `host.docker.internal` (the host as the Docker service sees it). Any other host, such as a staging or production address, needs https.
+- **The token is write-only** and stored like the other integration tokens, under `tracker-<name>`. Native installs read it from `DEVAGENTS_TRACKER_TOKEN_<NAME>`; a pasted token is refused there.
+- **A rule only offers filters the mapping can answer**, by an argument or by a ticket field, and it needs at least one of column, assignee or label.
+- **Labels on tickets count as choices** even when the tool does not list them.
+- **A tool must return structured data.** One that answers only with prose cannot be mapped.
+- **A tool cannot be removed while a project uses it.** Archiving a project drops its connection.
+- Everything a server sends is treated as remote content: only mapped fields are read, as short plain text.
+
+```bash
+devagents tools add "Team board" https://tracker.example.com/mcp     # hidden token prompt, or --token-env NAME
+devagents tools inspect "Team board"                                # the server's tools, the answer's outline, the proposed mapping
+devagents tools map "Team board" --suggested                        # or --file mapping.json
+devagents tools list | show | check | rename | address | token | remove
+devagents integrations tool list <project>
+devagents integrations tool connect <project> "Team board"
+devagents integrations tool options <project> "Team board"
+devagents integrations tool rule <project> "Team board" --project Website --column todo --label devagents [--preview] [--start auto]
+devagents integrations tool disconnect <project> "Team board"
+```
+
+API: `GET|POST /trackers`; `GET|PUT|DELETE /trackers/:id` (`PUT` takes any of `{ name, url, token }`; a new address or token is verified before it is saved, and the mapping is kept); `GET /trackers/:id/inspect`; `PUT /trackers/:id/mapping`; `POST /trackers/:id/check`; and per project `GET /projects/:id/integrations/trackers`, `PUT|DELETE …/trackers/:toolId`, `GET …/trackers/:toolId/options`, `POST …/trackers/:toolId/preview`, `PUT …/trackers/:toolId/rule`. Tools are stored in the `trackers` table (database schema 8).
+
+Not included yet: browser sign-in (OAuth) for servers that do not accept a token, starting tasks from tickets, and writing comments or column changes back.
 
 ## Authentication
 

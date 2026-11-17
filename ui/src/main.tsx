@@ -13,6 +13,7 @@ import { SetupPage } from './pages/Setup';
 import { SubmitTaskPage } from './pages/SubmitTask';
 import { RegisterProjectPage } from './pages/RegisterProject';
 import { ProjectPage } from './pages/Project';
+import { ToolsPage } from './pages/Tools';
 import { TeamEditorPage, TeamsPage } from './pages/Teams';
 
 function App() {
@@ -38,6 +39,7 @@ function Authenticated() {
       <Route path="/ui/projects/new" component={RegisterProjectPage} />
       <Route path="/ui/projects" component={ProjectsPage} />
       <Route path="/ui/projects/:id" component={({ id }: { id: string }) => <ProjectPage id={id} />} />
+      <Route path="/ui/tools" component={ToolsPage} />
       <Route path="/ui/settings/setup" component={SetupPage} />
       <Route path="/ui/settings" component={SettingsPage} />
       <Route default component={() => <div class="note info">Unknown page. <a href="/ui/">Back to the overview</a></div>} />

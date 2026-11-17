@@ -91,6 +91,23 @@ export type GitHubConnection = Shown & { savedToken: string; repository: string;
 export type JiraRule = { project: { key: string; name: string }; column?: { name: string; statusIds: string[] }; assignee?: { id: string; name: string }; label?: string; start: 'manual' | 'auto'; jql: string; savedAt: string };
 export type JiraConnection = Shown & { savedToken: string; kind: 'cloud' | 'data-center'; site: string; email?: string; account: string; gateway?: string; expiresOn?: string; rule?: JiraRule };
 export type Integrations = { projectId: string; folder: { path: string; hostPath?: string; repository: string | null }; secrets: { mode: 'vault' | 'environment'; locked: boolean; githubVariable?: string; jiraVariable?: string }; savedTokens: { github: SavedToken[]; jira: SavedToken[] }; github: GitHubConnection | null; jira: JiraConnection | null };
+/** Ticket tools reached through their MCP server: added once, then used by projects. */
+export type ToolArgument = { name: string; many: boolean };
+export type ToolMapping = {
+  list: { tool: string; fixed: Record<string, string | number | boolean | string[]>; filters: { project?: ToolArgument; column?: ToolArgument; label?: ToolArgument; assignee?: ToolArgument } };
+  result: { tickets: string; projects?: string; labels?: string; people?: string; account?: string };
+  ticket: { key: string; title: string; column?: string; project?: string; assignee?: string; labels?: string; url?: string };
+  columns: string[];
+};
+export type Tool = { id: string; name: string; url: string; server: { name: string; version: string }; account?: string; mapping?: ToolMapping; connectedAt: string; checkedAt: string; problem?: IntegrationProblem; state: ConnectionState; mapped: boolean; usedBy: { id: string; name: string }[]; variable?: string };
+export type ToolList = { secrets: { mode: 'vault' | 'environment'; locked: boolean }; trackers: Tool[] };
+export type ToolInspection = { tracker: Tool; tools: { name: string; description: string; properties: Record<string, { many: boolean; choices: string[] }> }[]; suggestion?: ToolMapping; shape?: { lists: { path: string; fields: string[] }[]; values: string[] }; sample?: { values: Record<string, string>; names: Record<string, string> }; note?: string };
+export type ToolRule = { project?: { id: string; name: string }; column?: string; assignee?: { id: string; name: string }; label?: string; start: 'manual' | 'auto'; savedAt: string };
+export type ToolMatches = { total: number; sample: { key: string; title: string; url?: string }[] };
+export type ToolOptions = { projects: { id: string; name: string }[]; columns: string[]; people: { id: string; name: string }[]; labels: string[]; account?: string; filters: ('project' | 'column' | 'assignee' | 'label')[] };
+export type ToolConnection = { trackerId: string; connectedAt: string; rule?: ToolRule; tracker: Tool };
+/** A project may use several tools; `trackers` is every added tool, to choose from. */
+export type ProjectTool = { connections: ToolConnection[]; trackers: Tool[] };
 /** A token saved once and shared by the projects on its account. `id` names it; it is never the token. */
 export type SavedToken = { id: string; label: string; usedBy: { id: string; name: string }[] };
 export type JiraChoices = { projects: { key: string; name: string }[]; options?: { columns: { name: string; statusIds: string[] }[]; columnsFrom: 'board' | 'statuses'; users: { id: string; name: string }[]; labels: string[] } };

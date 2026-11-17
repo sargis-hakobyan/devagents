@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { api, SignedOutError, type ConnectionState, type GitHubConnection, type Integrations, type JiraConnection, type JiraMatches, type JiraRuleInput, type SavedToken } from '../api';
+import { api, SignedOutError, type ConnectionState, type GitHubConnection, type Integrations, type JiraConnection, type JiraMatches, type JiraRuleInput, type ProjectTool, type SavedToken, type ToolConnection, type ToolMatches, type ToolOptions } from '../api';
 import { formatTime, type Tone } from '../format';
 import { onSignedOut } from '../state';
 import { Chip, Code, ErrorNote, Skeleton } from './ui';
 import { Autocomplete, type Choice } from './Autocomplete';
 
-type Kind = 'github' | 'jira';
+type Kind = 'github' | 'jira' | 'tool';
 const base = (projectId: string) => `/projects/${encodeURIComponent(projectId)}/integrations`;
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 const days = (n: number) => n === 0 ? 'today' : n === 1 ? 'in 1 day' : `in ${n} days`;
 
-function stateChip(c: { state: ConnectionState; expiresInDays?: number }): { tone: Tone; text: string } {
+export function stateChip(c: { state: ConnectionState; expiresInDays?: number }): { tone: Tone; text: string } {
   switch (c.state) {
     case 'connected': return { tone: 'ok', text: '✓ Connected' };
     case 'expiring': return { tone: 'warn', text: `⚠ Expires ${days(c.expiresInDays ?? 0)}` };
@@ -23,9 +23,9 @@ function stateChip(c: { state: ConnectionState; expiresInDays?: number }): { ton
   }
 }
 const needsToken = (state: ConnectionState) => ['expiring', 'expired', 'rejected'].includes(state);
-const Logo = ({ kind, small }: { kind: Kind; small?: boolean }) => <span class={`integ-logo ${kind}${small ? ' small' : ''}`} aria-hidden="true">
+export const Logo = ({ kind, small }: { kind: Kind; small?: boolean }) => <span class={`integ-logo ${kind}${small ? ' small' : ''}`} aria-hidden="true">
   <svg width={small ? 19 : 24} height={small ? 19 : 24} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    {kind === 'github' ? <><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="8" r="2.5" /><path d="M6 8.5v7M18 10.5c0 4-6 3-11.5 5.5" /></> : <><rect x="4" y="4" width="16" height="16" rx="3" /><path d="m8.5 12 2.5 2.5 4.5-5" /></>}
+    {kind === 'github' ? <><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="8" r="2.5" /><path d="M6 8.5v7M18 10.5c0 4-6 3-11.5 5.5" /></> : kind === 'jira' ? <><rect x="4" y="4" width="16" height="16" rx="3" /><path d="m8.5 12 2.5 2.5 4.5-5" /></> : <path d="M9 3v5M15 3v5M6 8h12v4a6 6 0 0 1-12 0zM12 18v3" />}
   </svg>
 </span>;
 const External = ({ href, children }: { href: string; children: ComponentChildren }) => <a href={href} target="_blank" rel="noopener noreferrer" style={{ fontSize: '13px', fontWeight: 700 }}>{children} ↗</a>;
@@ -41,7 +41,7 @@ function Tile({ kind, name, what, connection, line, foot, open, onOpen }: { kind
 }
 
 /** Runs one request at a time and keeps its failure next to the control that caused it. */
-function useAction() {
+export function useAction() {
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const lock = useRef(false);
   const run = async (work: () => Promise<void>) => {
@@ -52,7 +52,7 @@ function useAction() {
   return { busy, error, run, clear: () => setError('') };
 }
 type Using = { id: string; name: string };
-const others = (view: Integrations, kind: Kind): Using[] => view.savedTokens[kind].find(t => t.id === view[kind]?.savedToken)?.usedBy.filter(p => p.id !== view.projectId) ?? [];
+const others = (view: Integrations, kind: 'github' | 'jira'): Using[] => view.savedTokens[kind].find(t => t.id === view[kind]?.savedToken)?.usedBy.filter(p => p.id !== view.projectId) ?? [];
 const names = (projects: Using[]) => projects.length === 1 ? `project ${projects[0]!.name}` : `projects ${projects.map(p => p.name).join(', ')}`;
 /** Choose a token another project already saved, or paste a new one. Shown only when there is one to reuse. */
 function SavedTokenChoice({ name, tokens, value, disabled, onChange }: { name: string; tokens: SavedToken[]; value: string; disabled: boolean; onChange: (id: string) => void }) {
@@ -290,20 +290,129 @@ function JiraPanel({ projectId, view, onChange }: { projectId: string; view: Int
   </section>;
 }
 
-/** Design: design/ui/U8-Integrations.dc.html. Both connections are optional and independent. */
+/** Tickets of an added tool that may become tasks. The tool offers only the filters its mapping can answer. */
+function ToolRuleEditor({ projectId, connection, onChange }: { projectId: string; connection: ToolConnection; onChange: (next: ProjectTool) => void }) {
+  const saved = connection.rule; const action = useAction(); const name = connection.tracker.name; const path = `${base(projectId)}/trackers/${connection.trackerId}`;
+  const [project, setProject] = useState<Choice | undefined>(saved?.project); const [column, setColumn] = useState(saved?.column ?? '');
+  const [assignee, setAssignee] = useState<Choice | undefined>(saved?.assignee); const [label, setLabel] = useState(saved?.label ?? '');
+  const [start, setStart] = useState<'manual' | 'auto'>(saved?.start ?? 'manual');
+  const [options, setOptions] = useState<ToolOptions>(); const [loadError, setLoadError] = useState('');
+  const [found, setFound] = useState<{ state: 'idle' | 'loading' } | { state: 'ok'; value: ToolMatches } | { state: 'bad'; text: string }>({ state: 'idle' });
+  const [note, setNote] = useState(''); const sequence = useRef(0);
+  const usable = connection.tracker.state === 'connected';
+  useEffect(() => {
+    if (!usable) return;
+    let current = true; setLoadError('');
+    api<ToolOptions>(`${path}/options`).then(next => { if (current) setOptions(next); }, e => { if (!current) return; if (e instanceof SignedOutError) onSignedOut(); else setLoadError(message(e)); });
+    return () => { current = false; };
+  }, [projectId, usable, connection.trackerId, connection.tracker.checkedAt]);
+  // A tool's lists are loaded once, so the fields search them here.
+  const within = (items: Choice[]) => async (query: string) => items.filter(i => `${i.name} ${i.id}`.toLowerCase().includes(query.toLowerCase())).slice(0, 20);
+  const rule = { start, ...(project ? { project: project.id } : {}), ...(column ? { column } : {}), ...(assignee ? { assignee: assignee.id } : {}), ...(label.trim() ? { label: label.trim() } : {}) };
+  const filtered = Boolean(column || assignee || label.trim());
+  useEffect(() => {
+    const id = ++sequence.current;
+    if (!usable || !filtered) { setFound({ state: 'idle' }); return; }
+    setFound({ state: 'loading' });
+    const timer = setTimeout(() => {
+      api<{ matches: ToolMatches }>(`${path}/preview`, { method: 'POST', body: rule }).then(
+        result => { if (id === sequence.current) setFound({ state: 'ok', value: result.matches }); },
+        e => { if (id !== sequence.current) return; if (e instanceof SignedOutError) onSignedOut(); else setFound({ state: 'bad', text: message(e) }); });
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [projectId, project?.id, column, assignee?.id, label, usable]);
+  const unchanged = Boolean(saved) && (saved!.project?.id ?? '') === (project?.id ?? '') && (saved!.column ?? '') === column && (saved!.assignee?.id ?? '') === (assignee?.id ?? '') && (saved!.label ?? '') === label.trim() && saved!.start === start;
+  const save = (event: Event) => {
+    event.preventDefault(); setNote('');
+    void action.run(async () => { onChange(await api<ProjectTool>(`${path}/rule`, { method: 'PUT', body: rule })); setNote('Rule saved.'); });
+  };
+  if (!usable) return <div class="integ-col"><div class="h">2 · Which tickets</div><span class="muted" style={{ fontSize: '13.5px' }}>Tickets can be chosen again once {name} is reachable with a working token.{saved ? ' The saved rule is kept.' : ''}</span></div>;
+  if (!options) return <div class="integ-col"><div class="h">2 · Which tickets</div>{loadError ? <div class="note bad" role="alert">{loadError}</div> : <Skeleton rows={3} label={`Asking ${name} what a rule can name`} />}</div>;
+  const can = (part: ToolOptions['filters'][number]) => options.filters.includes(part);
+  const matched = found.state === 'ok' ? found.value : undefined;
+  return <form class="integ-col" onSubmit={save} aria-label="Which tickets">
+    <div class="h">2 · Which tickets</div>
+    <div class="integ-rule" role="group" aria-label="Filters">
+      {can('project') && <><label for="integ-tool-project">from project</label>
+        <Autocomplete id="integ-tool-project" what="project" value={project} onChange={next => { setProject(next); setNote(''); }} search={within(options.projects)} placeholder="any project" disabled={action.busy} /></>}
+      {can('column') && <><label for="integ-tool-column">in column</label>
+        <select id="integ-tool-column" value={column} disabled={action.busy} onChange={e => { setColumn((e.target as HTMLSelectElement).value); setNote(''); }}><option value="">any column</option>{[...new Set([...(column ? [column] : []), ...options.columns])].map(c => <option key={c} value={c}>{c}</option>)}</select></>}
+      {can('assignee') && <><label for="integ-tool-assignee">assigned to</label>
+        <Autocomplete id="integ-tool-assignee" what="assignee" value={assignee} onChange={next => { setAssignee(next); setNote(''); }} search={within(options.people)} placeholder="anyone" disabled={action.busy} /></>}
+      {can('label') && <><label for="integ-tool-label">with label</label>
+        <Autocomplete id="integ-tool-label" what="label" free value={label ? { id: label, name: label } : undefined} onChange={next => { setLabel(next?.id ?? ''); setNote(''); }} search={within(options.labels.map(l => ({ id: l, name: l })))} placeholder="any label" disabled={action.busy} /></>}
+    </div>
+    <div class={`integ-match${matched?.total ? ' ok' : found.state === 'bad' ? ' bad' : ''}`} role="status" aria-live="polite">
+      {!filtered ? <span>Choose a column, an assignee or a label. A rule never means every ticket.</span>
+        : found.state === 'bad' ? <span>{found.text}</span>
+        : !matched ? <span>Asking {name} what this matches…</span>
+        : matched.total === 0 ? <span><b>No tickets match right now.</b> The rule can still be saved.</span>
+        : <><span aria-hidden="true">✓</span><span><b>Matches {matched.total} ticket{matched.total === 1 ? '' : 's'} now:</b> {matched.sample.map(t => t.key).join(', ')}{matched.total > matched.sample.length ? ', …' : ''}</span></>}
+    </div>
+    <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <legend style={{ fontSize: '13px', fontWeight: 700, padding: 0, marginBottom: '6px' }}>When a ticket matches</legend>
+      <label class="integ-radio"><input type="radio" name="integ-tool-start" checked={start === 'manual'} disabled={action.busy} onChange={() => { setStart('manual'); setNote(''); }} /><span><b>Wait until someone starts it</b> <span class="muted">· recommended</span></span></label>
+      <label class="integ-radio"><input type="radio" name="integ-tool-start" checked={start === 'auto'} disabled={action.busy} onChange={() => { setStart('auto'); setNote(''); }} /><span>Start on its own</span></label>
+    </fieldset>
+    <div class="integ-actions"><button type="submit" class="btn primary" disabled={action.busy || !filtered || unchanged}>{action.busy ? 'Saving…' : 'Save rule'}</button>
+      <span class="muted" style={{ fontSize: '13px' }} role="status">{note || (unchanged ? `Saved ${formatTime(saved!.savedAt)}` : '')}</span></div>
+    {action.error && <div class="note bad" role="alert">{action.error}</div>}
+  </form>;
+}
+
+/** One connected tool, or (without a connection) the choice of an added tool to connect. */
+function ToolPanel({ projectId, view, connection, onChange, onConnected }: { projectId: string; view: ProjectTool; connection: ToolConnection | undefined; onChange: (next: ProjectTool) => void; onConnected: (trackerId: string) => void }) {
+  const action = useAction(); const taken = new Set(view.connections.map(c => c.trackerId));
+  const ready = view.trackers.filter(t => t.mapped && !taken.has(t.id)); const unmapped = view.trackers.filter(t => !t.mapped);
+  const [chosen, setChosen] = useState(ready[0]?.id ?? ''); const [asking, setAsking] = useState(false);
+  const connect = (event: Event) => { event.preventDefault(); void action.run(async () => { onChange(await api<ProjectTool>(`${base(projectId)}/trackers/${chosen}`, { method: 'PUT', body: {} })); onConnected(chosen); }); };
+  const tool = connection?.tracker;
+  return <section class="card integ-panel" aria-label={connection ? `${connection.tracker.name} connection` : 'Ticket tool connection'}>
+    <div class="integ-panel-head"><div class="integ-title"><Logo kind="tool" small />{tool ? tool.name : 'Connect a ticket tool'}</div>
+      <div class="integ-steps" aria-hidden="true"><span class={connection ? '' : 'on'}><i>1</i>Tool</span><span>—</span><span class={connection ? 'on' : ''}><i>2</i>Tickets</span></div></div>
+    {tool?.state === 'locked' && <div class="note warn" role="status">Credentials are locked after a restart. Run <Code>./devagents start</Code> to unlock them.</div>}
+    {tool?.problem && <div class="note bad" role="status">{tool.problem.message} <span class="muted">Checked {formatTime(tool.problem.at)}.</span> <a href="/ui/tools">Fix it on the Tools page</a></div>}
+    <div class="integ-cols">
+      <div class="integ-col">
+        <div class="h">1 · Which tool</div>
+        {tool ? <div class="integ-summary">
+          <span><b>{tool.name}</b> · <span class="mono wrap-anywhere">{tool.url.replace(/^https:\/\//, '')}</span></span>
+          {tool.account && <span>Acts as <b>{tool.account}</b></span>}
+          <span class="muted">One token for this tool, saved once and used by every project that connects it · checked {formatTime(tool.checkedAt)}</span>
+          <div class="integ-actions"><a class="btn small" href="/ui/tools">Manage tool</a>
+            {asking ? <span class="integ-actions" role="group" aria-label={`Disconnect ${tool.name}?`}><span style={{ fontSize: '13px' }}>Stop using {tool.name} for this project? The tool and its token stay.</span><button type="button" class="btn small" disabled={action.busy} onClick={() => void action.run(async () => { onChange(await api<ProjectTool>(`${base(projectId)}/trackers/${tool.id}`, { method: 'DELETE' })); setAsking(false); })}>Yes, disconnect {tool.name}</button><button type="button" class="btn small quiet" disabled={action.busy} onClick={() => setAsking(false)}>Keep</button></span>
+              : <button type="button" class="btn small quiet" disabled={action.busy} onClick={() => setAsking(true)}>Disconnect</button>}</div>
+        </div> : ready.length ? <form class="integ-col" onSubmit={connect}>
+          <label class="field">Ticket tool<select value={chosen} disabled={action.busy} onChange={e => setChosen((e.target as HTMLSelectElement).value)}>{ready.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+          <span class="hint">The tool's address and token were saved when it was added, so nothing is entered again. Which tickets to pick up is chosen for this project.</span>
+          <div class="integ-actions"><button type="submit" class="btn primary" disabled={action.busy || !chosen}>{action.busy ? 'Connecting…' : 'Connect'}</button><a href="/ui/tools" style={{ fontSize: '13px', fontWeight: 700 }}>Add another tool →</a></div>
+        </form> : <div class="integ-col">
+          <span style={{ fontSize: '13.5px' }}>{unmapped.length ? `${unmapped.map(t => t.name).join(', ')} still ${unmapped.length === 1 ? 'needs' : 'need'} a mapping before a project can use it.` : view.trackers.length ? 'This project already uses every added tool. Add another tool to connect it here.' : 'No ticket tool is added yet. Any Jira-like tool with an MCP server can be added once and then used by every project.'}</span>
+          <div class="integ-actions"><a class="btn primary" href="/ui/tools">{unmapped.length ? 'Finish on the Tools page' : 'Add a tool'}</a></div>
+        </div>}
+        {action.error && <div class="note bad" role="alert">{action.error}</div>}
+      </div>
+      {connection ? <ToolRuleEditor key={`${connection.trackerId}:${connection.connectedAt}`} projectId={projectId} connection={connection} onChange={onChange} />
+        : <div class="integ-col"><div class="h">2 · Which tickets</div><span class="muted" style={{ fontSize: '13.5px' }}>After connecting you choose which of the tool's tickets may become tasks: by project, board column, assignee or label, as far as the tool supports them.</span></div>}
+    </div>
+  </section>;
+}
+
+/** Design: design/ui/U8-Integrations.dc.html. Every connection is optional and independent. */
 export function ProjectIntegrations({ projectId }: { projectId: string }) {
-  const [view, setView] = useState<Integrations>(); const [error, setError] = useState(''); const [open, setOpen] = useState<Kind>();
+  const [view, setView] = useState<Integrations>(); const [tool, setTool] = useState<ProjectTool>(); const [error, setError] = useState(''); const [open, setOpen] = useState<'github' | 'jira' | 'tool:new' | `tool:${string}`>();
   const load = useCallback(async () => {
-    try { setView(await api<Integrations>(base(projectId))); setError(''); }
+    try { const [next, nextTool] = await Promise.all([api<Integrations>(base(projectId)), api<ProjectTool>(`${base(projectId)}/trackers`)]); setView(next); setTool(nextTool); setError(''); }
     catch (e) { if (e instanceof SignedOutError) onSignedOut(); else setError(message(e)); }
   }, [projectId]);
-  useEffect(() => { setView(undefined); setOpen(undefined); void load(); }, [load]);
-  if (!view) return error ? <><ErrorNote message={error} /><div><button type="button" class="btn" onClick={() => void load()}>Retry</button></div></> : <Skeleton rows={4} label="Loading integrations" />;
+  useEffect(() => { setView(undefined); setTool(undefined); setOpen(undefined); void load(); }, [load]);
+  if (!view || !tool) return error ? <><ErrorNote message={error} /><div><button type="button" class="btn" onClick={() => void load()}>Retry</button></div></> : <Skeleton rows={4} label="Loading integrations" />;
   const { github, jira } = view;
-  const toggle = (kind: Kind) => setOpen(current => current === kind ? undefined : kind);
+  const toggle = (kind: NonNullable<typeof open>) => setOpen(current => current === kind ? undefined : kind);
+  const connected = tool.connections.find(c => open === `tool:${c.trackerId}`); const more = tool.trackers.length - tool.connections.length;
   return <section class="integ" aria-label="Integrations">
-    <div><div style={{ fontWeight: 800, fontSize: '18px' }}>Integrations</div><div class="muted">Both are optional. Each one needs a token, saved once and shared by your projects on the same account.</div></div>
-    <div class="note info">This page saves and checks the two connections. DevAgents does not open pull requests or start tasks from tickets yet; tasks still end in a local commit.</div>
+    <div><div style={{ fontWeight: 800, fontSize: '18px' }}>Integrations</div><div class="muted">All are optional. Each one needs a token, saved once and shared by your projects on the same account.</div></div>
+    <div class="note info">This page saves and checks the connections. DevAgents does not open pull requests or start tasks from tickets yet; tasks still end in a local commit.</div>
     {view.secrets.locked && <div class="note warn" role="status">Credentials are locked after a restart. Run <Code>./devagents start</Code> to unlock them; until then tokens cannot be saved or checked.</div>}
     <div class="integ-tiles">
       <Tile kind="github" name="GitHub" what="The repository this folder was cloned from" connection={github} open={open === 'github'} onOpen={() => toggle('github')}
@@ -312,7 +421,14 @@ export function ProjectIntegrations({ projectId }: { projectId: string }) {
       <Tile kind="jira" name="Jira" what="The tickets that may become tasks" connection={jira} open={open === 'jira'} onOpen={() => toggle('jira')}
         line={jira && (jira.rule ? <>project <b>{jira.rule.project.key}</b>{jira.rule.column ? <>, column <b>{jira.rule.column.name}</b></> : null}</> : 'no ticket rule yet')}
         foot={jira ? `as ${jira.account}${jira.expiresOn ? ` · token valid until ${day(`${jira.expiresOn}T00:00:00Z`)}` : ''}` : 'You write requests yourself'} />
+      {tool.connections.map(c => <Tile key={c.trackerId} kind="tool" name={c.tracker.name} what="Ticket tool, through its MCP server" connection={c.tracker} open={open === `tool:${c.trackerId}`} onOpen={() => toggle(`tool:${c.trackerId}`)}
+        line={c.rule ? <>{c.rule.project ? <>project <b>{c.rule.project.name}</b>{c.rule.column ? ', ' : ''}</> : null}{c.rule.column ? <>column <b>{c.rule.column}</b></> : null}{!c.rule.project && !c.rule.column ? 'ticket rule saved' : null}</> : 'no ticket rule yet'}
+        foot={c.tracker.account ? `as ${c.tracker.account}` : 'connected'} />)}
+      <Tile kind="tool" name={tool.connections.length ? 'Another ticket tool' : 'Ticket tool'} what="Any Jira-like tool with an MCP server" connection={null} open={open === 'tool:new'} onOpen={() => toggle('tool:new')}
+        line={null} foot={more > 0 ? `${more} added tool${more === 1 ? '' : 's'} to choose from` : tool.trackers.length ? 'Every added tool is in use here' : 'Add a tool first'} />
     </div>
+    {connected && <ToolPanel key={connected.trackerId} projectId={projectId} view={tool} connection={connected} onChange={setTool} onConnected={() => undefined} />}
+    {open === 'tool:new' && <ToolPanel key="new" projectId={projectId} view={tool} connection={undefined} onChange={setTool} onConnected={id => setOpen(`tool:${id}`)} />}
     {open === 'github' && <GitHubPanel projectId={projectId} view={view} onChange={setView} />}
     {open === 'jira' && <JiraPanel projectId={projectId} view={view} onChange={setView} />}
   </section>;

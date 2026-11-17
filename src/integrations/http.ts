@@ -3,7 +3,7 @@ import { AppError } from '../domain/errors.js';
 export type Fetch = typeof fetch;
 const LIMIT = 2 * 1024 * 1024;
 
-export type RemoteResponse = { status: number; headers: Headers; json: unknown };
+export type RemoteResponse = { status: number; headers: Headers; json: unknown; /** The raw body, for answers that are not one JSON document. */ body: string };
 /**
  * One bounded request to an integration host. Redirects are not followed, so a token is only ever
  * sent to the address that was configured. The response body is remote content: callers pick the
@@ -24,7 +24,7 @@ export async function remote(fetcher: Fetch, service: string, url: string, init:
   let json: unknown;
   try { json = text ? JSON.parse(text) : undefined; } catch { json = undefined; }
   if (response.status >= 500) throw new AppError('integration_unavailable', `${service} is not answering right now (${response.status}). Try again later.`, 502);
-  return { status: response.status, headers: response.headers, json };
+  return { status: response.status, headers: response.headers, json, body: text };
 }
 export const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 export const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];

@@ -37,6 +37,7 @@ import { configuredVault } from '../security/credential-vault.js';
 import { configuredSecretStore } from '../security/secret-store.js';
 import { hostFolders } from './project-mount.js';
 import { ProjectIntegrationService } from '../integrations/service.js';
+import { TrackerService } from '../integrations/trackers.js';
 
 const print = (data: unknown) => console.log(JSON.stringify(redactValues(data, environmentSecrets()), null, 2));
 const port = () => z.coerce.number().int().min(1).max(65535).parse(process.env.DEVAGENTS_PORT ?? 4310);
@@ -79,9 +80,10 @@ cli.command('serve').description('Start the local API').action(async () => {
   };
   const setupAuth = new SetupAuth(codexSetupDriver(dataDir), () => assertSignInIdle(store, runner));
   const claudeAuth = new SetupAuth(claudeSetupDriver(dataDir), () => assertSignInIdle(store, runner));
+  const secretStore = await configuredSecretStore(dataDir);
   const server = createApi(service, await accessToken(dataDir), {
     sessions: new BrowserSessions(undefined, sessionLimits(), sessionFile(dataDir)), uiRoot, publicPort, setupAuth, claudeAuth, assertSetupIdle,
-    integrations: new ProjectIntegrationService(store, await configuredSecretStore(dataDir)),
+    integrations: new ProjectIntegrationService(store, secretStore), trackers: new TrackerService(store, secretStore),
     status: statusReporter({ dataDir, config, version: '0.1.0', host, port: () => publicPort, executionEnabled: true, revision: () => setupAuth.revision + claudeAuth.revision }),
   });
   await service.agents();
@@ -259,6 +261,58 @@ jira.command('rule <project>').description('Save which tickets may become tasks;
     print(await request(integrationPath(await pid(project), opts.preview ? '/jira/preview' : '/jira/rule'), opts.preview ? 'POST' : 'PUT', rule));
   });
 jira.command('check <project>').description('Ask Jira whether the saved token still works').action(async (project: string) => print(await request(integrationPath(await pid(project), '/jira/check'), 'POST', {})));
+// Ticket tools reached through their MCP server: added once, then used by projects.
+const toolRef = async (ref: string): Promise<string> => {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(ref)) return ref;
+  const { trackers } = await request('/trackers') as { trackers: { id: string; name: string }[] };
+  const found = trackers.filter(t => t.name.toLowerCase() === ref.toLowerCase());
+  if (found.length !== 1) throw new AppError('tracker_not_found', `No tool named "${ref}". List them with: devagents tools list`, 404);
+  return found[0]!.id;
+};
+const tools = cli.command('tools').description('Ticket tools with an MCP server (any Jira-like tool). Add one once, then connect projects to it. Stores and checks configuration; no task is created');
+tools.command('list').description('Added tools, their state and the projects that use them').action(async () => print(await request('/trackers')));
+tools.command('add <name> <url>').description('Sign in to a tool\'s MCP server and show its tools with a proposed mapping')
+  .option('--token-env <name>', 'Read the token from this environment variable instead of the hidden prompt')
+  .action(async (name: string, url: string, opts: { tokenEnv?: string }) => {
+    const token = await integrationToken(`the token for ${name}`, opts);
+    print(await request('/trackers', 'POST', { name, url, ...(token ? { token } : {}) }));
+  });
+tools.command('show <tool>').description('One tool with its saved mapping').action(async (tool: string) => print(await request(`/trackers/${await toolRef(tool)}`)));
+tools.command('inspect <tool>').description('The server\'s tools, the outline of the ticket list answer and a proposed mapping').action(async (tool: string) => print(await request(`/trackers/${await toolRef(tool)}/inspect`)));
+tools.command('map <tool>').description('Save the mapping: which tool lists tickets and where the ticket fields are')
+  .option('--suggested', 'Save the mapping DevAgents proposes')
+  .option('--file <path>', 'Save the mapping from a JSON file, in the shape "inspect" prints as suggestion')
+  .action(async (tool: string, opts: { suggested?: boolean; file?: string }) => {
+    const id = await toolRef(tool);
+    if (Boolean(opts.suggested) === Boolean(opts.file)) throw new AppError('invalid_options', 'Pass either --suggested or --file <path>');
+    const mapping = opts.file ? JSON.parse(await readFile(opts.file, 'utf8')) as unknown : (await request(`/trackers/${id}/inspect`) as { suggestion?: unknown; note?: string }).suggestion;
+    if (!mapping) throw new AppError('no_suggestion', 'DevAgents could not propose a mapping for this tool. Write one and pass it with --file; "tools inspect" shows the tools and fields.', 422);
+    print(await request(`/trackers/${id}/mapping`, 'PUT', mapping));
+  });
+tools.command('rename <tool> <name>').description('Change the name shown for a tool').action(async (tool: string, name: string) => print(await request(`/trackers/${await toolRef(tool)}`, 'PUT', { name })));
+tools.command('address <tool> <url>').description('Change the MCP address of a tool; DevAgents signs in there first, with the saved token').action(async (tool: string, url: string) => print(await request(`/trackers/${await toolRef(tool)}`, 'PUT', { url })));
+tools.command('token <tool>').description('Replace the saved token; it is verified first')
+  .option('--token-env <name>', 'Read the token from this environment variable instead of the hidden prompt')
+  .action(async (tool: string, opts: { tokenEnv?: string }) => print(await request(`/trackers/${await toolRef(tool)}`, 'PUT', { token: await integrationToken('the new token', opts) })));
+tools.command('check <tool>').description('Ask the tool whether the saved token and mapping still work').action(async (tool: string) => print(await request(`/trackers/${await toolRef(tool)}/check`, 'POST', {})));
+tools.command('remove <tool>').description('Remove a tool and forget its token; refused while a project uses it').action(async (tool: string) => print(await request(`/trackers/${await toolRef(tool)}`, 'DELETE')));
+const tracker = integrations.command('tool').description('Connect a project to added ticket tools and say which tickets may become tasks. A project can use several tools');
+const toolPath = async (project: string, tool: string, rest = '') => integrationPath(await pid(project), `/trackers/${await toolRef(tool)}${rest}`);
+tracker.command('list <project>').description('The tools this project uses, with their rules, and every added tool').action(async (project: string) => print(await request(integrationPath(await pid(project), '/trackers'))));
+tracker.command('connect <project> <tool>').description('Use an added tool for this project; its address and token are already saved').action(async (project: string, tool: string) => print(await request(await toolPath(project, tool), 'PUT', {})));
+tracker.command('options <project> <tool>').description('Projects, columns, people and labels a rule can name').action(async (project: string, tool: string) => print(await request(await toolPath(project, tool, '/options'))));
+tracker.command('rule <project> <tool>').description('Save which tickets may become tasks; at least one of --column, --assignee, --label')
+  .option('--project <name-or-id>', 'Project in the tool')
+  .option('--column <name>', 'Board column')
+  .option('--assignee <name-or-id>', 'Person the tickets are assigned to')
+  .option('--label <label>', 'Label on the ticket')
+  .addOption(new Option('--start <mode>', 'manual: wait until someone starts it; auto: start on its own').choices(['manual', 'auto']).default('manual'))
+  .option('--preview', 'Only show what the rule matches now; save nothing')
+  .action(async (project: string, tool: string, opts: { project?: string; column?: string; assignee?: string; label?: string; start: string; preview?: boolean }) => {
+    const rule = { start: opts.start, ...(opts.project ? { project: opts.project } : {}), ...(opts.column ? { column: opts.column } : {}), ...(opts.assignee ? { assignee: opts.assignee } : {}), ...(opts.label ? { label: opts.label } : {}) };
+    print(await request(await toolPath(project, tool, opts.preview ? '/preview' : '/rule'), opts.preview ? 'POST' : 'PUT', rule));
+  });
+tracker.command('disconnect <project> <tool>').description('Stop using one tool for this project; the tool itself stays').action(async (project: string, tool: string) => print(await request(await toolPath(project, tool), 'DELETE')));
 jira.command('disconnect <project>').description('Forget this project\'s connection and rule; the token is forgotten once no project uses it').action(async (project: string) => print(await request(integrationPath(await pid(project), '/jira'), 'DELETE')));
 const teams = cli.command('teams').description('Saved teams: named rosters copied from templates or custom roles');
 teams.command('list').option('--archived', 'Only archived teams').option('--all', 'Active and archived teams').action(async (opts: { archived?: boolean; all?: boolean }) => print(await request(`/teams?filter=${opts.all ? 'all' : opts.archived ? 'archived' : 'active'}`)));

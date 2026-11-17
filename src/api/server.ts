@@ -14,6 +14,7 @@ import { BrowserSessions, SESSION_COOKIE, parseCookies, sessionCookie, clearedSe
 import { securityHeaders, serveUi } from './static.js';
 import { evidenceMetadata } from './evidence.js';
 import type { ProjectIntegrationService } from '../integrations/service.js';
+import type { TrackerService } from '../integrations/trackers.js';
 
 export async function accessToken(dataDir: string): Promise<string> {
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
@@ -66,6 +67,8 @@ export type ApiOptions = {
   publicPort?: number | undefined;
   /** Per-project GitHub and Jira connections; absent on services that do not configure a secret store. */
   integrations?: ProjectIntegrationService;
+  /** Ticket tools reached through their MCP server. */
+  trackers?: TrackerService;
   /** Host header values that may carry a browser session; defaults to loopback names on the public port. */
   allowedHosts?: (port: number) => string[];
 };
@@ -186,6 +189,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
         const project = await service.setProjectArchived(projectArchive[1]!, change.archived, change.expectedVersion);
         // An archived project holds no connections; a token goes only when no other project uses it.
         if (change.archived && options.integrations) for (const kind of ['github', 'jira'] as const) await options.integrations.disconnect(project.id, kind);
+        if (change.archived && options.trackers) await options.trackers.disconnect(project.id);
         return send(res, 200, service.store.project(project.id));
       }
       if (req.method === 'POST' && path === '/projects') {
@@ -200,6 +204,32 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       if (req.method === 'PUT' && projectDefault) {
         const change = z.strictObject({ teamId: TeamId.nullable(), expectedVersion: z.number().int().nonnegative() }).parse(await body(req));
         return send(res, 200, service.setProjectDefaultTeam(projectDefault[1]!, change.teamId, change.expectedVersion));
+      }
+      // Ticket tools: added once by their MCP address, then used by projects. Tokens are write-only here too.
+      const trackerRoute = /^\/trackers(?:\/([0-9a-f-]{36})(?:\/(inspect|mapping|check))?)?$/.exec(path);
+      const projectTracker = /^\/projects\/([a-z0-9][a-z0-9-]{0,63})\/integrations\/trackers(?:\/([0-9a-f-]{36})(?:\/(options|preview|rule))?)?$/.exec(path);
+      if (trackerRoute || projectTracker) {
+        const trackers = options.trackers;
+        if (!trackers) throw new AppError('integrations_unavailable', 'Integrations are not enabled on this service.', 503);
+        if (trackerRoute) {
+          const [, id, action] = trackerRoute;
+          if (!id && req.method === 'GET') return send(res, 200, await trackers.list());
+          if (!id && req.method === 'POST') return send(res, 201, await trackers.add(await body(req, 16384)));
+          if (id && !action && req.method === 'GET') return send(res, 200, await trackers.show(id));
+          if (id && !action && req.method === 'PUT') return send(res, 200, await trackers.update(id, await body(req, 16384)));
+          if (id && !action && req.method === 'DELETE') return send(res, 200, await trackers.remove(id));
+          if (id && action === 'inspect' && req.method === 'GET') return send(res, 200, await trackers.inspect(id));
+          if (id && action === 'mapping' && req.method === 'PUT') return send(res, 200, await trackers.setMapping(id, await body(req, 65536)));
+          if (id && action === 'check' && req.method === 'POST') return send(res, 200, await trackers.check(id));
+        } else if (projectTracker) {
+          const [, id, tool, action] = projectTracker as unknown as [string, string, string | undefined, string | undefined];
+          if (!tool && req.method === 'GET') return send(res, 200, await trackers.projectView(id));
+          if (tool && !action && req.method === 'PUT') return send(res, 200, await trackers.connect(id, tool));
+          if (tool && !action && req.method === 'DELETE') return send(res, 200, await trackers.disconnect(id, tool));
+          if (tool && action === 'options' && req.method === 'GET') return send(res, 200, await trackers.choices(id, tool));
+          if (tool && action === 'preview' && req.method === 'POST') return send(res, 200, await trackers.preview(id, tool, await body(req, 16384)));
+          if (tool && action === 'rule' && req.method === 'PUT') return send(res, 200, await trackers.saveRule(id, tool, await body(req, 16384)));
+        }
       }
       // Project integrations: tokens are write-only; responses carry settings and the last check, never a secret.
       const integration = /^\/projects\/([a-z0-9][a-z0-9-]{0,63})\/integrations(?:\/(github|jira)(?:\/(check|options|columns|suggest|preview|rule))?)?$/.exec(path);

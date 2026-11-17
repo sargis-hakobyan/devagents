@@ -468,3 +468,18 @@ The owner was signed out after the laptop slept overnight (12 hours idle, 24 hou
 - **Bounded.** The 20 most recent sessions are kept.
 - **Unchanged:** sessions are still created only from a single-use code minted through the CLI, the cookie stays `HttpOnly; SameSite=Strict`, and the loopback-host, same-origin and CSRF checks apply to every request.
 
+## Third-party ticket tools connect through MCP with a confirmed mapping — 2026-11-17
+
+The owner wants DevAgents to connect to any Jira-like tool, with the in-house board of the owner's employer as the first example, and decided after comparing REST and MCP: go with MCP, and build it generally, not for one tool. Delivered: configuration only, at the level of the Jira connection (add, check, map, connect a project, save and preview a pick-up rule), in the browser and the terminal.
+
+- **A tool is added once and shared by projects.** Address, token and mapping belong to the tool; a project holds only a reference and its own rule. This follows the earlier decision that a token is saved once, not per project.
+- **No tool-specific code.** A mapping names the list tool, its filter arguments, and the paths of tickets and ticket fields in the answer. DevAgents proposes it from the server's tool list and one answer, and the user confirms it. Nothing about the first example tool is in the repository; tests use a made-up tool (`scripts/fake-tracker.mjs`).
+- **Deterministic, no model involved.** DevAgents calls the MCP tools itself and reads structured answers. A server that answers only with prose is refused.
+- **A token as bearer first.** Browser sign-in (OAuth) is not built; it is needed before servers that accept nothing else can be added.
+- **Filters fall back to DevAgents.** A rule value the server cannot filter by is checked on the returned tickets when the ticket field is mapped, and refused otherwise.
+- **Jira and GitHub stay as built.** They are not converted to tools.
+- **A project can use several tools,** next to the optional Jira connection, each with its own rule. Owner decision of 2026-11-17, replacing Claude's first build of one tool per project. A tool that is already added is chosen from a list; its address and token are not entered again.
+- **Plain http only for a tool on this computer** (`localhost`, loopback addresses, `host.docker.internal`); every other host needs https. Owner decision of 2026-11-17: a local tool is fine over http, staging and production are not.
+- **A token is enough for the first tool.** Its MCP route accepts a personal key as a bearer token, so browser sign-in is not needed to integrate it.
+- **The setup a user sees is seven ticket fields.** The first build showed the whole mapping as a form; the owner found it too much and asked for only what brings a ticket in: status, project, assignee, label, plus the ticket number and link. Board `design/ui/U9-Tools.dc.html` (2026-11-17) shows those with the title, which Claude kept because a ticket cannot be shown or named without it. The rest of the mapping is filled in automatically and folded away. Each row shows the value from one real ticket, returned by the inspection for the signed-in owner only.
+
