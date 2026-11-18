@@ -41,6 +41,7 @@ import { ProjectIntegrationService } from '../integrations/service.js';
 import { PullRequestService } from '../integrations/pull-requests.js';
 import { TrackerService } from '../integrations/trackers.js';
 import { downloadTicketFiles } from '../integrations/ticket-files.js';
+import { assignStartedTicket } from '../integrations/tickets.js';
 
 const print = (data: unknown) => console.log(JSON.stringify(redactValues(data, environmentSecrets()), null, 2));
 const port = () => z.coerce.number().int().min(1).max(65535).parse(process.env.DEVAGENTS_PORT ?? 4310);
@@ -87,7 +88,8 @@ cli.command('serve').description('Start the local API').action(async () => {
   const integrations = new ProjectIntegrationService(store, secretStore); const trackers = new TrackerService(store, secretStore);
   // A task keeps the pull request choices of its project; finished tasks of projects that publish on their own are picked up below.
   const pullRequests = new PullRequestService(store, secretStore);
-  service.onSubmitted(task => pullRequests.freeze(task.id, task.projectId));
+  // A task started from a ticket also takes the ticket: it is assigned to the account the connection uses.
+  service.onSubmitted(task => { pullRequests.freeze(task.id, task.projectId); if (!store.lastEvidence(task.id, 'ticket-assigned') && !store.lastEvidence(task.id, 'ticket-assign-failed')) void assignStartedTicket({ integrations, trackers }, task, (kind, data) => store.record(task.id, kind, data)); });
   pullRequests.attachRounds((input, key, followUp) => service.submit(input, key, followUp));
   service.onStart(task => pullRequests.startCommit(task));
   // A task started from a ticket takes the ticket's pictures and short text files with it while it works.

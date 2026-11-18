@@ -20,6 +20,7 @@ import { ProjectIntegrationService } from '../dist/integrations/service.js';
 import { PullRequestService } from '../dist/integrations/pull-requests.js';
 import { TrackerService } from '../dist/integrations/trackers.js';
 import { downloadTicketFiles } from '../dist/integrations/ticket-files.js';
+import { assignStartedTicket } from '../dist/integrations/tickets.js';
 import { ModelCatalogService } from '../dist/engines/model-catalog.js';
 import { fakeTracker } from './fake-tracker.mjs';
 
@@ -155,7 +156,7 @@ const integrations = new ProjectIntegrationService(store, fixtureSecrets, { fetc
 const fixturePulls = []; let fixtureReading; const fixtureGitHub = join(root, 'github-remote.git');
 execFileSync('git', ['init', '-q', '--bare', fixtureGitHub]);
 const pullRequests = new PullRequestService(store, fixtureSecrets, { fetch: fixtureRemote, githubApiUrl: 'https://github.fixture.invalid', remoteUrl: () => fixtureGitHub });
-service.onSubmitted(task => pullRequests.freeze(task.id, task.projectId));
+service.onSubmitted(task => { pullRequests.freeze(task.id, task.projectId); if (!store.lastEvidence(task.id, 'ticket-assigned') && !store.lastEvidence(task.id, 'ticket-assign-failed')) void assignStartedTicket({ integrations, trackers }, task, (kind, data) => store.record(task.id, kind, data)); });
 pullRequests.attachRounds((input, key, followUp) => service.submit(input, key, followUp));
 service.onStart(task => pullRequests.startCommit(task));
 // The fixture's GitHub starts with the website project's main, so a connected project has a target branch to start from.

@@ -43,6 +43,20 @@ function authorization(access: JiraAccess): string {
 async function call(fetcher: Fetch, access: JiraAccess, url: string, body?: unknown): Promise<RemoteResponse> {
   return remote(fetcher, 'Jira', url, { headers: { authorization: authorization(access) }, ...(body === undefined ? {} : { method: 'POST', body }) });
 }
+/**
+ * Assigns a ticket to the account the token belongs to. The only thing DevAgents writes to Jira; it
+ * needs a token that may edit issues (scope `write:jira-work` for a scoped token).
+ */
+export async function jiraAssignSelf(fetcher: Fetch, access: JiraAccess, key: string): Promise<string> {
+  const me = record(ok(await call(fetcher, access, `${roots(access).api}/myself`), access, 'read the account'));
+  const id = text(access.kind === 'cloud' ? me.accountId : me.name, 200);
+  if (!id) throw new AppError('assign_unavailable', 'Jira did not say which account this token belongs to, so the ticket was not assigned.', 422);
+  const response = await remote(fetcher, 'Jira', `${roots(access).api}/issue/${encodeURIComponent(key)}/assignee`, { method: 'PUT', headers: { authorization: authorization(access) }, body: access.kind === 'cloud' ? { accountId: id } : { name: id } });
+  if (response.status === 401) throw rejected(access);
+  if (response.status === 403) throw new AppError('not_reachable', `This account may not assign ${key} in Jira. The token needs permission to edit issues${access.gateway ? ' (scope write:jira-work)' : ''}.`, 422);
+  if (response.status !== 204 && response.status !== 200) throw new AppError('jira_refused', `Jira could not assign ${key} (${response.status}).`, 422);
+  return text(me.displayName, 120) || id;
+}
 function rejected(access: JiraAccess): AppError {
   return new AppError('token_rejected', access.kind === 'cloud'
     ? 'Jira did not accept this email and token. The token may be mistyped, expired or revoked, or it belongs to another account.'

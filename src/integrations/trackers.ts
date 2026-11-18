@@ -7,7 +7,7 @@ import type { Store } from '../persistence/store.js';
 import type { SecretStore } from '../security/secret-store.js';
 import type { Fetch } from './http.js';
 import { McpSession, normalizeMcpUrl, type McpTool } from './mcp.js';
-import { at, choice, listArguments, matches, options, sampleOf, shapeOf, suggestColumns, suggestFields, suggestList, suggestRead, ticketContent, tickets, unfilterable, type AnswerShape, type Choice, type RuleParts, type TicketSample, type TrackerOptions } from './tracker-mapping.js';
+import { at, choice, listArguments, matches, options, sampleOf, shapeOf, suggestColumns, suggestFields, suggestList, suggestAssign, suggestRead, ticketContent, tickets, unfilterable, type AnswerShape, type Choice, type RuleParts, type TicketSample, type TrackerOptions } from './tracker-mapping.js';
 
 export type TrackerView = Omit<Tracker, 'savedToken'> & {
   state: ConnectionState; /** False until a mapping is saved; a project can only use a mapped tool. */ mapped: boolean;
@@ -264,6 +264,20 @@ export class TrackerService {
     const content = ticketContent(mapping, await session.call(read.tool, { [read.key]: wanted }));
     if (!content) throw new AppError('ticket_unreadable', `${read.tool} of ${tracker.name} did not answer with a ticket for ${wanted}.`, 422);
     return { name: tracker.name, content };
+  }
+  /**
+   * Assigns a ticket to the account the tool was connected with, so the board of that tool shows who
+   * took it. The only thing DevAgents writes to a ticket tool.
+   */
+  async assign(projectId: string, trackerId: string, key: string): Promise<{ name: string; to: string }> {
+    const wanted = TicketKey.parse(key); const { tracker, mapping, session } = await this.load(projectId, trackerId);
+    // The account is saved as "Name (id)", or as the id alone.
+    const to = /\(([^()]+)\)$/.exec(tracker.account ?? '')?.[1] ?? tracker.account;
+    if (!to) throw new AppError('assign_unavailable', `${tracker.name} did not say which account DevAgents uses, so the ticket was not assigned.`, 422);
+    const assign = mapping.assign ?? suggestAssign(await session.tools());
+    if (!assign) throw new AppError('assign_unavailable', `${tracker.name} offers no tool that sets a ticket's assignee.`, 422);
+    await session.call(assign.tool, { [assign.key]: wanted, [assign.assignee]: to, ...(assign.operation ? { [assign.operation]: randomUUID() } : {}) });
+    return { name: tracker.name, to: tracker.account! };
   }
   /** The address and token a file of a ticket is fetched with. Files are only fetched from the tool's own host. */
   async fileAccess(trackerId: string): Promise<{ name: string; origins: string[]; authorization: string; fetch: Fetch }> {

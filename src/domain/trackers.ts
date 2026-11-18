@@ -34,6 +34,8 @@ export const TrackerMapping = z.strictObject({
   columns: z.array(z.string().min(1).max(100)).max(100).default([]),
   /** The tool that returns one ticket with its text, comments and files, and the argument that takes the ticket number. Left out, DevAgents looks for it on the server. */
   read: z.strictObject({ tool: Identifier, key: Identifier }).optional(),
+  /** The tool that changes a ticket's assignee, with the arguments for the ticket number and the person, and for a request id where the tool wants one. Left out, DevAgents looks for it on the server. */
+  assign: z.strictObject({ tool: Identifier, key: Identifier, assignee: Identifier, operation: Identifier.optional() }).optional(),
 });
 export type TrackerMapping = z.infer<typeof TrackerMapping>;
 

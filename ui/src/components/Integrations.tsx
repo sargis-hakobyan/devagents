@@ -288,7 +288,7 @@ function JiraPanel({ projectId, view, onChange }: { projectId: string; view: Int
         <div><i>1</i><span>Open <span class="mono">id.atlassian.com</span>, then <b>Security → API tokens</b>.</span></div>
         <div><i>2</i><span><b>Create API token</b>, name it "DevAgents" and choose when it expires. One year is the longest.</span></div>
         <div><i>3</i><span>Copy it and paste it here. Atlassian shows it only once.</span></div>
-      </div><p class="hint" style={{ margin: '8px 0 0' }}>If you create a token "with scopes", choose the app <b>Jira</b> and the scopes <span class="mono">read:jira-work</span> and <span class="mono">read:jira-user</span>. The plain token needs no choices.</p></>
+      </div><p class="hint" style={{ margin: '8px 0 0' }}>If you create a token "with scopes", choose the app <b>Jira</b> and the scopes <span class="mono">read:jira-work</span> and <span class="mono">read:jira-user</span>, and <span class="mono">write:jira-work</span> so a started ticket can be assigned to you. The plain token needs no choices.</p></>
         : <div class="integ-how" style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}><div><i>1</i><span>In Jira, open your <b>Profile → Personal access tokens</b>, create a token named "DevAgents" and paste it here.</span></div></div>}
     </div>}
   </section>;

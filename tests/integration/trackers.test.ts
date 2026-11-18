@@ -1,4 +1,9 @@
 import test from 'node:test';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { assignStartedTicket } from '../../src/integrations/tickets.js';
+import { suggestAssign } from '../../src/integrations/tracker-mapping.js';
+import { McpSession } from '../../src/integrations/mcp.js';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { execFileSync } from 'node:child_process';
@@ -9,7 +14,7 @@ import { fixture } from '../helpers.js';
 
 type Call = { url: string; authorization?: string; method?: string; params?: { name?: string; arguments?: Record<string, unknown> }; redirect?: string };
 type Fake = { fetcher: typeof fetch; calls: Call[] };
-const fake = await import('../../scripts/fake-tracker.mjs' as string) as { FAKE_TRACKER_URL: string; FAKE_TRACKER_TOKEN: string; fakeTracker(state?: { revoked?: boolean; events?: boolean; limited?: boolean }): Fake };
+const fake = await import('../../scripts/fake-tracker.mjs' as string) as { FAKE_TRACKER_URL: string; FAKE_TRACKER_TOKEN: string; fakeTracker(state?: { revoked?: boolean; events?: boolean; limited?: boolean; updates?: Record<string, unknown>[] }): Fake };
 const { FAKE_TRACKER_URL: URL_, FAKE_TRACKER_TOKEN: TOKEN } = fake;
 
 function memorySecrets(): SecretStore & { values: Map<string, string> } {
@@ -23,7 +28,7 @@ const MAPPING = {
   columns: ['backlog', 'todo', 'ready-for-development', 'in-progress', 'done'],
   read: { tool: 'tracker_get_task', key: 'taskId' },
 };
-async function serve(options: { secrets?: SecretStore; state?: { revoked?: boolean; events?: boolean; limited?: boolean } } = {}) {
+async function serve(options: { secrets?: SecretStore; state?: { revoked?: boolean; events?: boolean; limited?: boolean; updates?: Record<string, unknown>[] } } = {}) {
   const f = await fixture(); const secrets = options.secrets ?? memorySecrets(); const state = options.state ?? {}; const { fetcher, calls } = fake.fakeTracker(state);
   const trackers = new TrackerService(f.store, secrets, { fetch: fetcher, now: () => new Date('2026-11-17T12:00:00Z') });
   const server = createApi(f.service, 'test-token', { trackers });
@@ -42,7 +47,7 @@ async function serve(options: { secrets?: SecretStore; state?: { revoked?: boole
     assert.equal((await call(`/trackers/${id}/mapping`, 'PUT', inspection.data.suggestion)).status, 200);
     return id;
   };
-  return { f, root, secrets, state, calls, call, added, project: '/projects/fixture/integrations/trackers', close: async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await f.cleanup(); } };
+  return { f, root, secrets, state, calls, call, added, trackers, project: '/projects/fixture/integrations/trackers', close: async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await f.cleanup(); } };
 }
 
 test('a tool is added by its MCP address: the token is verified, kept out of every response and sent only to that address', async () => {
@@ -237,6 +242,18 @@ test('a project uses several tools, each with its own rule, and a tool added onc
     assert.equal(available.data.tickets[0].url, 'https://tracker.fixture.invalid/board?task=FX-1'); assert.equal(available.data.tickets[0].title, 'Add a contact form');
     await s.f.service.submit({ projectId: 'fixture', request: 'FX-2: Fix the footer links\n\nTicket: https://tracker.fixture.invalid/board?task=FX-2' }, 'available-start');
     assert.deepEqual((await s.call('/tickets/available')).data.tickets.map((t: { key: string }) => t.key), ['FX-1', 'FX-3', 'FX-5'], 'a ticket named by a task of the project is started');
+    // Put back on the board: once the task was cancelled, or its pull request was closed without merging, the ticket can be started again.
+    const started = s.f.store.summaries({ projectId: 'fixture' }).tasks.find(t => t.request.startsWith('FX-2'))!;
+    const raw = new DatabaseSync(join(s.f.dataDir, 'test.db')); const stored = JSON.parse(String(raw.prepare('SELECT data FROM tasks WHERE id=?').get(started.id)!.data));
+    const set = (state: string) => raw.prepare('UPDATE tasks SET state=?, data=? WHERE id=?').run(state, JSON.stringify({ ...stored, state }), started.id);
+    const keys = async () => (await s.call('/tickets/available')).data.tickets.map((t: { key: string }) => t.key);
+    set('cancelled'); assert.deepEqual(await keys(), ['FX-1', 'FX-2', 'FX-3', 'FX-5']);
+    set('completed'); assert.deepEqual(await keys(), ['FX-1', 'FX-3', 'FX-5'], 'a finished task keeps its ticket');
+    const pull = { number: 7, base: 'main', draft: false, headSha: 'a'.repeat(40), mergeable: 'unknown' as const, checks: [], comments: [] };
+    s.f.store.savePullRequest(started.id, { ...pull, state: 'open', status: { code: 'ready', text: 'ready to merge' } }); assert.deepEqual(await keys(), ['FX-1', 'FX-3', 'FX-5']);
+    s.f.store.savePullRequest(started.id, { ...pull, state: 'closed', status: { code: 'closed', text: 'closed without merging' } }); assert.deepEqual(await keys(), ['FX-1', 'FX-2', 'FX-3', 'FX-5']);
+    s.f.store.savePullRequest(started.id, { ...pull, state: 'merged', status: { code: 'merged', text: 'merged into main' } }); assert.deepEqual(await keys(), ['FX-1', 'FX-3', 'FX-5']);
+    raw.close();
     // A source that cannot be read is reported and does not hide the others.
     s.state.revoked = true;
     const broken = await s.call('/tickets/available');
@@ -292,5 +309,23 @@ test('a ticket is read with its text, comments and file names, and a task starte
     assert.deepEqual((await s.call('/tickets/available')).data.tickets.map((t: { key: string; source: { id: string } }) => `${t.source.id === board}/${t.key}`), ['true/FX-2', 'true/FX-3']);
     assert.throws(() => s.f.service.submit({ projectId: 'fixture', request: 'x', ticket: { source: 'jira', key: 'WEB-1' } }, 'no-jira'), /Jira is not connected/);
     assert.throws(() => s.f.service.submit({ projectId: 'fixture', request: 'x', ticket: { source: '11111111-1111-4111-8111-111111111111', key: 'FX-1' } }, 'no-tool'), /not connected for this project/);
+  } finally { await s.close(); }
+});
+
+test('starting a ticket assigns it to the account the tool is connected with, and a failure is recorded without stopping anything', async () => {
+  const s = await serve();
+  try {
+    const id = await s.added(); await s.call(`${s.project}/${id}`, 'PUT', {});
+    assert.deepEqual(suggestAssign(await new McpSession(fake.fakeTracker().fetcher as typeof fetch, { name: 'Fixture Tracker', url: URL_, token: TOKEN }).tools()), { tool: 'tracker_update_task', key: 'taskId', assignee: 'assignee', operation: 'operationId' });
+    const notes: [string, any][] = []; const note = (kind: string, data: unknown) => { notes.push([kind, data]); };
+    await assignStartedTicket({ trackers: s.trackers }, { id: 't', projectId: 'fixture', ticket: { source: id, key: 'FX-1' } }, note);
+    assert.deepEqual(notes, [['ticket-assigned', { ticket: 'FX-1', source: 'Fixture Tracker', to: 'agents@example.com' }]]);
+    const [update] = s.state.updates!;
+    assert.equal(update!.taskId, 'FX-1'); assert.equal(update!.assignee, 'agents@example.com'); assert.match(String(update!.operationId), /^[0-9a-f-]{36}$/);
+    assert.deepEqual(Object.keys(update!).sort(), ['assignee', 'operationId', 'taskId'], 'nothing else on the ticket is changed');
+    await assignStartedTicket({ trackers: s.trackers }, { id: 't', projectId: 'fixture', ticket: { source: id, key: 'NOPE-1' } }, note);
+    assert.equal(notes[1]![0], 'ticket-assign-failed'); assert.match(notes[1]![1].message, /was not found/);
+    await assignStartedTicket({ trackers: s.trackers }, { id: 't', projectId: 'fixture' }, note);
+    assert.equal(notes.length, 2, 'a task without a ticket assigns nothing');
   } finally { await s.close(); }
 });

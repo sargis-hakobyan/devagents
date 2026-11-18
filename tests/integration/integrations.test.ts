@@ -7,6 +7,7 @@ import { ProjectIntegrationService } from '../../src/integrations/service.js';
 import { EnvironmentSecretStore, type SecretStore } from '../../src/security/secret-store.js';
 import { fixture } from '../helpers.js';
 import { downloadTicketFiles } from '../../src/integrations/ticket-files.js';
+import { assignStartedTicket } from '../../src/integrations/tickets.js';
 
 const GITHUB_TOKEN = `github_pat_${'Fixture1'.repeat(6)}`;
 const NEWER_GITHUB_TOKEN = `github_pat_${'Fixture2'.repeat(6)}`;
@@ -21,7 +22,7 @@ function memorySecrets(): SecretStore & { values: Map<string, string> } {
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', ...headers } });
 /** A deterministic GitHub and Jira. Every request is recorded so tests can assert what was sent where. */
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
-function remotes(state: { githubRevoked?: boolean } = {}) {
+function remotes(state: { githubRevoked?: boolean; readOnly?: boolean } = {}) {
   const calls: { url: string; authorization: string | undefined; body: unknown }[] = [];
   const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input); const headers = init?.headers as Record<string, string>; const authorization = headers.authorization;
@@ -66,6 +67,7 @@ function remotes(state: { githubRevoked?: boolean } = {}) {
     if (path === '/api/search') return json({ total: 1, issues: [{ key: 'OPS-4' }] });
     if (path === '/api/attachment/content/10001') return new Response(null, { status: 303, headers: { location: 'https://media.fixture.invalid/file/10001?token=signed' } });
     if (path === '/api/attachment/content/10002') return new Response('Three fields.\n', { status: 200, headers: { 'content-type': 'text/plain' } });
+    if (path === '/api/issue/WEB-12/assignee' && init?.method === 'PUT') return state.readOnly ? json({}, 403) : new Response(null, { status: 204 });
     if (path.startsWith('/api/issue/WEB-12?')) return json({ key: 'WEB-12', fields: {
       summary: 'Add a contact form',
       description: { type: 'doc', content: [
@@ -82,7 +84,7 @@ function remotes(state: { githubRevoked?: boolean } = {}) {
   }) as typeof fetch;
   return { fetcher, calls };
 }
-async function serve(options: { secrets?: SecretStore; state?: { githubRevoked?: boolean }; origin?: boolean } = {}) {
+async function serve(options: { secrets?: SecretStore; state?: { githubRevoked?: boolean; readOnly?: boolean }; origin?: boolean } = {}) {
   const f = await fixture(); const secrets = options.secrets ?? memorySecrets(); const { fetcher, calls } = remotes(options.state);
   if (options.origin !== false) execFileSync('git', ['-C', f.project, 'remote', 'add', 'origin', 'git@github.com:example-org/website.git']);
   let now = new Date('2026-11-13T12:00:00Z');
@@ -365,5 +367,20 @@ test('Jira: matching tickets are available, a started one leaves, and its files 
     assert.match((await s.f.service.ticketMaterial(task.id)).text, /--- notes\.txt ---\nThree fields\.\n--- end of notes\.txt ---/);
     assert.deepEqual((JSON.parse((await get('/tickets/available')).bytes.toString()) as typeof available).tickets.map(t => t.key), ['WEB-15', 'WEB-21'], 'the started ticket is no longer available');
     assert.ok(s.calls.filter(c => c.url.includes('media.fixture.invalid')).every(c => c.authorization === undefined));
+  } finally { await s.close(); }
+});
+
+test('starting a Jira ticket assigns it to the account of the token; a read-only token is reported, not fatal', async () => {
+  const state: { readOnly?: boolean } = {}; const s = await serve({ state });
+  try {
+    assert.equal((await s.call('/jira', 'PUT', { kind: 'cloud', site: 'example.atlassian.net', email: 'agents@example.com', token: JIRA_TOKEN })).status, 200);
+    const notes: [string, any][] = []; const note = (kind: string, data: unknown) => { notes.push([kind, data]); };
+    await assignStartedTicket({ integrations: s.integrations }, { id: 't', projectId: 'fixture', ticket: { source: 'jira', key: 'web-12' } }, note);
+    assert.deepEqual(notes, [['ticket-assigned', { ticket: 'web-12', source: 'Jira', to: 'DevAgents Bot' }]]);
+    const put = s.calls.find(c => c.url.endsWith('/issue/WEB-12/assignee'))!;
+    assert.deepEqual(put.body, { accountId: 'acc-bot' }, 'assigned to the token\'s own account, by its id');
+    state.readOnly = true;
+    await assignStartedTicket({ integrations: s.integrations }, { id: 't', projectId: 'fixture', ticket: { source: 'jira', key: 'WEB-12' } }, note);
+    assert.equal(notes[1]![0], 'ticket-assign-failed'); assert.match(notes[1]![1].message, /may not assign WEB-12/);
   } finally { await s.close(); }
 });

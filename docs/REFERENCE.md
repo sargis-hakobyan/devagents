@@ -380,7 +380,7 @@ The Tasks page (`/ui/tasks`) opens as a board; a **Board / List** switch keeps t
 - **The pin** in the corner of Available keeps the column open. Unpinned, it folds to a strip that opens over the board while the pointer or the keyboard focus is on it; Escape closes it.
 - **Dragging a ticket into Planning** (or pressing its **Start task** button) reads the full ticket and submits it immediately, staying on the board. It inherits the project’s default team and effective autonomy mode; if no mode is configured, it uses plan approval. The column shows “Starting…” until the service responds, then the task’s actual state. Ticket-read failures leave the ticket available. An uncertain submission offers a same-key, same-payload retry that survives reload; resolve it before starting another ticket. Other columns do not accept drops.
 - **Clicking a ticket** opens the Submit work form with everything preselected: the request, the project's default team and its usual autonomy mode. The request, team and mode can be changed. The project is shown but not offered as a choice, because the ticket's rule belongs to that project. Nothing starts until the form is submitted.
-- **A ticket counts as started** when a task of the same project was started from it. Tasks from before tasks recorded their ticket are recognised by the ticket number in their request.
+- **A ticket counts as started** while a task of the same project that was started from it is waiting, working or completed. It is available again when that task failed or was cancelled, or when its pull request was closed without merging, so a ticket you put back on the board can be started again. Tasks from before tasks recorded their ticket are recognised by the ticket number in their request.
 
 `GET /tickets/available` returns `{ tickets, problems, checkedAt }`; a source that cannot be read is listed under `problems` and does not hide the others. At most 50 tickets per source are read. The board asks once a minute. Terminal: `devagents tickets`.
 
@@ -400,6 +400,12 @@ The ticket stays the source of truth. A task started from one keeps the text it 
 `GET /tickets/content?projectId=…&source=…&key=…` returns `{ ticket, request }` for one ticket; `source` is `jira` or the ID of a ticket tool the project uses. Terminal: `devagents ticket <project> <jira|tool name> <number>`. `POST /tasks` takes an optional `ticket: { source, key, url?, readAt? }`; the source must be connected for the project.
 
 For a ticket tool, the single ticket is read with the server's "get one ticket" tool. DevAgents finds it by name, and the mapping can name it (`read: { tool, key }`; "Reading one ticket" under "How the tool is called"). In its answer the number, title and link are where the mapping says; the description, comments and files are read from their usual field names (`description`, `comments` with `body`/`by`/`createdAt`, `attachments` with `name`/`type`/`size`/`url`).
+
+**The ticket is assigned when the task starts.** A task started from a Jira ticket or from a ticket tool assigns that ticket to the account the project's connection uses: in Jira the account the token belongs to, in a ticket tool the account the tool reports for the token. This is the only change DevAgents makes to a ticket; its status, text and comments are not touched.
+
+- In Jira the token must be allowed to edit issues (scope `write:jira-work` for a token created "with scopes").
+- In a ticket tool DevAgents looks for a tool that updates a ticket and takes an assignee (for example `pulse_update_task`), and sends the ticket number, the account, and a request id where the tool has an argument for one. A mapping can name the tool under `assign` (`tool`, `key`, `assignee`, optional `operation`).
+- Assigning never holds the task up. The task page shows "assigned to …" on the ticket line, or a warning with the reason when it did not work; both are recorded as `ticket-assigned` or `ticket-assign-failed` evidence.
 
 ## Ticket tools (any Jira-like tool with an MCP server)
 

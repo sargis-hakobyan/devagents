@@ -136,6 +136,18 @@ export function suggestRead(tools: McpTool[]): NonNullable<TrackerMapping['read'
   }
   return;
 }
+/** The tool that can hand a ticket to a person: one that updates a ticket and takes an assignee. */
+export function suggestAssign(tools: McpTool[]): NonNullable<TrackerMapping['assign']> | undefined {
+  const score = (tool: McpTool) => (/(^|[_.\-/])(update|edit|assign|patch|set|modify)/i.test(tool.name) ? 2 : 0) + (TICKET_WORD.test(tool.name) ? 2 : 0) - (/list|search|find|query|create|delete|remove|comment|check/i.test(tool.name) ? 3 : 0);
+  for (const tool of [...tools].filter(t => score(t) >= 3).sort((a, b) => score(b) - score(a))) {
+    const single = Object.keys(tool.properties).filter(n => !tool.properties[n]!.many);
+    const assignee = first(single, [/^assignee(_?id)?$/i, /^assigned_?to$/i, /^owner(_?id)?$/i]);
+    const key = first(single.filter(n => n !== assignee), [/^(task|ticket|issue|item|card|work_?item)?_?(id|key|number)$/i]);
+    const operation = first(single, [/^(operation|idempotency|request)_?(id|key)$/i]);
+    if (assignee && key) return { tool: tool.name, key, assignee, ...(operation && operation !== key ? { operation } : {}) };
+  }
+  return;
+}
 
 /** Text of a ticket keeps its lines; control characters are dropped. */
 const prose = (value: unknown, limit: number): string => typeof value === 'string' ? value.replace(/\r\n?/g, '\n').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').replace(/[^\S\n]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, limit) : '';

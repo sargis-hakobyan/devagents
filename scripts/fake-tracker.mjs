@@ -43,7 +43,7 @@ const text = { type: 'string' };
 const tools = [
   { name: 'tracker_list_work', description: 'Lists visible tickets. Defaults to the caller\'s own tickets.', inputSchema: { type: 'object', properties: { assignment: { type: 'string', enum: ['mine', 'all'] }, projectId: text, statuses: { type: 'array', items: text }, labels: { type: 'array', items: text } } } },
   { name: 'tracker_get_task', description: 'Returns one ticket by key.', inputSchema: { type: 'object', properties: { taskId: text } } },
-  { name: 'tracker_update_task', description: 'Updates one ticket.', inputSchema: { type: 'object', properties: { taskId: text, status: { type: 'string', enum: statuses }, labels: { type: 'array', items: text } } } },
+  { name: 'tracker_update_task', description: 'Updates one ticket.', inputSchema: { type: 'object', properties: { taskId: text, operationId: text, status: { type: 'string', enum: statuses }, assignee: text, labels: { type: 'array', items: text } } } },
 ];
 
 /**
@@ -76,6 +76,13 @@ export function fakeTracker(state = {}) {
         const found = tasks.find(t => t.key === args.taskId || t.id === args.taskId);
         if (!found) return answer({ isError: true, content: [{ type: 'text', text: `Ticket ${args.taskId} was not found.` }] });
         return answer({ content: [{ type: 'text', text: `${found.key}: ${found.title}` }], structuredContent: { ...found, comments: [], ...details[found.key] } });
+      }
+      if (name === 'tracker_update_task') {
+        const found = tasks.find(t => t.key === args.taskId || t.id === args.taskId);
+        if (!found) return answer({ isError: true, content: [{ type: 'text', text: `Ticket ${args.taskId} was not found.` }] });
+        if (args.assignee !== undefined) found.assignee = args.assignee;
+        (state.updates ??= []).push(args);
+        return answer({ content: [{ type: 'text', text: `${found.key} updated.` }], structuredContent: found });
       }
       if (name !== 'tracker_list_work') return answer({ isError: true, content: [{ type: 'text', text: `Unknown tool ${name}` }] });
       const found = tasks.filter(t => (args.assignment ?? 'mine') === 'all' || t.assignee === 'agents@example.com')

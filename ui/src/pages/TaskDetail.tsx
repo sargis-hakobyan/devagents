@@ -55,6 +55,8 @@ export function TaskDetailPage({ id }: { id: string }) {
   const names = (value: unknown) => Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
   // A task of a project connected to GitHub starts from the target branch there, not from local main.
   const startRecord = evidence.rows.find(e => e.kind === 'task-start'); const started = startRecord ? evidenceFacts(startRecord) as { branch?: unknown; commit?: unknown } : undefined;
+  // A task started from a ticket takes the ticket: it is assigned to the account the connection uses.
+  const assigned = evidence.rows.find(e => e.kind === 'ticket-assigned'); const assignFailed = assigned ? undefined : evidence.rows.find(e => e.kind === 'ticket-assign-failed');
   const taskSkills = skillRecord ? { found: names(evidenceFacts(skillRecord).skills), error: typeof evidenceFacts(skillRecord).error === 'string' ? evidenceFacts(skillRecord).error as string : '', used: [...new Set(evidence.rows.filter(e => e.kind === 'skills-used').flatMap(e => names(evidenceFacts(e).skills)))] } : undefined;
   // What was fetched from the ticket for this task, from the task's own record.
   const fetched = evidence.rows.filter(e => e.kind === 'ticket-files').at(-1);
@@ -81,7 +83,8 @@ export function TaskDetailPage({ id }: { id: string }) {
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}><StateChip task={task} /><PullRequestChip view={pull.data} /><span class="muted" style={{ fontSize: '13px' }}>{task.mode ?? 'mode not chosen'} · v{task.version} · started {formatTime(task.createdAt)} · {terminal ? 'took' : 'elapsed'} {elapsed(task.createdAt, finishedAt, now)}</span></div>
             <div class="muted" style={{ fontSize: '13px' }}>Extra DevAgents rules: {(task.devagentsRules ?? true) ? 'on' : 'off · engine sandbox'} · frozen at submission</div>
             <h1 style={{ margin: 0, fontSize: '22px', letterSpacing: '-0.02em', lineHeight: 1.3 }} class="wrap-anywhere">{requestTitle}</h1>
-            {task.ticket && <div class="muted" style={{ fontSize: '13.5px' }}>From {task.ticket.name} ticket {task.ticket.url ? <a href={task.ticket.url} target="_blank" rel="noopener noreferrer"><b>{task.ticket.key}</b></a> : <b>{task.ticket.key}</b>}{task.ticket.readAt ? ` · read ${formatTime(task.ticket.readAt)}` : ''} · the ticket itself is the current version</div>}
+            {task.ticket && <div class="muted" style={{ fontSize: '13.5px' }}>From {task.ticket.name} ticket {task.ticket.url ? <a href={task.ticket.url} target="_blank" rel="noopener noreferrer"><b>{task.ticket.key}</b></a> : <b>{task.ticket.key}</b>}{task.ticket.readAt ? ` · read ${formatTime(task.ticket.readAt)}` : ''} · the ticket itself is the current version{assigned ? <> · assigned to <b>{String(evidenceFacts(assigned).to ?? 'you')}</b></> : null}</div>}
+            {assignFailed && <div class="diag-error" style={{ fontSize: '13.5px' }}>⚠ The ticket was not assigned: {String(evidenceFacts(assignFailed).message ?? '')}</div>}
             {ticketFiles && <div class="muted wrap-anywhere" style={{ fontSize: '13.5px' }}>
               {ticketFiles.error ? `The ticket's files could not be fetched: ${ticketFiles.error}` : <>{ticketFiles.saved.length ? 'Files given to the team' : 'No file of the ticket was given to the team'}{ticketFiles.removed ? ' · the copies were removed when the task ended' : ''}</>}
               {ticketFiles.saved.length > 0 && <div style={{ margin: '8px 0 2px' }}><TicketFileList files={ticketFiles.saved} label="Files given to the team" /></div>}

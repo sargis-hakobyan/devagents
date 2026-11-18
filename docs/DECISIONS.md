@@ -653,3 +653,18 @@ The first real pull request (in a project whose local `main` was two days behind
 ## Pull requests are never opened as drafts — 2026-11-18
 
 The owner's repository runs an automated multi-agent reviewer on pull requests, and it skips drafts. Pull requests are therefore always opened as ready for review. This replaces "Pull requests open as drafts and are marked ready when checks pass" from the design decision of the same day, and the draft-then-ready fallback of step 1. Marking a draft ready before a merge stays, for a pull request that someone turned into a draft by hand. There is no setting for this.
+
+## A started ticket is assigned, and the task links its pull request — 2026-11-18
+
+The owner asked that starting a Jira or Pulse ticket assigns it to "the owner of the team", and for a link to the pull request inside the task.
+
+- **Assigned to the connected account.** Teams have no owner. Offered the connected account, an owner per team, or a person per project, the owner chose the account whose token DevAgents uses.
+- **This is the first write to a ticket source.** Earlier decisions said nothing writes to Jira and recommended read-only scopes; a scoped Jira token now also needs `write:jira-work`. Only the assignee is changed.
+- **A ticket tool's assign call is found, not configured:** a tool that updates a ticket and takes an assignee, as the read tool is found. With the owner's permission the Pulse server was asked once for its tool list; `pulse_update_task` (`taskId`, `assignee`, `operationId`) fits.
+- **Assigning cannot fail a task.** It runs beside the submission and its outcome is evidence.
+- **The pull request link is the header chip,** shown on every tab, and it opens in the same tab like the tab's own button.
+- **Not verified against the real Jira or Pulse.** No ticket was changed while building this. Whether Pulse accepts the account as `assignee` in the form DevAgents has it (the address the tool reports) will show on the first real ticket.
+
+## A ticket is available again when its task left nothing — 2026-11-18
+
+The owner closed a pull request and moved its Pulse ticket back to todo, and the ticket did not return to the Available column: a ticket was hidden for good once any task had been started from it. A ticket now stays hidden only while a task from it is waiting, working or completed. It returns when that task failed or was cancelled, or when its pull request was closed without merging. A completed task without a pull request, and a merged one, keep the ticket hidden. Automatic ticket start is not implemented; when it is, it must not restart a ticket whose task failed without a limit.

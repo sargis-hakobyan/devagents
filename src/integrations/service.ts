@@ -6,7 +6,7 @@ import type { SecretStore } from '../security/secret-store.js';
 import { GITHUB_API, folderRepository, tokenKind, verifyGitHub } from './github.js';
 import type { Fetch } from './http.js';
 import { TicketKey, type TicketContent } from '../domain/tickets.js';
-import { jiraAuthorization, jiraFileOrigins, jiraTicket, jiraAssignee, jiraColumns, jiraMatches, jiraTickets, jiraOptions, jiraProject, jiraProjects, jiraSuggest, normalizeSite, ruleJql, verifyJira, type JiraAccess, type JiraMatches, type JiraOptions, type JiraSuggestion } from './jira.js';
+import { jiraAssignSelf, jiraAuthorization, jiraFileOrigins, jiraTicket, jiraAssignee, jiraColumns, jiraMatches, jiraTickets, jiraOptions, jiraProject, jiraProjects, jiraSuggest, normalizeSite, ruleJql, verifyJira, type JiraAccess, type JiraMatches, type JiraOptions, type JiraSuggestion } from './jira.js';
 
 type Kind = 'github' | 'jira';
 type Shown<T> = T & { state: ConnectionState; expiresInDays?: number };
@@ -285,6 +285,11 @@ export class ProjectIntegrationService {
   async jiraTicket(projectId: string, key: string): Promise<{ name: string; content: TicketContent }> {
     const wanted = TicketKey.regex(/^[A-Za-z][A-Za-z0-9_]*-\d+$/, 'Use a Jira ticket number such as WEB-12').parse(key).toUpperCase();
     return { name: 'Jira', content: await jiraTicket(this.fetcher, (await this.jiraAccess(projectId)).access, wanted) };
+  }
+  /** Assigns a Jira ticket to the account this project's token belongs to. */
+  async assignJiraTicket(projectId: string, key: string): Promise<{ name: string; to: string }> {
+    const wanted = TicketKey.regex(/^[A-Za-z][A-Za-z0-9_]*-\d+$/, 'Use a Jira ticket number such as WEB-12').parse(key).toUpperCase();
+    return { name: 'Jira', to: await jiraAssignSelf(this.fetcher, (await this.jiraAccess(projectId)).access, wanted) };
   }
   /** The hosts and sign-in a file of a Jira ticket is fetched with. */
   async jiraFileAccess(projectId: string): Promise<{ name: string; origins: string[]; authorization: string; fetch: Fetch; redirects: boolean }> {

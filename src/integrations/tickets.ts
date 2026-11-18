@@ -13,12 +13,32 @@ export type TicketView = {
 const REQUEST_ROOM = 18000;
 const day = (at: string | undefined) => at && /^\d{4}-\d{2}-\d{2}/.test(at) ? at.slice(0, 10) : at;
 
-/** Reads one ticket from the source the project is connected to. Reading only; nothing is written to the tool. */
+/** Reads one ticket from the source the project is connected to. */
 export async function ticketContent(sources: TicketSources, projectId: string, source: string, key: string): Promise<{ name: string; content: TicketContent }> {
   const from = TicketSource.parse(source); const wanted = TicketKey.parse(key);
   const service = from === 'jira' ? sources.integrations : sources.trackers;
   if (!service) throw new AppError('integrations_unavailable', 'Integrations are not enabled on this service.', 503);
   return from === 'jira' ? sources.integrations!.jiraTicket(projectId, wanted) : sources.trackers!.ticket(projectId, from, wanted);
+}
+
+/** Assigns a started ticket to the account the project's connection uses. The one change DevAgents makes to a ticket. */
+export async function assignTicket(sources: TicketSources, projectId: string, source: string, key: string): Promise<{ name: string; to: string }> {
+  const from = TicketSource.parse(source); const wanted = TicketKey.parse(key);
+  const service = from === 'jira' ? sources.integrations : sources.trackers;
+  if (!service) throw new AppError('integrations_unavailable', 'Integrations are not enabled on this service.', 503);
+  return from === 'jira' ? sources.integrations!.assignJiraTicket(projectId, wanted) : sources.trackers!.assign(projectId, from, wanted);
+}
+/**
+ * Runs once when a task is started from a ticket. It never holds the task up or fails it: the task
+ * records whether the ticket was assigned, and why not when it was not.
+ */
+export function assignStartedTicket(sources: TicketSources, task: { id: string; projectId: string; ticket?: { source: string; key: string } | undefined }, note: (kind: string, data: unknown) => void): Promise<void> {
+  if (!task.ticket) return Promise.resolve();
+  const { source, key } = task.ticket;
+  return assignTicket(sources, task.projectId, source, key).then(
+    done => note('ticket-assigned', { ticket: key, source: done.name, to: done.to }),
+    error => note('ticket-assign-failed', { ticket: key, message: error instanceof AppError ? error.message : 'The ticket could not be assigned.' }),
+  ).catch(() => {});
 }
 
 /**
