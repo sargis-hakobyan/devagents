@@ -50,7 +50,8 @@ test('a connected project turns on Publish, and a finished task is opened as a p
     await expect(comments).toContainText('@reviewer-a'); await expect(comments).toContainText('1 open');
     await expect(comments.locator('li', { hasText: '@outside-user' })).toContainText('Does not count');
     await expect(page.getByRole('link', { name: 'View on GitHub' })).toHaveAttribute('href', /^https:\/\/github\.com\/example-org\/website\/pull\/\d+$/);
-    await expect(page.getByText(/^PR #\d+ · 1 check failed$/)).toBeVisible();
+    // The header carries a link to the pull request on GitHub, whichever tab is open.
+    await expect(page.getByRole('link', { name: /^PR #\d+ · 1 check failed/ })).toHaveAttribute('href', /^https:\/\/github\.com\/example-org\/website\/pull\/\d+$/);
     await expect(page.getByRole('button', { name: 'Open pull request' })).toHaveCount(0);
     // A fix round: the failed check and the comment that counts are ticked, the outside comment is not.
     await expect(checks.getByRole('checkbox', { name: 'Fix test (node 24)' })).toBeChecked();

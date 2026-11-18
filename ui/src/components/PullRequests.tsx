@@ -89,10 +89,12 @@ const TONES: Record<PullRequestStatusCode, Tone> = { 'not-read': 'run', merged: 
 export function PullRequestStatusChip({ pullRequest }: { pullRequest: { number: number; status: string; code: PullRequestStatusCode } }) {
   return <Chip tone={TONES[pullRequest.code]}>PR #{pullRequest.number} · {pullRequest.status}</Chip>;
 }
+/** In the task header: the pull request's number and status, as a link to it on GitHub. */
 export function PullRequestChip({ view }: { view: TaskPullRequestView | undefined }) {
   if (view?.roundOf) return <a class="chip run" href={`/ui/tasks/${view.roundOf.taskId}`}>Round {view.roundOf.round} of PR #{view.roundOf.number}</a>;
-  if (!view?.pullRequest) return null;
-  return view.github ? <PullRequestStatusChip pullRequest={{ number: view.github.number, status: view.github.status.text, code: view.github.status.code }} /> : <Chip tone="run">PR #{view.pullRequest.number}</Chip>;
+  const pr = view?.pullRequest;
+  if (!pr) return null;
+  return <a class={`chip ${view.github ? TONES[view.github.status.code] : 'run'}`} href={pr.url} rel="noreferrer" title="Open the pull request on GitHub">PR #{pr.number}{view.github ? ` · ${view.github.status.text}` : ''} ↗</a>;
 }
 
 const CHECK: Record<PullRequestCheck['status'], { icon: string; label: string; tone: string }> = { passed: { icon: '✓', label: 'Passed', tone: 'ok' }, failed: { icon: '✕', label: 'Failed', tone: 'bad' }, running: { icon: '…', label: 'Running', tone: 'run' }, skipped: { icon: '–', label: 'Skipped', tone: 'neutral' } };
