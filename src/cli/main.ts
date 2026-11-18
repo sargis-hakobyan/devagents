@@ -38,6 +38,7 @@ import { configuredVault } from '../security/credential-vault.js';
 import { configuredSecretStore } from '../security/secret-store.js';
 import { hostFolders } from './project-mount.js';
 import { ProjectIntegrationService } from '../integrations/service.js';
+import { PullRequestService } from '../integrations/pull-requests.js';
 import { TrackerService } from '../integrations/trackers.js';
 import { downloadTicketFiles } from '../integrations/ticket-files.js';
 
@@ -84,13 +85,16 @@ cli.command('serve').description('Start the local API').action(async () => {
   const claudeAuth = new SetupAuth(claudeSetupDriver(dataDir), () => assertSignInIdle(store, runner));
   const secretStore = await configuredSecretStore(dataDir);
   const integrations = new ProjectIntegrationService(store, secretStore); const trackers = new TrackerService(store, secretStore);
+  // A task keeps the pull request choices of its project; finished tasks of projects that publish on their own are picked up below.
+  const pullRequests = new PullRequestService(store, secretStore);
+  service.onSubmitted(task => pullRequests.freeze(task.id, task.projectId));
   // A task started from a ticket takes the ticket's pictures and short text files with it while it works.
   service.attachTicketFiles((task, directory) => downloadTicketFiles({ integrations, trackers }, task.projectId, task.ticket!, directory));
   const providerOf = (kind: string) => config.providers.find(p => p.kind === kind && !p.baseUrl);
   const models = new ModelCatalogService(store, { codex: codexModelLister(dataDir, providerOf('openai')), 'claude-code': claudeModelLister(dataDir, providerOf('anthropic')) });
   const server = createApi(service, await accessToken(dataDir), {
     sessions: new BrowserSessions(undefined, sessionLimits(), sessionFile(dataDir)), uiRoot, publicPort, setupAuth, claudeAuth, assertSetupIdle,
-    integrations, trackers, models,
+    integrations, pullRequests, trackers, models,
     status: statusReporter({ dataDir, config, version: '0.1.0', host, port: () => publicPort, executionEnabled: true, revision: () => setupAuth.revision + claudeAuth.revision }),
   });
   await service.agents();
@@ -102,9 +106,10 @@ cli.command('serve').description('Start the local API').action(async () => {
   await service.diskReserve.replenish();
   log('service_started', { host, port: port(), publicPort, recovered, projects: store.projects().length, executionEnabled: true, ui: uiRoot ? `http://127.0.0.1:${publicPort}/ui/` : 'not built' });
   log('setup', { message: 'Register an existing checkout and authenticate Codex. Use tasks submit, show and evidence to follow work. Open the browser UI with a one-time link from: devagents ui' });
+  const publishing = setInterval(() => { void pullRequests.publishDue(); }, 15000); publishing.unref();
   let closing = false;
   const shutdown = () => {
-    if (closing) return; closing = true;
+    if (closing) return; closing = true; clearInterval(publishing);
     void claudeAuth.close(); void setupAuth.close(); void runner.stop();
     server.close(() => { void Promise.all([runner.stop(), setupAuth.close(), claudeAuth.close()]).then(() => { store.close(); unlock(); process.exitCode = 0; }); });
     server.closeIdleConnections();

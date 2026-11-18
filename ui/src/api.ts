@@ -89,6 +89,12 @@ export const teamLabel = (team: TeamRef | undefined): string => team ? `${team.n
 /** A preview is display text, never a substitute for structured execution facts. */
 export const evidenceFacts = (e: Evidence): Record<string, unknown> => e.truncated ? e.metadata ?? {} : (e.data ?? {}) as Record<string, unknown>;
 
+/** What happens on GitHub after a task finishes: each step is skipped, waits for a click, or runs on its own. */
+export type StepMode = 'off' | 'ask' | 'auto';
+export type ProjectPullRequests = { connected: boolean; repository?: string; settings: { publish: StepMode; targetBranch?: string } };
+export type TaskPullRequest = { number: number; url: string; repository: string; branch: string; base: string; commit: string; draft: boolean; openedAt: string; trigger: 'user' | 'setting' };
+export type TaskPullRequestView = { mode: StepMode; canPublish: boolean; publishing: boolean; pullRequest?: TaskPullRequest; failure?: { message: string; at: string; trigger: 'user' | 'setting' } };
+
 /** Per-project GitHub and Jira connections. A token is write-only: it is sent once and never returned. */
 export type ConnectionState = 'connected' | 'expiring' | 'expired' | 'rejected' | 'unreachable' | 'locked';
 export type IntegrationProblem = { code: 'token_missing' | 'token_rejected' | 'not_reachable'; message: string; at: string };

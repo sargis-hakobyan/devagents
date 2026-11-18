@@ -1,10 +1,11 @@
 import { z } from 'zod';
 import type { TrackerConnection } from './trackers.js';
+import type { PullRequestSettings } from './pull-requests.js';
 
 /**
  * Per-project GitHub and Jira connections. Only settings and the last check live here; a token is
- * write-only and stays in the secret store. Nothing in DevAgents acts on these connections yet:
- * they are stored and verified so publishing and ticket pick-up can build on them.
+ * write-only and stays in the secret store. Publishing a finished task as a pull request and reading
+ * tickets build on these connections.
  */
 const Token = z.string().min(8).max(4096).regex(/^\S+$/, 'Enter one token without whitespace');
 export const GitHubRepository = z.string().max(140).regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/, 'Use owner/name');
@@ -59,7 +60,7 @@ export type JiraIntegration = {
   /** Cloud id when the token only works through Atlassian's gateway (a token created "with scopes"). */
   gateway?: string; expiresOn?: string; connectedAt: string; checkedAt: string; problem?: IntegrationProblem; rule?: JiraRule;
 };
-export type ProjectIntegrations = { github?: GitHubIntegration; jira?: JiraIntegration; /** Ticket tools this project uses, one entry per tool. */ trackers?: TrackerConnection[] };
+export type ProjectIntegrations = { github?: GitHubIntegration; /** What happens on GitHub after a task finishes. Kept beside the connection so reconnecting does not lose it. */ pullRequests?: PullRequestSettings; jira?: JiraIntegration; /** Ticket tools this project uses, one entry per tool. */ trackers?: TrackerConnection[] };
 
 export type ConnectionState = 'connected' | 'expiring' | 'expired' | 'rejected' | 'unreachable' | 'locked';
 /** Days before the end date from which a token is shown as expiring. */

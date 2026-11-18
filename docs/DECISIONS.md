@@ -582,3 +582,16 @@ The owner asked for the flow after a finished task: push, open a pull request, n
 - **On the screens:** a "Pull request" column on the Tasks board between Working and Done, merge offered in the Needs-you band, and a Pull request tab on the task. The owner asked for screens without explanatory text, so behaviour is described in the canvas notes and here, not in the interface.
 - **Open:** running a check again needs a token that may write Actions; which fine-grained permissions that and merging require is to be confirmed with the G0 spike of the plan.
 
+
+## Pull requests, step 1: publishing is implemented — 2026-11-18
+
+The owner asked for the pull request design to be built step by step. This is the first step: the Publish setting and target branch per project, the push, and the pull request. Fixing failed checks and review comments, merging, and the "Pull request" column on the board are not built.
+
+- **The page shows only what works.** The settings card has one row, Publish, and one field, Target branch. The other three rows and three fields of `U12-PR-Settings` are added with the steps that implement them.
+- **No new table and no new task field.** The project's choices sit beside its GitHub connection. A task's frozen choices, its push, its pull request and a failed publish are evidence (`pull-request-settings`, `-pushed`, `-opened`, `-failed`), and a task's state stays `completed`.
+- **A click is the user's decision.** The frozen choice governs what happens automatically. A click is offered whenever the project publishes at all, also for a task finished before Publish was turned on.
+- **Asking GitHub replaces an operation log.** Before pushing, the branch is looked up on GitHub; before opening, the pull requests for that branch are listed. The plan's outbox table is not built.
+- **A failed publish is not retried automatically,** in line with the standing rule against repeating what an environment refuses.
+- **This changes a product rule:** `AGENTS.md` and `README.md` said DevAgents never pushes. It now pushes a completed task's own `devagents/` branch to the connected repository when the project's Publish setting allows it, and nothing else.
+- **Not built:** terminal commands, a pull request description from validation evidence, a managed clone, and keeping pull request state up to date after opening.
+- **Not verified against the real GitHub.** No authenticated call was made; tests use a local bare repository and recorded API answers.

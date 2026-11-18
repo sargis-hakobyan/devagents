@@ -14,6 +14,7 @@ import { BrowserSessions, SESSION_COOKIE, parseCookies, sessionCookie, clearedSe
 import { securityHeaders, serveUi } from './static.js';
 import { evidenceMetadata } from './evidence.js';
 import type { ProjectIntegrationService } from '../integrations/service.js';
+import type { PullRequestService } from '../integrations/pull-requests.js';
 import type { TrackerService } from '../integrations/trackers.js';
 import type { ModelCatalogService } from '../engines/model-catalog.js';
 import { availableTickets } from '../integrations/available.js';
@@ -76,6 +77,7 @@ export type ApiOptions = {
   publicPort?: number | undefined;
   /** Per-project GitHub and Jira connections; absent on services that do not configure a secret store. */
   integrations?: ProjectIntegrationService;
+  pullRequests?: PullRequestService;
   /** Ticket tools reached through their MCP server. */
   trackers?: TrackerService;
   /** Model lists read from the engines on request; absent where no engine can be asked. */
@@ -244,6 +246,23 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
           if (tool && action === 'rule' && req.method === 'PUT') return send(res, 200, await trackers.saveRule(id, tool, await body(req, 16384)));
           if (tool && action === 'rule' && req.method === 'DELETE') return send(res, 200, await trackers.removeRule(id, tool));
         }
+      }
+      // What happens on GitHub after a task finishes, per project and per task.
+      const projectPulls = /^\/projects\/([a-z0-9][a-z0-9-]{0,63})\/pull-requests(\/branches)?$/.exec(path);
+      const taskPull = /^\/tasks\/([a-f0-9-]{36})\/pull-request$/.exec(path);
+      if (projectPulls || taskPull) {
+        const pulls = options.pullRequests;
+        if (!pulls) throw new AppError('integrations_unavailable', 'Integrations are not enabled on this service.', 503);
+        if (projectPulls) {
+          const id = service.store.project(projectPulls[1]!).id;
+          if (req.method === 'GET') return send(res, 200, projectPulls[2] ? await pulls.branches(id) : pulls.project(id));
+          if (req.method === 'PUT' && !projectPulls[2]) return send(res, 200, pulls.save(id, await body(req, 4096)));
+        } else {
+          const id = service.store.task(taskPull![1]!).id;
+          if (req.method === 'GET') return send(res, 200, pulls.view(id));
+          if (req.method === 'POST') { await pulls.publish(id, 'user'); return send(res, 200, pulls.view(id)); }
+        }
+        throw new AppError('method_not_allowed', 'Method not allowed', 405);
       }
       // Project integrations: tokens are write-only; responses carry settings and the last check, never a secret.
       const integration = /^\/projects\/([a-z0-9][a-z0-9-]{0,63})\/integrations(?:\/(github|jira)(?:\/(check|options|columns|suggest|preview|rule))?)?$/.exec(path);

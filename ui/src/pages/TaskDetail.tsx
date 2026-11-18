@@ -7,14 +7,15 @@ import { useTaskActions } from '../components/TaskActions';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { TicketFileList } from '../components/TicketFiles';
-import { api, evidenceFacts, type Evidence, type ItemProgress, type Task, type TaskEvent } from '../api';
+import { PullRequestChip, PullRequestTab, hasPullRequest, useTaskPullRequest } from '../components/PullRequests';
+import { api, evidenceFacts, type Evidence, type ItemProgress, type Task, type TaskEvent, type TaskPullRequestView } from '../api';
 import { Card, Chip, ErrorNote, Later, Pre, Skeleton, Stage, StateChip, pretty } from '../components/ui';
 import { MemberList, Pipeline } from '../components/TeamBoard';
 import { teamBoard, type TeamBoard } from '../team-board';
 import { limitationCount, command, elapsed, formatTime, taskState } from '../format';
 import { forget, useNow, usePoll } from '../state';
 
-type Tab = 'work' | 'plan' | 'activity' | 'usage' | 'result';
+type Tab = 'work' | 'plan' | 'activity' | 'usage' | 'result' | 'pull-request';
 type Detail = { task: Task; items: ItemProgress[] };
 
 /** Events and evidence are appended by sequence cursor, so polling and reconnects never duplicate or drop rows. */
@@ -37,6 +38,7 @@ export function TaskDetailPage({ id }: { id: string }) {
   const events = useAppendLog<TaskEvent>(`/tasks/${id}/events`, 3000, 500);
   const evidence = useAppendLog<Evidence>(`/tasks/${id}/evidence`, 3000, 200);
   const task = detail.data?.task; const items = detail.data?.items ?? [];
+  const pull = useTaskPullRequest(id); const pullShown = hasPullRequest(pull.data);
   const renderActions = useTaskActions({ task, reload: detail.reload, showPlan: () => setTab('plan') });
   const [activityItem, setActivityItem] = useState<string | undefined>(undefined);
   const board = useMemo(() => (task ? teamBoard({ task, items, evidence: evidence.rows, now }) : undefined), [task, items, evidence.rows, now]);
@@ -66,7 +68,7 @@ export function TaskDetailPage({ id }: { id: string }) {
     : task.scheduling?.status === 'held' ? { title: 'Recovery needs inspection', tone: 'warn', detail: task.scheduling.reason }
     : board?.stages.some(s => s.key === 'qa' && s.status === 'busy')
     ? { title: 'QA verification in progress', tone: 'info', detail: 'The QA engineer is checking required acceptance criteria. Final review and commit follow only after QA passes.' }
-    : summarize(task, items);
+    : summarize(task, items, pull.data);
   return <>
     {terminal && <Card><TaskCompaction key={task.id} task={task} /></Card>}
     <a href="/ui/tasks" style={{ fontWeight: 700, fontSize: '13.5px', textDecoration: 'none' }}>← All tasks</a>
@@ -74,7 +76,7 @@ export function TaskDetailPage({ id }: { id: string }) {
       <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}><StateChip task={task} /><span class="muted" style={{ fontSize: '13px' }}>{task.mode ?? 'mode not chosen'} · v{task.version} · started {formatTime(task.createdAt)} · {terminal ? 'took' : 'elapsed'} {elapsed(task.createdAt, finishedAt, now)}</span></div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}><StateChip task={task} /><PullRequestChip view={pull.data} /><span class="muted" style={{ fontSize: '13px' }}>{task.mode ?? 'mode not chosen'} · v{task.version} · started {formatTime(task.createdAt)} · {terminal ? 'took' : 'elapsed'} {elapsed(task.createdAt, finishedAt, now)}</span></div>
             <div class="muted" style={{ fontSize: '13px' }}>Extra DevAgents rules: {(task.devagentsRules ?? true) ? 'on' : 'off · engine sandbox'} · frozen at submission</div>
             <h1 style={{ margin: 0, fontSize: '22px', letterSpacing: '-0.02em', lineHeight: 1.3 }} class="wrap-anywhere">{requestTitle}</h1>
             {task.ticket && <div class="muted" style={{ fontSize: '13.5px' }}>From {task.ticket.name} ticket {task.ticket.url ? <a href={task.ticket.url} target="_blank" rel="noopener noreferrer"><b>{task.ticket.key}</b></a> : <b>{task.ticket.key}</b>}{task.ticket.readAt ? ` · read ${formatTime(task.ticket.readAt)}` : ''} · the ticket itself is the current version</div>}
@@ -93,21 +95,22 @@ export function TaskDetailPage({ id }: { id: string }) {
         </div>
         <div class={`note ${summary.tone}`} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}><span aria-hidden="true" style={{ fontSize: '16px' }}>{state.icon}</span><div><b>{summary.title}</b><div class="muted" style={{ fontSize: '13.5px' }}>{summary.detail}</div></div></div>
         {task.state === 'failed' && <a href="/ui/settings/setup">Check setup before submitting a new task</a>}
-        {task.state === 'awaiting_plan_approval' && <div class="note warn"><b>Approval binds to version {task.version}.</b> If the plan changes before you approve, the page refreshes and asks again. Approving a plan is not permission to push, merge or run destructive commands.</div>}
+        {task.state === 'awaiting_plan_approval' && <div class="note warn"><b>Approval binds to version {task.version}.</b> If the plan changes before you approve, the page refreshes and asks again. {pull.data?.mode === 'auto' ? 'When the task completes, this project opens a pull request on its own.' : 'Approving a plan is not permission to push, merge or run destructive commands.'}</div>}
       </div>
     </Card>
     <div class="tabs" role="tablist" aria-label="Task sections">
-      {([['work', `Work · ${items.length}`], ['plan', 'Plan'], ['activity', `Activity · ${events.rows.length + evidence.rows.length}`], ['usage', 'Usage'], ['result', 'Result']] as [Tab, string][]).map(([t, label]) => <button key={t} type="button" role="tab" class="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{label}</button>)}
+      {([['work', `Work · ${items.length}`], ['plan', 'Plan'], ['activity', `Activity · ${events.rows.length + evidence.rows.length}`], ['usage', 'Usage'], ['result', 'Result'], ...(pullShown ? [['pull-request', pull.data?.pullRequest ? `Pull request · #${pull.data.pullRequest.number}` : 'Pull request']] : [])] as [Tab, string][]).map(([t, label]) => <button key={t} type="button" role="tab" class="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{label}</button>)}
     </div>
     {tab === 'work' && board && <WorkTab task={task} board={board} now={now} onActivity={item => { setActivityItem(item); setTab('activity'); }} />}
     {tab === 'plan' && <><PlanTab task={task} />{task.state === 'awaiting_plan_approval' && <div class="decision-bar plan-decision-bar">{renderActions()}</div>}</>}
     {tab === 'activity' && <ActivityTab task={task} events={events.rows} evidence={evidence.rows} filter={activityItem} onClear={() => setActivityItem(undefined)} />}
     {tab === 'usage' && <TaskUsage key={id} id={id} />}
     {tab === 'result' && <ResultTab task={task} evidence={evidence.rows} />}
+    {tab === 'pull-request' && pullShown && <PullRequestTab taskId={id} view={pull.data!} reload={pull.reload} />}
   </>;
 }
 
-function summarize(task: Task, items: ItemProgress[]): { title: string; detail: string; tone: 'warn' | 'bad' | 'info' } {
+function summarize(task: Task, items: ItemProgress[], pull?: TaskPullRequestView): { title: string; detail: string; tone: 'warn' | 'bad' | 'info' } {
   const current = items.find(i => ['running', 'validating', 'reviewing', 'repairing', 'creating', 'checkpointing', 'integrating'].includes(i.state));
   const done = items.filter(i => i.state === 'completed').length;
   switch (task.state) {
@@ -119,7 +122,7 @@ function summarize(task: Task, items: ItemProgress[]): { title: string; detail: 
       : { title: 'Queued', tone: 'info', detail: 'This task starts when the scheduler has capacity.' };
     case 'running': case 'validating': case 'reviewing': case 'repairing': return { title: current ? `Now: ${itemVerb(current.state)} work item ${current.itemId}${current.agentId ? ` (${current.agentId})` : ''}` : `Now: ${task.state}`, tone: 'info', detail: items.length > 1 ? `${done} of ${items.length} items integrated. After every item is integrated, the combined result is validated and reviewed before one local commit. No merge, push or deployment happens.` : 'Implementation, real validation and an independent review precede one local commit on the task branch. No merge, push or deployment happens.' };
     case 'committing': return { title: 'Creating the reviewed local commit', tone: 'info', detail: 'This boundary cannot be cancelled; the outcome appears in Result.' };
-    case 'completed': { const n = limitationCount(task.outcome); return { title: n ? `Completed with ${task.outcome?.limitationOverflow ? 'at least ' : ''}${n} check${n === 1 ? '' : 's'} not run in this environment` : 'Completed: one reviewed local commit on the task branch', tone: n ? 'warn' : 'info', detail: `Commit ${task.outcome?.commit?.slice(0, 7) ?? '—'} on ${task.workspace?.branch ?? 'the task branch'}. Nothing was merged or pushed; you integrate it yourself.${n ? ' The Result tab lists what you should verify yourself.' : ''}` }; }
+    case 'completed': { const n = limitationCount(task.outcome); return { title: n ? `Completed with ${task.outcome?.limitationOverflow ? 'at least ' : ''}${n} check${n === 1 ? '' : 's'} not run in this environment` : 'Completed: one reviewed local commit on the task branch', tone: n ? 'warn' : 'info', detail: `Commit ${task.outcome?.commit?.slice(0, 7) ?? '—'} on ${task.workspace?.branch ?? 'the task branch'}. ${pull?.pullRequest ? `Published as pull request #${pull.pullRequest.number}; nothing was merged.` : 'Nothing was merged or pushed; you integrate it yourself.'}${n ? ' The Result tab lists what you should verify yourself.' : ''}` }; }
     case 'failed': if (task.outcome?.error?.startsWith('QA could not verify required acceptance criteria.')) return { title: 'Implementation complete; verification stopped at QA', tone: 'warn', detail: 'The developer finished and project validation passed. QA could not verify some checks in its environment, so this earlier run stopped before review and commit. See Activity for the original evidence.' }; return { title: /Service shutdown interrupted/.test(task.outcome?.error ?? '') ? 'Interrupted by a service shutdown' : 'Stopped: the task failed', tone: 'bad', detail: task.outcome?.error ?? 'See Activity for the last recorded step.' };
     case 'cancelled': return { title: 'Cancelled by you', tone: 'warn', detail: 'Workers are stopping or have stopped. See Result for cleanup status and any recovery snapshot. Resubmitting creates a new task.' };
     default: return { title: task.state, tone: 'info', detail: '' };

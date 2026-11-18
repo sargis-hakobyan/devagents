@@ -17,6 +17,7 @@ import { BrowserSessions } from '../dist/api/session.js';
 import { runProcess } from '../dist/engines/process.js';
 import { git } from '../dist/workspace/git.js';
 import { ProjectIntegrationService } from '../dist/integrations/service.js';
+import { PullRequestService } from '../dist/integrations/pull-requests.js';
 import { TrackerService } from '../dist/integrations/trackers.js';
 import { downloadTicketFiles } from '../dist/integrations/ticket-files.js';
 import { ModelCatalogService } from '../dist/engines/model-catalog.js';
@@ -105,7 +106,15 @@ const fixtureRemote = async (input, init = {}) => {
   if (!credential || decoded.includes('rejected')) return reply({ message: 'Bad credentials' }, 401);
   if (url.hostname === 'github.fixture.invalid') {
     if (path === '/user') return reply({ login: 'fixture-user' }, 200, { 'github-authentication-token-expiration': '2099-01-01 00:00:00 UTC' });
-    return path === '/repos/example-org/website' ? reply({ permissions: { push: true } }) : reply({ message: 'Not Found' }, 404);
+    if (path === '/repos/example-org/website') return reply({ permissions: { push: true }, default_branch: 'main' });
+    if (path === '/repos/example-org/website/branches') return reply([{ name: 'main' }, { name: 'develop' }]);
+    if (path === '/repos/example-org/website/pulls') {
+      const shown = pull => ({ number: pull.number, html_url: `https://github.com/example-org/website/pull/${pull.number}`, draft: pull.draft, base: { ref: pull.base } });
+      if ((init.method ?? 'GET') === 'GET') return reply(fixturePulls.filter(p => `example-org:${p.head}` === url.searchParams.get('head')).map(shown));
+      const asked = JSON.parse(init.body); const pull = { number: 41 + fixturePulls.length + 1, head: asked.head, base: asked.base, draft: asked.draft === true }; fixturePulls.push(pull);
+      return reply(shown(pull), 201);
+    }
+    return reply({ message: 'Not Found' }, 404);
   }
   if (path === '/api/myself') return reply({ displayName: 'DevAgents Bot', accountId: 'acc-bot' });
   const typed = name => (url.searchParams.get(name) ?? '').toLowerCase(); const has = (value, name) => value.toLowerCase().includes(typed(name));
@@ -126,6 +135,12 @@ const fixtureRemote = async (input, init = {}) => {
   return reply({}, 404);
 };
 const integrations = new ProjectIntegrationService(store, fixtureSecrets, { fetch: fixtureRemote, githubApiUrl: 'https://github.fixture.invalid' });
+// Pull requests: the fixture's GitHub is a bare repository in the temporary folder and the canned API above.
+const fixturePulls = []; const fixtureGitHub = join(root, 'github-remote.git');
+execFileSync('git', ['init', '-q', '--bare', fixtureGitHub]);
+const pullRequests = new PullRequestService(store, fixtureSecrets, { fetch: fixtureRemote, githubApiUrl: 'https://github.fixture.invalid', remoteUrl: () => fixtureGitHub });
+service.onSubmitted(task => pullRequests.freeze(task.id, task.projectId));
+setInterval(() => { void pullRequests.publishDue(); }, 1000).unref();
 // A made-up ticket tool with an MCP server; its token is the one exported by fake-tracker.mjs.
 const trackers = new TrackerService(store, fixtureSecrets, { fetch: fakeTracker().fetcher });
 service.attachTicketFiles((task, directory) => downloadTicketFiles({ integrations, trackers }, task.projectId, task.ticket, directory));
@@ -138,7 +153,7 @@ const models = new ModelCatalogService(store, {
 const token = await accessToken(data); const sessions = new BrowserSessions();
 // Synthetic availability only: browser tests never inspect a host credential store or runtime login.
 const status = { service: { version: '0.1.0-fixture', host: '127.0.0.1', port, platform: process.platform, node: process.version, dataDir: data, executionEnabled: true, startedAt: new Date().toISOString(), checkedAt: new Date().toISOString() }, codex: { installed: true, version: 'fixture', signedIn: false, credentialStore: 'file', vaultLocked: false, modelAccessVerified: false }, claude: { installed: false, enabled: false, note: 'Adapter planned for M4' }, defaults: { devagentsRules: config.devagentsRules, engine: 'codex', provider: 'openai', model: null, providers: [{ id: 'openai', kind: 'openai', auth: 'login', apiKeyConfigured: null, executable: true }] }, limits: statusLimits(config), fixture: { label } };
-const server = createApi(service, token, { sessions, uiRoot: resolve('dist/ui'), status: async () => status, integrations, trackers, models });
+const server = createApi(service, token, { sessions, uiRoot: resolve('dist/ui'), status: async () => status, integrations, pullRequests, trackers, models });
 
 // Representative tasks. Each completes (or stops) through the real orchestrator against real Git worktrees.
 // The service starts listening only after they exist, so /health means the fixture is complete.

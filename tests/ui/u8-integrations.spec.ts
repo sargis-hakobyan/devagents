@@ -19,7 +19,8 @@ test('a project connects GitHub and Jira with tokens, saves a ticket rule and di
     await expect(page.getByRole('heading', { level: 1, name: 'website' })).toBeVisible();
     const github = page.getByRole('article', { name: /^GitHub/ }); const jira = page.getByRole('article', { name: /^Jira/ });
     await expect(github).toContainText('Not connected'); await expect(jira).toContainText('Not connected');
-    await expect(page.getByText('does not open pull requests or start tasks from tickets yet')).toBeVisible();
+    await expect(page.getByText('This page saves and checks the connections.')).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Publish' })).toHaveCount(0);
 
     // GitHub: a refused token is reported next to the field and nothing is saved.
     await github.getByRole('button', { name: 'Connect' }).click();

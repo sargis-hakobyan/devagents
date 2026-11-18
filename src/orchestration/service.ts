@@ -53,6 +53,9 @@ export class TaskService {
   get support(): RuntimeSupport { return { config: this.config, capabilities: builtinCapabilities, executableEngines: this.executableEngines, platform: this.platform }; }
   attachRunner(runner: Runner): void { this.runner = runner; }
   attachTicketFiles(loader: TicketFileLoader): void { this.ticketLoader = loader; }
+  private submitted?: (task: Task) => void;
+  /** Runs once for every accepted task, so an integration can record what the task starts with. */
+  onSubmitted(hook: (task: Task) => void): void { this.submitted = hook; }
   private ticketDirectory(id: string): string {
     if (!/^[a-f0-9-]{36}$/.test(id)) throw new AppError('invalid_task', 'Invalid task identifier');
     return join(this.dataDir, 'ticket-files', id);
@@ -348,6 +351,7 @@ export class TaskService {
     this.assertExecutionAvailable();
     const task = TaskInput.parse(input);
     const created = this.store.createTask(task, key, () => this.freezeTeam(task.teamId, task.projectId), () => this.store.project(task.projectId).defaultMode ?? this.config.defaultMode, this.config.devagentsRules);
+    try { this.submitted?.(created); } catch { /* an integration's bookkeeping never refuses a task */ }
     this.runner?.enqueue(created.id); return created;
   }
   mode(id: string, mode: unknown): Task {

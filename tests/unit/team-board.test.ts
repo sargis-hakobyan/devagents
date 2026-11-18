@@ -247,3 +247,15 @@ test('member engine uses recorded runs or the frozen roster without guessing for
   const older = board(base(), [], []);
   assert.equal(member(older, 'build', 'backend-developer').engine, undefined);
 });
+
+test('the commit step says what happens on GitHub when the project publishes', () => {
+  const lines = (evidence: Ev[], over: Partial<BoardInput['task']> = {}) => member(board(base(over), [], evidence), 'commit', 'devagents').lines;
+  assert.equal(lines([]).at(-1), 'Nothing is merged or pushed');
+  assert.equal(lines([ev('pull-request-settings', 1, { publish: 'ask' })]).at(-1), 'Nothing is merged or pushed');
+  assert.equal(lines([ev('pull-request-settings', 1, { publish: 'auto' })]).at(-1), 'Then opened as a pull request');
+  const done = { state: 'completed', outcome: { commit: 'abcdef1234', repairCycles: 0 } } as Partial<BoardInput['task']>;
+  assert.equal(lines([], done).at(-1), 'You integrate it yourself');
+  assert.equal(lines([ev('pull-request-settings', 1, { publish: 'ask' })], done).at(-1), 'A pull request waits for your click');
+  assert.equal(lines([ev('pull-request-settings', 1, { publish: 'auto' })], done).at(-1), 'Opening a pull request');
+  assert.equal(lines([ev('pull-request-settings', 1, { publish: 'auto' }), ev('pull-request-opened', 2, { number: 42 })], done).at(-1), 'Pull request #42 opened');
+});

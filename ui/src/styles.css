@@ -166,6 +166,19 @@ fieldset:disabled .field input, fieldset:disabled .field select, fieldset:disabl
 .link-button { border: 0; background: none; padding: 0; font: inherit; font-weight: 700; color: var(--link); text-decoration: underline; cursor: pointer; }
 .link-button:hover { color: var(--link-hover); }
 .link-button:disabled { color: var(--muted); cursor: default; text-decoration: none; }
+/* What happens after a task finishes: one row per step with Off / Ask me / Automatic. */
+.step-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; padding: 14px 16px; border-top: 1px solid var(--row); }
+.step-num { flex: 0 0 32px; height: 32px; border-radius: 50%; background: var(--neutral-bg); color: var(--neutral-text); display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; }
+.step-text { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; font-size: 14px; }
+.step-text b { font-size: 15.5px; }
+.step-seg { display: inline-flex; border: 1px solid var(--btn-border); border-radius: 12px; overflow: hidden; background: #fff; }
+.step-seg button { min-height: 44px; min-width: 104px; padding: 0 16px; border: 0; border-left: 1px solid var(--btn-border); background: #fff; color: var(--neutral-text); font: inherit; font-weight: 700; font-size: 14px; cursor: pointer; }
+.step-seg button:first-child { border-left: 0; }
+.step-seg button[aria-pressed="true"] { background: var(--ink); color: #fff; }
+.step-seg button:disabled { cursor: not-allowed; opacity: .6; }
+.step-fields { padding: 16px; border-top: 1px solid var(--row); display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 320px)); gap: 16px; }
+.step-actions { padding: 0 16px 16px; display: flex; gap: 10px; flex-wrap: wrap; }
+@media (max-width: 760px) { .step-seg { width: 100%; } .step-seg button { flex: 1; min-width: 0; } }
 .effort-seg { display: inline-flex; align-self: flex-start; padding: 3px; border-radius: 12px; background: var(--neutral-bg); gap: 2px; }
 .effort-seg button { min-height: 32px; padding: 0 15px; border-radius: 9px; border: 0; background: transparent; font: inherit; font-size: 13.5px; font-weight: 700; color: var(--muted); cursor: pointer; }
 .effort-seg button[aria-pressed="true"] { background: #fff; color: var(--text); box-shadow: 0 1px 2px rgba(28,26,51,.14); }

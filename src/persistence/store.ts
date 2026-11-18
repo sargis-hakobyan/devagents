@@ -556,6 +556,16 @@ export class Store {
     this.task(id);
     return this.db.prepare('SELECT sequence,kind,data FROM evidence WHERE task_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(id, after, limit).map(r => ({ sequence: Number(r.sequence), kind: String(r.kind), ...JSON.parse(String(r.data)) }));
   }
+  /** The newest evidence of one kind, without loading the task's whole record. */
+  lastEvidence(id: string, kind: string): { sequence: number; at: string; data: unknown } | undefined {
+    const row = this.db.prepare('SELECT sequence,data FROM evidence WHERE task_id=? AND kind=? ORDER BY sequence DESC LIMIT 1').get(id, kind);
+    return row ? { sequence: Number(row.sequence), ...JSON.parse(String(row.data)) } : undefined;
+  }
+  /** Completed tasks that carry evidence of `kind` and none of `settled`: work that is still owed after completion. */
+  completedAwaiting(kind: string, settled: string[]): string[] {
+    const marks = settled.map(() => '?').join(',');
+    return this.db.prepare(`SELECT DISTINCT e.task_id FROM evidence e JOIN tasks t ON t.id=e.task_id WHERE e.kind=? AND t.state='completed' AND NOT EXISTS (SELECT 1 FROM evidence x WHERE x.task_id=e.task_id AND x.kind IN (${marks})) ORDER BY e.sequence`).all(kind, ...settled).map(r => String(r.task_id));
+  }
   /** Read every execution boundary without loading paginated tool logs or large agent outputs. */
   executionEvidence(id: string): import('../domain/execution.js').ExecutionEvent[] {
     this.task(id);

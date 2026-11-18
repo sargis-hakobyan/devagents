@@ -94,12 +94,15 @@ export function teamBoard(input: BoardInput): TeamBoard {
 
   // Runs and per-item facts from the evidence log.
   const runs = new Map<string, Run>(); const perItem = new Map<string, ItemFacts>(); let commitAt: string | undefined;
+  // What the task's project does after the commit, and the pull request once it exists.
+  let publish: string | undefined; let pullRequest: number | undefined;
   const environments = new Map<string, { state: string; at: string; startedAt: string }>();
   const itemFacts = (id: string) => { let f = perItem.get(id); if (!f) { f = { tests: [], implementations: 0 }; perItem.set(id, f); } return f; };
   // A single-item task runs without the DAG: its runs and validations carry no item id and belong to the only item.
   const onlyItem = !multi ? plan?.items[0]?.id : undefined;
   input.evidence.forEach((e, index) => {
     const d = facts(e); const runId = str(d.runId) ?? (e.kind === 'run-completed' || e.kind === 'run-failed' ? `unrecorded:${index}` : undefined); const item = str(d.workItemId) ?? str(d.itemId) ?? (e.kind === 'work-item' ? undefined : onlyItem);
+    if (e.kind === 'pull-request-settings') publish = str(d.publish); if (e.kind === 'pull-request-opened' && typeof d.number === 'number') pullRequest = d.number;
     if (e.kind === 'run-started' && runId) runs.set(runId, { runId, engine: str(d.engine), phase: str(d.phase) ?? '', agentId: str(d.agentId) ?? '', ...(item ? { workItemId: item } : {}), startedAt: e.at });
     if ((e.kind === 'run-completed' || e.kind === 'run-failed') && runId) {
       const r = runs.get(runId) ?? { runId, phase: str(d.phase) ?? '', agentId: '', ...(item ? { workItemId: item } : {}), startedAt: e.at }; runs.set(runId, r);
@@ -255,10 +258,10 @@ export function teamBoard(input: BoardInput): TeamBoard {
   // Stage 5 · Commit
   const commitStatus: BoardStatus = task.outcome?.commit ? 'done' : task.state === 'committing' ? 'busy' : terminal ? 'aborted' : 'next';
   const system = member({ id: 'devagents', name: 'DevAgents', role: 'system', stage: 'commit', status: commitStatus });
-  if (commitStatus === 'done') { system.lines.push(`Committed ${short(task.outcome?.commit)} · ${clock(commitAt ?? task.updatedAt)}`); system.lines.push('You integrate it yourself'); system.finishedAt = commitAt ?? task.updatedAt; }
+  if (commitStatus === 'done') { system.lines.push(`Committed ${short(task.outcome?.commit)} · ${clock(commitAt ?? task.updatedAt)}`); system.lines.push(pullRequest ? `Pull request #${pullRequest} opened` : publish === 'auto' ? 'Opening a pull request' : publish === 'ask' ? 'A pull request waits for your click' : 'You integrate it yourself'); system.finishedAt = commitAt ?? task.updatedAt; }
   else if (commitStatus === 'aborted') { system.lines.push('No commit'); system.lines.push(task.state === 'cancelled' ? 'Cancelled by you' : 'The task stopped first'); }
   else if (commitStatus === 'busy') system.lines.push('Creating the reviewed local commit');
-  else { system.lines.push(`One local commit on ${task.workspace?.branch ?? 'the task branch'}`); system.lines.push('Nothing is merged or pushed'); }
+  else { system.lines.push(`One local commit on ${task.workspace?.branch ?? 'the task branch'}`); system.lines.push(publish === 'auto' ? 'Then opened as a pull request' : 'Nothing is merged or pushed'); }
   const commitStage: BoardStage = { key: 'commit', number: integrateStage ? 5 : 4, title: 'Commit', status: commitStatus, members: [system], chip: commitStatus === 'done' ? { tone: 'ok', text: '✓ Done' } : commitStatus === 'busy' ? { tone: 'run', text: '▶ Committing' } : commitStatus === 'aborted' ? { tone: 'neutral', text: task.state === 'cancelled' ? 'Cancelled' : 'No commit' } : { tone: 'neutral', text: 'Up next' } };
 
   let qaStage: BoardStage | undefined;

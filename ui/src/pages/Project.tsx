@@ -1,6 +1,7 @@
 import { useRef, useState } from 'preact/hooks';
 import { api, resources, SignedOutError, type Project, type ProjectSkills } from '../api';
 import { ProjectIntegrations } from '../components/Integrations';
+import { ProjectPullRequestsCard } from '../components/PullRequests';
 import { Card, Chip, ErrorNote, Skeleton } from '../components/ui';
 import { formatTime } from '../format';
 import { onSignedOut, retryNow, usePoll } from '../state';
@@ -110,6 +111,7 @@ export function ProjectPage({ id }: { id: string }) {
       <RestoreButton project={project} primary />
     </div></Card> : <>
       <ProjectIntegrations projectId={project.id} />
+      <ProjectPullRequestsCard projectId={project.id} />
       <ProjectSkillsCard projectId={project.id} />
       <ArchiveProject project={project} />
     </>}

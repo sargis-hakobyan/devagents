@@ -429,7 +429,7 @@ export function ProjectIntegrations({ projectId }: { projectId: string }) {
   const connected = tool.connections.find(c => open === `tool:${c.trackerId}`); const more = tool.trackers.length - tool.connections.length;
   return <section class="integ" aria-label="Integrations">
     <div><div style={{ fontWeight: 800, fontSize: '18px' }}>Integrations</div><div class="muted">All are optional. Each one needs a token, saved once and shared by your projects on the same account.</div></div>
-    <div class="note info">This page saves and checks the connections. DevAgents does not open pull requests or start tasks from tickets yet; tasks still end in a local commit.</div>
+    <div class="note info">This page saves and checks the connections. A task still ends in a local commit. With GitHub connected, \"After a task finishes\" below decides whether that commit becomes a pull request.</div>
     {view.secrets.locked && <div class="note warn" role="status">Credentials are locked after a restart. Run <Code>./devagents start</Code> to unlock them; until then tokens cannot be saved or checked.</div>}
     <div class="integ-tiles">
       <Tile kind="github" name="GitHub" what="The repository this folder was cloned from" connection={github} open={open === 'github'} onOpen={() => toggle('github')}

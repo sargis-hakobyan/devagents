@@ -268,7 +268,7 @@ Browser: the project page (Projects → **Integrations →**) has "Archive proje
 
 ## Project integrations
 
-Each project can be connected to GitHub and to Jira. Both are optional and independent. Other ticket tools are connected through their MCP server; see [Ticket tools](#ticket-tools-any-jira-like-tool-with-an-mcp-server). **This stores and checks configuration only**: DevAgents does not push, open pull requests, comment on tickets or create tasks from tickets, and tasks still end in a local commit. The browser page is Projects → **Integrations** (`/ui/projects/<id>`).
+Each project can be connected to GitHub and to Jira. Both are optional and independent. Other ticket tools are connected through their MCP server; see [Ticket tools](#ticket-tools-any-jira-like-tool-with-an-mcp-server). Connecting stores and checks configuration. DevAgents does not comment on tickets or start tasks from tickets on its own, and a task still ends in a local commit. A project connected to GitHub can then publish that commit as a pull request; see [Pull requests](#pull-requests). The browser page is Projects → **Integrations** (`/ui/projects/<id>`).
 
 | | GitHub | Jira |
 | --- | --- | --- |
@@ -303,6 +303,32 @@ devagents integrations jira check|disconnect <project>
 API: `GET /projects/:id/integrations`; `PUT`/`DELETE /projects/:id/integrations/github|jira`; `POST …/github|jira/check`; `GET …/jira/options[?project=KEY]`; `POST …/jira/preview`; `PUT …/jira/rule`. They use the same bearer or session-plus-CSRF rules as every other route. Settings live in the project's record; the project `version` is not changed by them.
 
 The GitHub and Jira calls are covered by deterministic fixtures only. They have not been run against the real services.
+
+## Pull requests
+
+A project that is connected to GitHub shows **After a task finishes** on its page. **Publish** is `Off` (the default), `Ask me` or `Automatic`, and **Target branch** is the branch pull requests open into; without one, the repository's default branch is used. The other steps of the design (fixing failed checks and review comments, merging) are not implemented.
+
+- **Ask me:** a completed task gets a **Pull request** tab with **Open pull request**.
+- **Automatic:** a completed task is published within about 15 seconds. A publish that fails is recorded on the tab and waits for a click; it is not retried on its own.
+- A task keeps the choices its project had when the task was submitted. A click is also offered for a task that was finished before Publish was turned on.
+
+Publishing pushes the task's commit to a branch of the same name in the connected repository and opens a draft pull request (a ready one where the repository has no drafts). Its title is the first line of the request; its body is the task's result summary and the task ID.
+
+- Only the task's own `devagents/…` branch is pushed, never with force. A branch of that name that already holds other commits is left alone and the publish fails.
+- Before each step GitHub is asked what exists, so a repeated or interrupted publish neither pushes twice nor opens a second pull request.
+- The token is sent to Git as an HTTP header through the environment. It is never in a command line, a URL or a Git config file, and your checkout gets no remote and no changed branch.
+- The token needs read and write access to **Contents** and **Pull requests** of the repository.
+- The task records `pull-request-settings`, `pull-request-pushed`, `pull-request-opened` and `pull-request-failed` as evidence, visible under Activity.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /projects/<id>/pull-requests` | Whether GitHub is connected, and the saved choices |
+| `PUT /projects/<id>/pull-requests` | Save `{ "publish": "off" \| "ask" \| "auto", "targetBranch"?: "<branch>" }` |
+| `GET /projects/<id>/pull-requests/branches` | Branch names read from GitHub, and the default branch |
+| `GET /tasks/<id>/pull-request` | The task's choice, whether a click can publish it, the pull request or the last failure |
+| `POST /tasks/<id>/pull-request` | Publish now |
+
+There are no terminal commands for this yet. Not verified against the real GitHub: the push and the API calls are tested with a local bare repository and recorded answers.
 
 ## Task board and available tickets
 

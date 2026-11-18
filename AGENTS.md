@@ -122,7 +122,7 @@ task. Reuse that authorization within its scope rather than asking at every step
 - Developer validation and independent review remain meaningful gates. Report optional unavailable checks honestly; do not convert an unverified required acceptance criterion into success.
 - Preserve CLI bearer authentication and browser session/CSRF protections. Render model output, task text and logs as untrusted content.
 - Never expose host home directories, the Docker socket or real credentials to worker fixtures. Cleanup and compaction must prove ownership and preserve the work their contracts promise to retain.
-- DevAgents produces local results; do not add automatic pushing or merging into users' original checkouts.
+- DevAgents produces local results and never merges into or changes users' original checkouts. The only push is the pull request service's: a completed task's own `devagents/` branch, to the project's connected GitHub repository, when that project's Publish setting allows it. Agents never receive the token and cannot push.
 
 ## Technical UI Design Standard
 
