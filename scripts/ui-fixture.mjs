@@ -110,8 +110,8 @@ const fixtureRemote = async (input, init = {}) => {
     if (path === '/repos/example-org/website/branches') return reply([{ name: 'main' }, { name: 'develop' }]);
     // Reading a pull request: one failed and one passed check, one comment that counts and one that does not.
     const onePull = /^\/repos\/example-org\/website\/pulls\/(\d+)$/.exec(path); const pull = onePull && fixturePulls.find(p => p.number === Number(onePull[1]));
-    if (pull) return reply({ number: pull.number, state: 'open', merged: false, draft: pull.draft, mergeable: true, mergeable_state: 'unstable', head: { sha: 'a'.repeat(40) }, base: { ref: pull.base } });
-    if (path.endsWith('/check-runs')) return reply({ check_runs: [{ name: 'build', status: 'completed', conclusion: 'success', html_url: 'https://github.com/example-org/website/actions/runs/1' }, { name: 'test (node 24)', status: 'completed', conclusion: 'failure', html_url: 'https://github.com/example-org/website/actions/runs/2', output: { title: '1 failed, 23 passed' } }] });
+    if (pull) return reply({ number: pull.number, state: 'open', merged: false, draft: pull.draft, mergeable: true, mergeable_state: 'unstable', head: { sha: execFileSync('git', ['-C', fixtureGitHub, 'rev-parse', `refs/heads/${pull.head}`], { encoding: 'utf8' }).trim() }, base: { ref: pull.base } });
+    if (path.endsWith('/check-runs')) return reply({ check_runs: [{ name: 'build', status: 'completed', conclusion: 'success', html_url: 'https://github.com/example-org/website/actions/runs/1' }, { id: 2, name: 'test (node 24)', status: 'completed', conclusion: 'failure', html_url: 'https://github.com/example-org/website/actions/runs/2', output: { title: '1 failed, 23 passed' } }] });
     if (path.endsWith('/status')) return reply({ statuses: [] });
     if (path === '/graphql') return reply({ data: { repository: { pullRequest: { reviewThreads: { nodes: [
       { id: 'thread-1', isResolved: false, path: 'greeting.cjs', line: 1, comments: { nodes: [{ author: { login: 'reviewer-a' }, authorAssociation: 'MEMBER', body: 'The greeting should come from the shared messages file.', url: 'https://github.com/example-org/website/pull/42#discussion_r1' }] } },
@@ -149,6 +149,7 @@ const fixturePulls = []; const fixtureGitHub = join(root, 'github-remote.git');
 execFileSync('git', ['init', '-q', '--bare', fixtureGitHub]);
 const pullRequests = new PullRequestService(store, fixtureSecrets, { fetch: fixtureRemote, githubApiUrl: 'https://github.fixture.invalid', remoteUrl: () => fixtureGitHub });
 service.onSubmitted(task => pullRequests.freeze(task.id, task.projectId));
+pullRequests.attachRounds((input, key, followUp) => service.submit(input, key, followUp));
 setInterval(() => { void pullRequests.publishDue().then(() => pullRequests.syncDue()); }, 1000).unref();
 // A made-up ticket tool with an MCP server; its token is the one exported by fake-tracker.mjs.
 const trackers = new TrackerService(store, fixtureSecrets, { fetch: fakeTracker().fetcher });

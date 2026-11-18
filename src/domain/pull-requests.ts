@@ -11,9 +11,15 @@ export const PullRequestSettings = z.strictObject({
   publish: StepMode.default('off'),
   /** The branch pull requests open into. Without it, the repository's default branch. */
   targetBranch: BranchName.optional(),
+  /** A failed GitHub check starts a fix round. Needs Publish. */
+  fixChecks: StepMode.default('off'),
+  /** Unresolved review comments from people who can write to the repository start a fix round. Needs Publish. */
+  fixComments: StepMode.default('off'),
+  /** Fix rounds DevAgents may start on its own for one pull request. */
+  maxFixRounds: z.number().int().min(1).max(5).default(3),
 });
 export type PullRequestSettings = z.infer<typeof PullRequestSettings>;
-export const NO_PULL_REQUESTS: PullRequestSettings = { publish: 'off' };
+export const NO_PULL_REQUESTS: PullRequestSettings = { publish: 'off', fixChecks: 'off', fixComments: 'off', maxFixRounds: 3 };
 
 /** The pull request a task was published as. */
 export type TaskPullRequest = { number: number; url: string; repository: string; branch: string; base: string; commit: string; draft: boolean; openedAt: string; trigger: 'user' | 'setting' };
@@ -21,9 +27,28 @@ export type PublishFailure = { message: string; at: string; trigger: 'user' | 's
 /** Evidence kinds: the settings a task started with, the push, the opened pull request, and a publish that failed. */
 export const PR_SETTINGS = 'pull-request-settings'; export const PR_PUSHED = 'pull-request-pushed'; export const PR_OPENED = 'pull-request-opened'; export const PR_FAILED = 'pull-request-failed';
 
+/**
+ * A fix round: a normal task that starts from the pull request's latest commit, fixes what GitHub
+ * reported, passes the same validation and review as any task, and adds one commit to the pull request.
+ */
+export type TaskFollowUp = {
+  /** The task that owns the pull request. */
+  taskId: string; number: number; round: number;
+  /** The pull request's latest commit when the round started; the round's worktree starts there. */
+  baseSha: string; checks: string[]; comments: string[]; trigger: 'user' | 'setting';
+};
+export type RoundState = 'working' | 'needs-you' | 'pushed' | 'held' | 'failed';
+export type PullRequestRound = {
+  round: number; taskId: string; checks: string[]; comments: number; trigger: 'user' | 'setting'; startedAt: string;
+  state: RoundState;
+  /** One line about where the round stands, or why it stopped. */
+  detail: string; commit?: string;
+};
+export const PR_ROUND = 'pull-request-round'; export const PR_ROUND_PUSHED = 'pull-request-round-pushed'; export const PR_ROUND_HELD = 'pull-request-round-held'; export const PR_ROUND_FAILED = 'pull-request-round-failed';
+
 /** What GitHub last said about a task's pull request. Read by the service about once a minute while the pull request is open. */
 export type CheckStatus = 'passed' | 'failed' | 'running' | 'skipped';
-export type PullRequestCheck = { name: string; status: CheckStatus; url?: string; /** GitHub's own short description of the result. Remote text, shown as plain text. */ summary?: string };
+export type PullRequestCheck = { name: string; status: CheckStatus; url?: string; /** GitHub's id of the check run, used to read its log and annotations. */ runId?: number; /** GitHub's own short description of the result. Remote text, shown as plain text. */ summary?: string };
 export type PullRequestComment = {
   id: string; author: string;
   /** The author can write to the repository. Other comments are shown and never block or start anything. */

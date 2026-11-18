@@ -347,10 +347,11 @@ export class TaskService {
   submissionOptions() {
     return { projects: this.store.projects().filter(p => !p.archivedAt).map(p => ({ projectId: p.id, mode: p.defaultMode ?? this.config.defaultMode ?? null, source: p.defaultMode ? 'project' : this.config.defaultMode ? 'service' : 'none' })) };
   }
-  submit(input: unknown, key: string): Task {
+  /** `followUp` marks a fix round of a pull request; only the pull request service passes it. */
+  submit(input: unknown, key: string, followUp?: Task['followUp']): Task {
     this.assertExecutionAvailable();
     const task = TaskInput.parse(input);
-    const created = this.store.createTask(task, key, () => this.freezeTeam(task.teamId, task.projectId), () => this.store.project(task.projectId).defaultMode ?? this.config.defaultMode, this.config.devagentsRules);
+    const created = this.store.createTask(task, key, () => this.freezeTeam(task.teamId, task.projectId), () => this.store.project(task.projectId).defaultMode ?? this.config.defaultMode, this.config.devagentsRules, followUp);
     try { this.submitted?.(created); } catch { /* an integration's bookkeeping never refuses a task */ }
     this.runner?.enqueue(created.id); return created;
   }

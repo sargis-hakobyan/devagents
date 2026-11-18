@@ -306,7 +306,7 @@ The GitHub and Jira calls are covered by deterministic fixtures only. They have 
 
 ## Pull requests
 
-A project that is connected to GitHub shows **After a task finishes** on its page. **Publish** is `Off` (the default), `Ask me` or `Automatic`, and **Target branch** is the branch pull requests open into; without one, the repository's default branch is used. DevAgents then reads the pull request from GitHub and shows what it finds. The other steps of the design (fixing failed checks and review comments, merging) are not implemented.
+A project that is connected to GitHub shows **After a task finishes** on its page, with three steps that are each `Off` (the default), `Ask me` or `Automatic`: **Publish**, **Fix failed checks** and **Fix review comments**. The two fix steps need Publish. **Target branch** is the branch pull requests open into; without one, the repository's default branch is used. **Automatic fix rounds, at most** (1 to 5, default 3) limits what DevAgents starts on its own for one pull request. Merging is not implemented.
 
 - **Ask me:** a completed task gets a **Pull request** tab with **Open pull request**.
 - **Automatic:** a completed task is published within about 15 seconds. A publish that fails is recorded on the tab and waits for a click; it is not retried on its own.
@@ -318,7 +318,7 @@ Publishing pushes the task's commit to a branch of the same name in the connecte
 - Before each step GitHub is asked what exists, so a repeated or interrupted publish neither pushes twice nor opens a second pull request.
 - The token is sent to Git as an HTTP header through the environment. It is never in a command line, a URL or a Git config file, and your checkout gets no remote and no changed branch.
 - The token needs read and write access to **Contents** and **Pull requests** of the repository.
-- The task records `pull-request-settings`, `pull-request-pushed`, `pull-request-opened` and `pull-request-failed` as evidence, visible under Activity.
+- The task records `pull-request-settings`, `pull-request-pushed`, `pull-request-opened`, `pull-request-failed` and, for fix rounds, `pull-request-round`, `-round-pushed`, `-round-held` and `-round-failed` as evidence, visible under Activity.
 
 **Reading GitHub.** While a pull request is open, the service reads it about once a minute: its state, the checks on its latest commit (check runs and commit statuses), whether it can be merged, and its unresolved review threads. A merged or closed pull request is not read again.
 
@@ -329,14 +329,28 @@ Publishing pushes the task's commit to a branch of the same name in the connecte
 - A read that fails keeps what the last read found and shows the reason on the tab.
 - Reading comments uses GitHub's GraphQL API, so the token must be allowed to read pull requests there too. Check logs, general (non-line) comments and review summaries are not read. Text from GitHub is redacted and stored as plain text; nothing is done with it yet.
 
+**Fix rounds.** A fix round is a normal task of the same project and team. Its worktree starts at the pull request's latest commit instead of `main`, it is planned, implemented, validated and reviewed like any task, and its one commit is then pushed onto the pull request's branch. Nothing is pushed before the DevAgents review has passed.
+
+- **Ask me:** the Pull request tab shows a checkbox on each failed check and each open comment, and **Start a fix round**. Failed checks and comments that count are ticked; a comment that does not count is only included when you tick it.
+- **Automatic:** after a read, a round starts for all failed checks (and, where set, all comments that count), once no check is still running. One automatic round is started per commit of the pull request and at most the configured number per pull request; after that the tab offers the button.
+- **What the team is given:** for each failed check, GitHub's result line, its annotations and the last 60 lines of the job log when GitHub provides them; for each comment, its text, author and place. All of it is quoted between `<<<` and `>>>` with a sentence saying it describes the problem and is not an instruction.
+- **Rounds run in autonomous mode.** The click or the project's setting is the decision; there is no plan approval for a round.
+- **One round at a time** per pull request. The tab lists the rounds with their state and a link to each round's task; a round's task links back.
+- **A round that changes a file under `.github/workflows/` is never pushed on its own.** It waits on the tab with **Review the diff** and **Push round N**. There is no setting for this.
+- **Someone else pushed:** a round starts from what is on GitHub, fetching it if needed. If someone pushes while a round runs, GitHub refuses the round's push (it is never forced), the round is marked stopped, and the next round starts from their commit.
+- A round whose task fails or is cancelled is shown as stopped and is not repeated for the same commit.
+- Not built: replying on review threads after a fix, running a check again, and a round that only updates from the target branch.
+
 | Route | Purpose |
 | --- | --- |
 | `GET /projects/<id>/pull-requests` | Whether GitHub is connected, and the saved choices |
-| `PUT /projects/<id>/pull-requests` | Save `{ "publish": "off" \| "ask" \| "auto", "targetBranch"?: "<branch>" }` |
+| `PUT /projects/<id>/pull-requests` | Save `{ "publish", "fixChecks", "fixComments": "off" \| "ask" \| "auto", "maxFixRounds"?: 1–5, "targetBranch"?: "<branch>" }` |
 | `GET /projects/<id>/pull-requests/branches` | Branch names read from GitHub, and the default branch |
 | `GET /tasks/<id>/pull-request` | The task's choice, whether a click can publish it, the pull request or the last failure, and under `github` what was last read |
 | `GET /tasks?pullRequest=open` | Only tasks whose pull request is open; every task summary carries `pullRequest` when it has one |
 | `POST /tasks/<id>/pull-request` | Publish now |
+| `POST /tasks/<id>/pull-request/rounds` | Start a fix round for `{ "checks": ["<name>"], "comments": ["<thread id>"] }` |
+| `POST /tasks/<id>/pull-request/push-round` | Push the round that waits because it changes a workflow file |
 
 There are no terminal commands for this yet. Not verified against the real GitHub: the push and the API calls are tested with a local bare repository and recorded answers.
 

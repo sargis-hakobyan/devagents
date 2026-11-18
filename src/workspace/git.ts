@@ -104,8 +104,10 @@ export class WorkspaceManager {
     }
   }
   /** A fresh task branch from local main, independent of the user's checked-out branch and working files. */
-  async create(project: Project, taskId: string, request: string): Promise<Workspace> {
-    return this.createOwned(project, taskId, taskBranch(taskId, request));
+  /** `base` starts the task from a given commit instead of `main`: a fix round continues the pull request it belongs to. */
+  async create(project: Project, taskId: string, request: string, base?: string): Promise<Workspace> {
+    if (base !== undefined && !/^[a-f0-9]{40}$/.test(base)) throw new AppError('invalid_base', 'Invalid base commit');
+    return this.createOwned(project, taskId, taskBranch(taskId, request), undefined, base);
   }
   /** A work-item worktree on `<task branch>-<item id>`, branched from the recorded integration base. */
   async createItem(project: Project, taskId: string, taskBranchName: string, itemId: string, baseSha: string): Promise<{ path: string; branch: string; baseSha: string }> {
@@ -157,7 +159,8 @@ export class WorkspaceManager {
     if (configuration.split('\n').some(key => key.startsWith('filter.'))) throw new AppError('unsafe_git_config', 'Worktree checkout with repository-defined filters requires sandbox support');
     // Resolve main at creation time, not registration time. Never fall back to HEAD or a previous task.
     const baseSha = source ?? await mainCommit(project.path);
-    const originalHead = source === undefined ? await git(project.path, ['rev-parse', '--verify', 'HEAD']) : undefined;
+    // The task's own worktree guards the user's checkout; item worktrees branch from a recorded snapshot instead.
+    const originalHead = itemId === undefined ? await git(project.path, ['rev-parse', '--verify', 'HEAD']) : undefined;
     const parent = resolve(this.dataDir, 'worktrees');
     await mkdir(parent, { recursive: true, mode: 0o700 });
     const owner = itemId ? `${taskId}-${itemId}` : taskId;

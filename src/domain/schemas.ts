@@ -137,6 +137,8 @@ export const TaskInput = z.strictObject({ projectId: ProjectId, request: z.strin
 export type Task = Omit<z.infer<typeof TaskInput>, 'ticket'> & {
   /** The ticket this task was started from. The ticket stays the source of truth; the task keeps the text it was given and the link. */
   ticket?: TaskTicket;
+  /** Set on a fix round of a pull request; absent on every other task. */
+  followUp?: import('./pull-requests.js').TaskFollowUp;
   /** Frozen service policy; absent on legacy tasks, which retain strict rules. */
   devagentsRules?: boolean;
   id: string; runId: string; state: TaskState; version: number;

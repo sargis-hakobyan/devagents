@@ -515,7 +515,7 @@ export class Store {
     if (!integrations?.trackers?.some(c => c.trackerId === ref.source)) throw new AppError('not_connected', 'This ticket tool is not connected for this project', 422);
     return { source: ref.source, name: this.tracker(ref.source).name, key: ref.key, ...(ref.url ? { url: ref.url } : {}), ...read };
   }
-  createTask(input: unknown, key: string, freeze?: (task: Task) => TaskTeam | undefined, defaultMode?: () => Task['mode'], devagentsRules = true): Task {
+  createTask(input: unknown, key: string, freeze?: (task: Task) => TaskTeam | undefined, defaultMode?: () => Task['mode'], devagentsRules = true, followUp?: Task['followUp']): Task {
     const parsed = TaskInput.parse(input);
     if (this.project(parsed.projectId).archivedAt) throw new AppError('project_archived', 'This project is archived. Restore it before submitting work.', 409);
     const clean = redactValues(parsed, this.secrets) as typeof parsed;
@@ -532,7 +532,7 @@ export class Store {
       const now = new Date().toISOString();
       const mode = clean.mode ?? defaultMode?.();
       const { ticket: ref, ...rest } = clean; const ticket = ref ? this.taskTicket(rest.projectId, ref) : undefined;
-      let task: Task = { ...rest, ...(ticket ? { ticket } : {}), ...(mode ? { mode } : {}), devagentsRules, id: randomUUID(), runId: randomUUID(), state: mode ? 'planning' : 'awaiting_mode', version: 0, createdAt: now, updatedAt: now };
+      let task: Task = { ...rest, ...(ticket ? { ticket } : {}), ...(followUp ? { followUp } : {}), ...(mode ? { mode } : {}), devagentsRules, id: randomUUID(), runId: randomUUID(), state: mode ? 'planning' : 'awaiting_mode', version: 0, createdAt: now, updatedAt: now };
       const team = freeze?.(task);
       if (team) task = { ...task, team, agents: team.members.map(m => ({ ...m, schemaVersion: 1 as const, instructionsFile: 'team', source: `team:${team.id}@${team.revision}` })) };
       this.db.prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)').run(task.id, task.projectId, task.state, task.version, this.taskJson(task));
@@ -575,6 +575,10 @@ export class Store {
   evidence(id: string, after = 0, limit = 100000): { sequence: number; kind: string; at: string; data: unknown }[] {
     this.task(id);
     return this.db.prepare('SELECT sequence,kind,data FROM evidence WHERE task_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(id, after, limit).map(r => ({ sequence: Number(r.sequence), kind: String(r.kind), ...JSON.parse(String(r.data)) }));
+  }
+  /** Evidence of the given kinds in order, without loading the rest of the task's record. */
+  evidenceOf(id: string, kinds: string[]): { sequence: number; kind: string; at: string; data: unknown }[] {
+    return this.db.prepare(`SELECT sequence,kind,data FROM evidence WHERE task_id=? AND kind IN (${kinds.map(() => '?').join(',')}) ORDER BY sequence`).all(id, ...kinds).map(r => ({ sequence: Number(r.sequence), kind: String(r.kind), ...JSON.parse(String(r.data)) }));
   }
   /** The newest evidence of one kind, without loading the task's whole record. */
   lastEvidence(id: string, kind: string): { sequence: number; at: string; data: unknown } | undefined {

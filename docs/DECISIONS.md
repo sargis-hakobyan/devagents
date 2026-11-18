@@ -607,3 +607,18 @@ Second step of the pull request work: the service reads each open pull request a
 - **The board column is `U12-PR-States` as drawn,** except that it is hidden while empty, so a workspace without GitHub looks as before.
 - **Not built:** reading check logs (needed to hand a failure to the team), general comments and review summaries, marking a draft ready, a "read now" control, and attention items on the Overview.
 - **Not verified against the real GitHub.** The answers GitHub gives for check runs, statuses and review threads are recorded fixtures written from its documentation.
+
+## Pull requests, step 3: fix rounds — 2026-11-18
+
+Third step: a failed GitHub check or a review comment becomes a fix round, by a click or on its own, and the reviewed result is pushed onto the pull request.
+
+- **A round is a normal task with one extra field** (`followUp`), as the plan proposed. The only change to execution is that a task's worktree can start from a given commit instead of `main`. Validation, QA, the DevAgents review and the single commit are untouched, which is what keeps the DevAgents review ahead of every push.
+- **A finished round is pushed without a second click.** The click that started it, or the project's setting, is the decision. The owner asked for as much autonomy as the settings allow.
+- **Rounds are autonomous.** A plan approval inside a round would stop an automatic fix; the project's default mode is not used for rounds.
+- **Workflow files always wait for a click,** decided by the owner on 2026-11-18. The check is on the round's diff, not on what the round was asked to do.
+- **One automatic round per commit and a limit per pull request.** A round that failed, or fixed nothing, is not started again for the same state of the pull request. This follows the standing rule against repeating what did not work.
+- **GitHub's text is quoted, not obeyed.** Check output and comments reach the team between markers they cannot close, with an explicit sentence, and redacted by the store like any task text.
+- **The job log is best effort.** GitHub serves it from a signed address it redirects to; the token is sent to GitHub's API only. Where no log or annotation is available the team is told to reproduce the failure.
+- **Differs from the design:** the tab has no four-step strip yet; rounds show a state and a link, not the plan-to-push track; "Comments that count" is still fixed to people who can write to the repository.
+- **Not built:** replies on review threads, running an unrelated failed check again, the update-from-target round, detecting "the same failure came back", and merging.
+- **Not verified against the real GitHub or with a real model.** The round's path through planning, implementation and review was exercised by fixtures that play the team.

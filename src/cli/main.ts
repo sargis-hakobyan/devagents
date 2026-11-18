@@ -88,6 +88,7 @@ cli.command('serve').description('Start the local API').action(async () => {
   // A task keeps the pull request choices of its project; finished tasks of projects that publish on their own are picked up below.
   const pullRequests = new PullRequestService(store, secretStore);
   service.onSubmitted(task => pullRequests.freeze(task.id, task.projectId));
+  pullRequests.attachRounds((input, key, followUp) => service.submit(input, key, followUp));
   // A task started from a ticket takes the ticket's pictures and short text files with it while it works.
   service.attachTicketFiles((task, directory) => downloadTicketFiles({ integrations, trackers }, task.projectId, task.ticket!, directory));
   const providerOf = (kind: string) => config.providers.find(p => p.kind === kind && !p.baseUrl);

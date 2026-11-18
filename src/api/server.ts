@@ -249,7 +249,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       }
       // What happens on GitHub after a task finishes, per project and per task.
       const projectPulls = /^\/projects\/([a-z0-9][a-z0-9-]{0,63})\/pull-requests(\/branches)?$/.exec(path);
-      const taskPull = /^\/tasks\/([a-f0-9-]{36})\/pull-request$/.exec(path);
+      const taskPull = /^\/tasks\/([a-f0-9-]{36})\/pull-request(?:\/(rounds|push-round))?$/.exec(path);
       if (projectPulls || taskPull) {
         const pulls = options.pullRequests;
         if (!pulls) throw new AppError('integrations_unavailable', 'Integrations are not enabled on this service.', 503);
@@ -259,8 +259,10 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
           if (req.method === 'PUT' && !projectPulls[2]) return send(res, 200, pulls.save(id, await body(req, 4096)));
         } else {
           const id = service.store.task(taskPull![1]!).id;
-          if (req.method === 'GET') return send(res, 200, pulls.view(id));
-          if (req.method === 'POST') { await pulls.publish(id, 'user'); return send(res, 200, pulls.view(id)); }
+          if (req.method === 'GET' && !taskPull![2]) return send(res, 200, pulls.view(id));
+          if (req.method === 'POST' && !taskPull![2]) { await pulls.publish(id, 'user'); return send(res, 200, pulls.view(id)); }
+          if (req.method === 'POST' && taskPull![2] === 'rounds') { await pulls.startRound(id, await body(req, 16384), 'user'); return send(res, 200, pulls.view(id)); }
+          if (req.method === 'POST' && taskPull![2] === 'push-round') { await pulls.releaseRound(id); return send(res, 200, pulls.view(id)); }
         }
         throw new AppError('method_not_allowed', 'Method not allowed', 405);
       }

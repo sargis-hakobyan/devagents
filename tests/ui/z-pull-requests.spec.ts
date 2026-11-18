@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fixtureDir, port } from './playwright.config.js';
 
 // The fixture's GitHub is a local bare repository and canned answers; this token is made up.
+// Named to run last: it leaves a pull request and a fix round on a shared fixture task, which other specs find by its title.
 const GITHUB = `github_pat_${'fixture0'.repeat(4)}`;
 
 test('a connected project turns on Publish, and a finished task is opened as a pull request with a click', async ({ page }) => {
@@ -15,6 +16,7 @@ test('a connected project turns on Publish, and a finished task is opened as a p
   const tasks = await (await call('/tasks?limit=50', 'GET')).json() as { tasks: { id: string; state: string; request: string }[] };
   const done = tasks.tasks.find(t => t.state === 'completed' && t.request.startsWith('Implement three modules'))!;
   const link = await (await call('/ui/bootstrap', 'POST', {})).json() as { url: string };
+  let roundId = '';
   try {
     await page.goto(link.url); await page.goto(`${base}/ui/tasks/${done.id}`);
     await expect(page.getByRole('tab', { name: 'Result' })).toBeVisible();
@@ -27,6 +29,10 @@ test('a connected project turns on Publish, and a finished task is opened as a p
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
     await publish.getByRole('button', { name: 'Ask me' }).click();
     await expect(page.getByLabel('Target branch').locator('option')).toHaveText(['Default branch (main)', 'main', 'develop']);
+    // The fix rows follow Publish: they are locked while it is off.
+    const fixChecks = page.getByRole('group', { name: 'Fix failed checks' }); const fixComments = page.getByRole('group', { name: 'Fix review comments' });
+    await fixChecks.getByRole('button', { name: 'Ask me' }).click(); await fixComments.getByRole('button', { name: 'Ask me' }).click();
+    await expect(page.getByLabel('Automatic fix rounds, at most')).toHaveValue('3');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
     await expect(publish.getByRole('button', { name: 'Ask me' })).toHaveAttribute('aria-pressed', 'true');
@@ -44,11 +50,24 @@ test('a connected project turns on Publish, and a finished task is opened as a p
     await expect(page.getByRole('link', { name: 'View on GitHub' })).toHaveAttribute('href', /^https:\/\/github\.com\/example-org\/website\/pull\/\d+$/);
     await expect(page.getByText(/^PR #\d+ · 1 check failed$/)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open pull request' })).toHaveCount(0);
+    // A fix round: the failed check and the comment that counts are ticked, the outside comment is not.
+    await expect(checks.getByRole('checkbox', { name: 'Fix test (node 24)' })).toBeChecked();
+    await expect(comments.getByRole('checkbox', { name: 'Fix the comment by reviewer-a' })).toBeChecked();
+    await expect(comments.getByRole('checkbox', { name: 'Fix the comment by outside-user' })).not.toBeChecked();
+    await page.getByRole('button', { name: 'Start a fix round · 2 items' }).click();
+    const rounds = page.locator('section', { hasText: 'Rounds' }).last();
+    await expect(rounds).toContainText('The task itself'); await expect(rounds).toContainText('Fix test (node 24) and 1 comment'); await expect(rounds).toContainText('Working');
+    await expect(page.getByRole('button', { name: /Start a fix round/ })).toHaveCount(0);
+    const roundLink = rounds.getByRole('link', { name: 'Fix test (node 24) and 1 comment' }); roundId = (await roundLink.getAttribute('href'))!.split('/').pop()!;
+    await roundLink.click();
+    await expect(page.getByRole('link', { name: /^Round 2 of PR #\d+$/ })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Fix pull request #');
     await page.goto(`${base}/ui/tasks`);
     const column = page.getByRole('region', { name: /^Pull request, 1 task/ });
     await expect(column).toContainText('Implement three modules'); await expect(column).toContainText('1 check failed');
     await expect(page.getByRole('region', { name: /^Done,/ })).not.toContainText('Implement three modules');
   } finally {
+    if (roundId) { const round = await (await call(`/tasks/${roundId}`, 'GET')).json() as { version: number }; await call(`/tasks/${roundId}/cancel`, 'POST', { expectedVersion: round.version }); }
     await call('/projects/fixture/pull-requests', 'PUT', { publish: 'off' });
     await call('/projects/fixture/integrations/github', 'DELETE');
   }
