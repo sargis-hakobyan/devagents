@@ -122,7 +122,7 @@ export function PullRequestTab({ taskId, view, reload }: { taskId: string; view:
   const checks = github?.checks ?? []; const comments = github?.comments ?? []; const open = github?.state === 'open';
   const failed = checks.filter(c => c.status === 'failed').length; const running = checks.filter(c => c.status === 'running').length; const passed = checks.filter(c => c.status === 'passed').length;
   const counted = comments.filter(c => c.counts).length;
-  const rounds = view.rounds ?? []; const canFix = view.canFix ?? { checks: false, comments: false };
+  const rounds = view.rounds ?? []; const canFix = view.canFix ?? { checks: false, comments: false, conflict: false };
   // Failed checks and comments that count are ticked to begin with; a comment that does not count is only included when ticked.
   const picked = (id: string, byDefault: boolean) => byDefault !== skipped.includes(id);
   const fixChecks = canFix.checks ? checks.filter(c => c.status === 'failed' && picked(`check:${c.name}`, true)).map(c => c.name) : [];
@@ -130,7 +130,7 @@ export function PullRequestTab({ taskId, view, reload }: { taskId: string; view:
   const chosen = fixChecks.length + fixComments.length;
   const ROUND: Record<string, { tone: Tone; text: string }> = { working: { tone: 'run', text: 'Working' }, 'needs-you': { tone: 'warn', text: 'Needs you' }, pushed: { tone: 'ok', text: '✓ Pushed' }, held: { tone: 'warn', text: 'Needs you' }, failed: { tone: 'bad', text: '✕ Stopped' } };
   return <>
-    <Card title={`Pull request #${pr.number}`} right={<a class="btn small" href={pr.url} target="_blank" rel="noreferrer">View on GitHub</a>}>
+    <Card title={`Pull request #${pr.number}`} right={<a class="btn small" href={pr.url} rel="noreferrer">View on GitHub</a>}>
       <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-start' }}>
         <span style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           {github ? <Chip tone={TONES[github.status.code]}>{github.status.text.replace(/^./, c => c.toUpperCase())}</Chip> : <Chip tone="ok">✓ Opened</Chip>}
@@ -142,7 +142,8 @@ export function PullRequestTab({ taskId, view, reload }: { taskId: string; view:
         {!error && view.mergeFailure && <div class="note warn" role="alert">{view.mergeFailure}</div>}
         {view.localBehind && <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}><span style={{ fontSize: '13.5px' }}>Your local <span class="mono">{github?.base ?? pr.base}</span> does not have this merge yet.</span><pre class="pr-cmd">git pull</pre></div>}
         {view.canMerge && <button type="button" class="btn primary" disabled={busy} onClick={() => void act('merge', {})}>{busy ? 'Merging…' : 'Merge pull request'}</button>}
-        {(canFix.checks || canFix.comments) && <button type="button" class="btn primary" disabled={busy || chosen === 0} onClick={() => void act('rounds', { checks: fixChecks, comments: fixComments })}>{busy ? 'Starting…' : `Start a fix round · ${chosen} item${chosen === 1 ? '' : 's'}`}</button>}
+        {canFix.conflict && <button type="button" class="btn primary" disabled={busy} onClick={() => void act('rounds', { conflict: true })}>{busy ? 'Starting…' : `Resolve the conflict with ${github?.base ?? pr.base}`}</button>}
+        {!canFix.conflict && (canFix.checks || canFix.comments) && <button type="button" class="btn primary" disabled={busy || chosen === 0} onClick={() => void act('rounds', { checks: fixChecks, comments: fixComments })}>{busy ? 'Starting…' : `Start a fix round · ${chosen} item${chosen === 1 ? '' : 's'}`}</button>}
       </div>
     </Card>
     {rounds.length > 0 && <div style={{ marginTop: '16px' }}><Card title="Rounds">
@@ -151,7 +152,7 @@ export function PullRequestTab({ taskId, view, reload }: { taskId: string; view:
         {rounds.map(r => <li key={r.round}>
           <span class="pr-num">{r.round}</span>
           <div style={{ minWidth: 0, flex: 1 }}>
-            <a href={`/ui/tasks/${r.taskId}`} style={{ fontWeight: 700 }}>{[r.checks.length ? `Fix ${r.checks.join(', ')}` : '', r.comments ? `${r.comments} comment${r.comments === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ')}</a>
+            <a href={`/ui/tasks/${r.taskId}`} style={{ fontWeight: 700 }}>{r.conflict ? `Resolve the conflict with ${github?.base ?? pr.base}` : [r.checks.length ? `Fix ${r.checks.join(', ')}` : '', r.comments ? `${r.comments} comment${r.comments === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ')}</a>
             <div class="muted wrap-anywhere" style={{ fontSize: '13px' }}>{r.detail}{r.commit ? <> · <span class="mono">{r.commit.slice(0, 7)}</span></> : null}{r.trigger === 'setting' ? ' · started on its own' : ''}</div>
             {r.state === 'held' && <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}><a class="btn small" href={`/ui/tasks/${r.taskId}`}>Review the diff</a><button type="button" class="btn small primary" disabled={busy} onClick={() => void act('push-round', {})}>Push round {r.round}</button></div>}
           </div>
@@ -162,14 +163,14 @@ export function PullRequestTab({ taskId, view, reload }: { taskId: string; view:
     {open && github?.syncedAt && <div class="pr-two">
       <Card title="GitHub checks" right={checks.length > 0 && <Chip tone={failed ? 'bad' : running ? 'run' : 'ok'}>{[failed && count(failed, 'failed'), running && count(running, 'running'), passed && count(passed, 'passed')].filter(Boolean).join(' · ') || 'None counted'}</Chip>}>
         {checks.length === 0 ? <div class="pr-none">No checks on this commit</div> : <ul class="pr-list">{checks.map(c => <li key={c.name} class={c.status === 'failed' ? 'pr-failed' : ''}>
-          {canFix.checks && c.status === 'failed' && <input type="checkbox" checked={picked(`check:${c.name}`, true)} aria-label={`Fix ${c.name}`} disabled={busy} onChange={() => toggle(`check:${c.name}`)} />}
+          {!canFix.conflict && canFix.checks && c.status === 'failed' && <input type="checkbox" checked={picked(`check:${c.name}`, true)} aria-label={`Fix ${c.name}`} disabled={busy} onChange={() => toggle(`check:${c.name}`)} />}
           <span class={`pr-ico ${CHECK[c.status].tone}`} aria-hidden="true">{CHECK[c.status].icon}</span>
           <div style={{ minWidth: 0, flex: 1 }}><b class="wrap-anywhere">{c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.name}</a> : c.name}</b><div class="muted wrap-anywhere" style={{ fontSize: '13px' }}>{CHECK[c.status].label}{c.summary ? ` · ${c.summary}` : ''}</div></div>
         </li>)}</ul>}
       </Card>
       <Card title="GitHub review comments" right={comments.length > 0 && <Chip tone={counted ? 'warn' : 'neutral'}>{counted} open</Chip>}>
         {comments.length === 0 ? <div class="pr-none">No open comments</div> : <ul class="pr-list">{comments.map(c => <li key={c.id}>
-          {canFix.comments && <input type="checkbox" checked={picked(`comment:${c.id}`, c.counts)} aria-label={`Fix the comment by ${c.author}`} disabled={busy} onChange={() => toggle(`comment:${c.id}`)} />}
+          {!canFix.conflict && canFix.comments && <input type="checkbox" checked={picked(`comment:${c.id}`, c.counts)} aria-label={`Fix the comment by ${c.author}`} disabled={busy} onChange={() => toggle(`comment:${c.id}`)} />}
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
               <span class="wrap-anywhere">{c.path ? <><b class="mono">{c.path}</b>{c.line ? <span class="muted"> line {c.line}</span> : null}</> : <b>General comment</b>}</span>

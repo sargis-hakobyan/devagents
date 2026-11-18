@@ -73,7 +73,7 @@ Model choices do not guarantee account access or quota. DevAgents stores task st
 
 ## Execution boundaries
 
-- **Work starts from local `main`.** Each task gets a clean worktree and its own branch. Uncommitted changes and other branches are not copied. DevAgents never merges into or changes your checkout; a pull request is merged on GitHub only, and only when the project's Merge setting allows it. It pushes nothing unless a project is connected to GitHub and its Publish setting is turned on; then only the task's own `devagents/` branch is pushed.
+- **Work starts from local `main`, or from GitHub for a connected project.** A project connected to GitHub fetches its target branch right before each task and starts there, without changing your local branches. Each task gets a clean worktree and its own branch. Uncommitted changes and other branches are not copied. DevAgents never merges into or changes your checkout; a pull request is merged on GitHub only, and only when the project's Merge setting allows it. It pushes nothing unless a project is connected to GitHub and its Publish setting is turned on; then only the task's own `devagents/` branch is pushed.
 - **The engine sandbox stays active.** Optional extra DevAgents rules are off by default. Docker credentials are encrypted using your OS keychain; project access is explicitly mounted.
 - **QA is opt-in.** `qaEnabled: false` keeps separate agent QA disabled. Developer validation and independent review still run. Read the [QA contract](docs/REFERENCE.md#optional-qa-gate) before enabling it.
 - **Verification has evidence.** Unavailable optional checks are reported as limitations. A required acceptance criterion blocked at the QA gate prevents a final task commit.

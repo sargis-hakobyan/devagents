@@ -157,6 +157,9 @@ execFileSync('git', ['init', '-q', '--bare', fixtureGitHub]);
 const pullRequests = new PullRequestService(store, fixtureSecrets, { fetch: fixtureRemote, githubApiUrl: 'https://github.fixture.invalid', remoteUrl: () => fixtureGitHub });
 service.onSubmitted(task => pullRequests.freeze(task.id, task.projectId));
 pullRequests.attachRounds((input, key, followUp) => service.submit(input, key, followUp));
+service.onStart(task => pullRequests.startCommit(task));
+// The fixture's GitHub starts with the website project's main, so a connected project has a target branch to start from.
+execFileSync('git', ['-C', websiteProject, '-c', 'protocol.file.allow=always', 'push', '-q', fixtureGitHub, 'main:refs/heads/main']);
 setInterval(() => { void pullRequests.publishDue().then(() => pullRequests.syncDue()); }, 1000).unref();
 // A made-up ticket tool with an MCP server; its token is the one exported by fake-tracker.mjs.
 const trackers = new TrackerService(store, fixtureSecrets, { fetch: fakeTracker().fetcher });

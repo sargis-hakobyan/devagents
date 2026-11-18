@@ -56,6 +56,10 @@ export class TaskService {
   private submitted?: (task: Task) => void;
   /** Runs once for every accepted task, so an integration can record what the task starts with. */
   onSubmitted(hook: (task: Task) => void): void { this.submitted = hook; }
+  private startBase?: (task: Task) => Promise<string | undefined>;
+  /** Lets an integration name the commit a task's worktree starts from. Without one, or when it names none, the task starts from local `main`. */
+  onStart(resolve: (task: Task) => Promise<string | undefined>): void { this.startBase = resolve; }
+  async startCommit(task: Task): Promise<string | undefined> { return this.startBase ? this.startBase(task) : task.followUp?.baseSha; }
   private ticketDirectory(id: string): string {
     if (!/^[a-f0-9-]{36}$/.test(id)) throw new AppError('invalid_task', 'Invalid task identifier');
     return join(this.dataDir, 'ticket-files', id);

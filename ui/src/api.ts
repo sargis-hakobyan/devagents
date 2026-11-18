@@ -93,14 +93,14 @@ export const evidenceFacts = (e: Evidence): Record<string, unknown> => e.truncat
 export type StepMode = 'off' | 'ask' | 'auto';
 export type ProjectPullRequests = { connected: boolean; repository?: string; settings: { publish: StepMode; targetBranch?: string; fixChecks: StepMode; fixComments: StepMode; maxFixRounds: number; merge: StepMode; mergeMethod: 'squash' | 'merge' | 'rebase' } };
 /** A fix round: a normal task that adds one commit to the pull request. */
-export type PullRequestRound = { round: number; taskId: string; checks: string[]; comments: number; trigger: 'user' | 'setting'; startedAt: string; state: 'working' | 'needs-you' | 'pushed' | 'held' | 'failed'; detail: string; commit?: string };
+export type PullRequestRound = { round: number; taskId: string; checks: string[]; comments: number; conflict?: boolean; trigger: 'user' | 'setting'; startedAt: string; state: 'working' | 'needs-you' | 'pushed' | 'held' | 'failed'; detail: string; commit?: string };
 export type TaskPullRequest = { number: number; url: string; repository: string; branch: string; base: string; commit: string; draft: boolean; openedAt: string; trigger: 'user' | 'setting' };
 export type PullRequestCheck = { name: string; status: 'passed' | 'failed' | 'running' | 'skipped'; url?: string; summary?: string };
 export type PullRequestComment = { id: string; author: string; counts: boolean; path?: string; line?: number; body: string; url?: string };
 export type PullRequestStatusCode = 'not-read' | 'merged' | 'closed' | 'checks-failed' | 'checks-running' | 'conflict' | 'comments-open' | 'waiting' | 'ready';
 /** What GitHub last said about a pull request; `error` is why the newest read failed. */
 export type PullRequestSnapshot = { number: number; base: string; state: 'open' | 'merged' | 'closed'; draft: boolean; headSha: string; mergeable: 'clean' | 'conflict' | 'blocked' | 'unknown'; checks: PullRequestCheck[]; comments: PullRequestComment[]; syncedAt?: string; attemptedAt?: string; error?: string; status: { code: PullRequestStatusCode; text: string } };
-export type TaskPullRequestView = { mode: StepMode; canPublish: boolean; publishing: boolean; pullRequest?: TaskPullRequest; failure?: { message: string; at: string; trigger: 'user' | 'setting' }; github?: PullRequestSnapshot; rounds?: PullRequestRound[]; canFix?: { checks: boolean; comments: boolean }; canMerge?: boolean; mergeFailure?: string; localBehind?: boolean; roundOf?: { taskId: string; number: number; round: number } };
+export type TaskPullRequestView = { mode: StepMode; canPublish: boolean; publishing: boolean; pullRequest?: TaskPullRequest; failure?: { message: string; at: string; trigger: 'user' | 'setting' }; github?: PullRequestSnapshot; rounds?: PullRequestRound[]; canFix?: { checks: boolean; comments: boolean; conflict: boolean }; canMerge?: boolean; mergeFailure?: string; localBehind?: boolean; roundOf?: { taskId: string; number: number; round: number } };
 
 /** Per-project GitHub and Jira connections. A token is write-only: it is sent once and never returned. */
 export type ConnectionState = 'connected' | 'expiring' | 'expired' | 'rejected' | 'unreachable' | 'locked';

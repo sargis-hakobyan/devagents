@@ -173,6 +173,10 @@ Diff display caps are **64 KiB per file, 256 KiB total text, 200 files**, plus a
 
 ## Task branches and starting commits
 
+**A project connected to GitHub starts from GitHub.** Right before a task's worktree is created, the service fetches the project's target branch (the one set under "After a task finishes", otherwise the repository's default branch) and the task starts from that commit. The fetch goes into a reference DevAgents owns (`refs/devagents/remote/<branch>`): your local branches, remote-tracking references and working files are not touched, and commits that exist only in your local `main` are not part of the task. If the branch cannot be fetched, the task fails with that reason and does not fall back to local `main`. The task page shows "Started from `<branch>` on GitHub at `<commit>`", recorded as `task-start` evidence.
+
+**A project without a GitHub connection starts from local `main`,** as described in the rest of this section.
+
 Every newly created task worktree starts from an explicitly resolved `refs/heads/main^{commit}`. The service resolves this at creation time, so registration does not freeze the starting commit. It creates a new `devagents/<request-slug>-<short-task-id>` branch with `git worktree add -b`; existing branches are never reset or reused. A missing local `main` is an actionable error, with no fallback to `HEAD`, a previous task branch or `origin/main`. No automatic fetch, pull, merge or modification of the original checkout occurs. Local staged, unstaged, untracked and ignored files are not copied into the task worktree.
 
 The recorded `workspace.baseSha` is the immutable task starting commit. `workspace.originalHead` separately records the original checkout HEAD for divergence checks and review evidence, because that checkout may be on another branch. Legacy workspaces without this field retain their existing HEAD check and starting commit. Existing tasks are not rebased by an upgrade. Worker branches within one task still start from private dependency checkpoints rooted in that task, preserving completed prerequisite work.
@@ -339,7 +343,8 @@ Publishing pushes the task's commit to a branch of the same name in the connecte
 - **A round that changes a file under `.github/workflows/` is never pushed on its own.** It waits on the tab with **Review the diff** and **Push round N**. There is no setting for this.
 - **Someone else pushed:** a round starts from what is on GitHub, fetching it if needed. If someone pushes while a round runs, GitHub refuses the round's push (it is never forced), the round is marked stopped, and the next round starts from their commit.
 - A round whose task fails or is cancelled is shown as stopped and is not repeated for the same commit.
-- Not built: replying on review threads after a fix, running a check again, and a round that only updates from the target branch.
+- **A conflict with the target branch** is handled by a round of its own, which follows the Fix failed checks setting. This happens, for example, when two tasks ran in parallel and the other one was merged first. The service fetches the target branch and lets Git merge both sides locally. What Git cannot combine stays in the files as conflict markers, in a merge commit that exists only on this computer. The round starts there, the team resolves the markers and runs the checks, and the reviewed result is pushed on top, so the pull request then contains the target branch. A result that still holds a conflict marker is not pushed. While a conflict is open it comes first: failed checks and comments are judged again on the merged result.
+- Not built: replying on review threads after a fix, and running a check again.
 
 **Merging.** A pull request can be merged when its status is "ready to merge": no check failed or is running, no comment that counts is open, GitHub reports no conflict and does not block it, and no fix round is open.
 
@@ -349,7 +354,7 @@ Publishing pushes the task's commit to a branch of the same name in the connecte
 - A refused merge is shown on the tab with the reason. An automatic merge is attempted once per commit; after a refusal it waits for a click and the task appears in Needs you.
 - After a merge the tab says so. Your checkout is not changed: when the local target branch does not hold the merge, the tab shows `git pull`.
 - **Needs you** on the Tasks board also lists pull requests where a fix changes a workflow file, a fix round waits for a decision, the automatic round limit is reached, or the last automatic round stopped.
-- Not built: bringing a moved target branch into the pull request, running an unrelated failed check again, and deleting the merged branch (left to the repository's own setting).
+- Not built: running an unrelated failed check again, and deleting the merged branch (left to the repository's own setting).
 
 | Route | Purpose |
 | --- | --- |
@@ -359,7 +364,7 @@ Publishing pushes the task's commit to a branch of the same name in the connecte
 | `GET /tasks/<id>/pull-request` | The task's choice, whether a click can publish it, the pull request or the last failure, and under `github` what was last read |
 | `GET /tasks?pullRequest=open` | Only tasks whose pull request is open; every task summary carries `pullRequest` when it has one |
 | `POST /tasks/<id>/pull-request` | Publish now |
-| `POST /tasks/<id>/pull-request/rounds` | Start a fix round for `{ "checks": ["<name>"], "comments": ["<thread id>"] }` |
+| `POST /tasks/<id>/pull-request/rounds` | Start a fix round for `{ "checks": ["<name>"], "comments": ["<thread id>"] }`, or `{ "conflict": true }` to resolve a conflict with the target branch |
 | `POST /tasks/<id>/pull-request/merge` | Merge now |
 | `POST /tasks/<id>/pull-request/push-round` | Push the round that waits because it changes a workflow file |
 

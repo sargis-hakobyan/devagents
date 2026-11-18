@@ -164,7 +164,7 @@ export class TaskExecution {
     if (!task.workspace) {
       await assertDiskSpace(this.service.dataDir, this.service.config.minFreeDiskBytes);
       this.service.store.record(id, 'worktree-intent', { owner: task.id });
-      const workspace = await new WorkspaceManager(this.service.dataDir).create(this.service.store.project(task.projectId), task.id, task.request, task.followUp?.baseSha);
+      const workspace = await new WorkspaceManager(this.service.dataDir).create(this.service.store.project(task.projectId), task.id, task.request, await this.service.startCommit(task));
       task = this.ensureActive(id, signal);
       task = this.service.store.checkpoint(id, task.version, { workspace, agents: roster }, 'Worktree created and agent definitions snapshotted');
     }

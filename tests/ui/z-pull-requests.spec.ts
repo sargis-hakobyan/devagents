@@ -75,7 +75,7 @@ test('a connected project turns on Publish, and a finished task is opened as a p
     await page.goto(`${base}/ui/tasks`);
     const band = page.getByRole('region', { name: /^Needs you/ });
     await expect(band).toContainText(/PR #\d+ · ready to merge/, { timeout: 20000 });
-    await band.getByRole('link', { name: 'Open the pull request' }).click();
+    await band.getByRole('link', { name: 'Open the task' }).click();
     await page.getByRole('tab', { name: /Pull request · #\d+/ }).click();
     await expect(page.getByRole('button', { name: /Start a fix round/ })).toHaveCount(0);
     await page.getByRole('button', { name: 'Merge pull request' }).click();

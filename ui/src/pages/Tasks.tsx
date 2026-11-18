@@ -53,7 +53,7 @@ function NeedsYou({ tasks, now }: { tasks: TaskSummary[]; now: number }) {
   if (!tasks.length) return null;
   return <section class="kb-you" aria-label={`Needs you, ${tasks.length} task${tasks.length === 1 ? '' : 's'}`}>
     <div class="kb-you-head"><b>Needs you</b><span class="kb-count">{tasks.length}</span></div>
-    <div class="kb-you-cards">{tasks.map(task => { const { why, action } = task.pullRequest?.attention ? { why: `PR #${task.pullRequest.number} · ${task.pullRequest.attention}`, action: 'Open the pull request' } : waitingAction(task.state); return <div key={task.id} class="kb-ycard">
+    <div class="kb-you-cards">{tasks.map(task => { const { why, action } = task.pullRequest?.attention ? { why: `PR #${task.pullRequest.number} · ${task.pullRequest.attention}`, action: 'Open the task' } : waitingAction(task.state); return <div key={task.id} class="kb-ycard">
       <span class="kb-ytitle">{truncate(task.request, 110)}</span>
       <a class="btn primary small" href={`/ui/tasks/${task.id}`}>{action}</a>
       <span class="kb-why"><span aria-hidden="true">● </span>{why}</span>

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
+import { writeFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createApi } from '../../src/api/server.js';
@@ -79,8 +80,17 @@ async function setup(options: { connected?: boolean } = {}) {
     raw.prepare('UPDATE tasks SET state=?, data=? WHERE id=?').run('completed', JSON.stringify({ ...task, workspace, state: 'completed', outcome: { commit, repairCycles: 0 } }), task.id); raw.close();
     return commit;
   };
+  /** Someone else's commit on a branch of the GitHub repository, made from a separate clone. */
+  const remoteCommit = (branch: string, files: Record<string, string>) => {
+    const other = join(f.root, `other-${count += 1}`);
+    if (!execFileSync('git', ['-C', bare, 'for-each-ref', `refs/heads/${branch}`], { encoding: 'utf8' })) execFileSync('git', ['-C', f.project, '-c', 'protocol.file.allow=always', 'push', '-q', bare, `main:refs/heads/${branch}`]);
+    execFileSync('git', ['clone', '-q', '-b', branch, bare, other]);
+    for (const [name, content] of Object.entries(files)) writeFileSync(join(other, name), content);
+    execFileSync('git', ['-C', other, 'add', '.']); execFileSync('git', ['-C', other, '-c', 'user.name=Other', '-c', 'user.email=other@example.invalid', 'commit', '-q', '-m', 'Theirs']); execFileSync('git', ['-C', other, 'push', '-q', 'origin', branch]);
+    return execFileSync('git', ['-C', other, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  };
   const remoteRef = (branch: string) => execFileSync('git', ['-C', bare, 'rev-parse', '-q', '--verify', `refs/heads/${branch}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  return { f, pulls, state, bare, finished, finishRound, remoteRef, kinds: (id: string) => f.store.evidence(id).map(e => e.kind).filter(k => k.startsWith('pull-request')) };
+  return { f, pulls, state, bare, finished, finishRound, remoteCommit, remoteRef, kinds: (id: string) => f.store.evidence(id).map(e => e.kind).filter(k => k.startsWith('pull-request')) };
 }
 
 test('a click pushes the task branch once and opens one draft pull request into the default branch', async () => {
@@ -239,7 +249,7 @@ test('a click starts a fix round from the pull request, and the reviewed result 
     const t = await s.finished(); await s.pulls.publish(t.id, 'user');
     s.state.github = { ...FAILING, head: () => s.remoteRef(t.branch) };
     await s.pulls.syncDue();
-    assert.deepEqual(s.pulls.view(t.id).canFix, { checks: true, comments: true }); assert.deepEqual(s.pulls.view(t.id).rounds, []);
+    assert.deepEqual(s.pulls.view(t.id).canFix, { conflict: false, checks: true, comments: true }); assert.deepEqual(s.pulls.view(t.id).rounds, []);
     await assert.rejects(s.pulls.startRound(t.id, { checks: ['lint'] }, 'user'), { code: 'not_fixable' });
     await assert.rejects(s.pulls.startRound(t.id, {}, 'user'));
     const round = await s.pulls.startRound(t.id, { checks: ['test'], comments: ['a'] }, 'user');
@@ -252,7 +262,7 @@ test('a click starts a fix round from the pull request, and the reviewed result 
     assert.match(task.request, /Review comment by @reviewer-a on src\/form\.ts line 71:\n<<<\nUse the shared messages file\.\n>>>/);
     assert.deepEqual(s.pulls.view(round.taskId), { mode: 'off', canPublish: false, publishing: false, roundOf: { taskId: t.id, number: 42, round: 2 } });
     assert.deepEqual(s.kinds(round.taskId), [], 'a round never opens a pull request of its own');
-    assert.deepEqual(s.pulls.view(t.id).canFix, { checks: false, comments: false });
+    assert.deepEqual(s.pulls.view(t.id).canFix, { conflict: false, checks: false, comments: false });
     await assert.rejects(s.pulls.startRound(t.id, { checks: ['test'] }, 'user'), { code: 'not_fixable' });
 
     // Nothing is pushed while the round is being worked on.
@@ -312,7 +322,7 @@ test('with fixing set to automatic, rounds start on their own: one per commit, u
     // The check still fails on the new commit, but both automatic rounds are used.
     await read(); await read();
     assert.equal(s.pulls.view(t.id).rounds!.length, 2);
-    assert.deepEqual(s.pulls.view(t.id).canFix, { checks: true, comments: false }, 'a click can still start one');
+    assert.deepEqual(s.pulls.view(t.id).canFix, { conflict: false, checks: true, comments: false }, 'a click can still start one');
   } finally { await s.f.cleanup(); }
 });
 
@@ -379,5 +389,66 @@ test('set to automatic and with nothing in the way, a pull request is merged wit
     assert.equal(s.pulls.view(t.id).github!.state, 'merged');
     assert.deepEqual(s.kinds(t.id), ['pull-request-settings', 'pull-request-pushed', 'pull-request-opened', 'pull-request-merged']);
     assert.equal((s.f.store.lastEvidence(t.id, 'pull-request-merged')!.data as { trigger: string }).trigger, 'setting');
+  } finally { await s.f.cleanup(); }
+});
+
+test('a task of a connected project starts from the target branch on GitHub; an unconnected one from local main', async () => {
+  const s = await setup();
+  try {
+    const local = execFileSync('git', ['-C', s.f.project, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
+    const theirs = s.remoteCommit('main', { 'merged-on-github.txt': 'newer\n' });
+    const task = s.f.service.submit({ projectId: 'fixture', request: 'Build on what was merged', mode: 'autonomous' }, 'start');
+    s.f.service.onStart(t => s.pulls.startCommit(t));
+    const base = await s.f.service.startCommit(task);
+    assert.equal(base, theirs); assert.notEqual(base, local);
+    assert.deepEqual(s.f.store.lastEvidence(task.id, 'task-start')!.data, { source: 'github', repository: 'example-org/website', branch: 'main', commit: theirs });
+    const workspace = await new WorkspaceManager(s.f.dataDir).create(s.f.store.project('fixture'), task.id, task.request, base);
+    assert.equal(workspace.baseSha, theirs); assert.equal(execFileSync('git', ['-C', workspace.path, 'show', 'HEAD:merged-on-github.txt'], { encoding: 'utf8' }), 'newer\n');
+    assert.equal(execFileSync('git', ['-C', s.f.project, 'rev-parse', 'main'], { encoding: 'utf8' }).trim(), local, 'local main is not moved');
+    assert.equal(execFileSync('git', ['-C', s.f.project, 'for-each-ref', 'refs/remotes'], { encoding: 'utf8' }), '', 'no remote-tracking branch appears in the checkout');
+    // The project's target branch decides, and a branch that cannot be fetched stops the task with a reason.
+    s.pulls.save('fixture', { publish: 'ask', targetBranch: 'develop' });
+    await assert.rejects(s.pulls.startCommit(s.f.service.submit({ projectId: 'fixture', request: 'Other target', mode: 'autonomous' }, 'develop')), { code: 'fetch_failed', message: /develop could not be fetched/ });
+    const develop = s.remoteCommit('develop', { 'on-develop.txt': 'x\n' });
+    assert.equal(await s.pulls.startCommit(s.f.service.submit({ projectId: 'fixture', request: 'Other target again', mode: 'autonomous' }, 'develop-2')), develop);
+    s.f.store.setProjectIntegrations('fixture', () => ({}));
+    assert.equal(await s.pulls.startCommit(s.f.service.submit({ projectId: 'fixture', request: 'Local only', mode: 'autonomous' }, 'local')), undefined);
+  } finally { await s.f.cleanup(); }
+});
+
+test('a pull request that conflicts with its target branch gets a round that brings the branch in and resolves it', async () => {
+  const s = await setup(); let now = new Date('2026-11-18T12:00:00Z'); const read = async () => { now = new Date(now.getTime() + 61000); await s.pulls.syncDue(); };
+  try {
+    (s.pulls as unknown as { now: () => Date }).now = () => now;
+    s.pulls.save('fixture', { publish: 'auto', fixChecks: 'auto' });
+    const t = await s.finished(); await s.pulls.publishDue();
+    // A parallel task was merged first and wrote the same file.
+    const theirs = s.remoteCommit('main', { 'change-1.txt': 'theirs\n' });
+    s.state.github = { mergeable: 'dirty', head: () => s.remoteRef(t.branch) };
+    await read();
+    const [round] = s.pulls.view(t.id).rounds!;
+    assert.deepEqual([round!.round, round!.trigger, round!.state, round!.conflict], [2, 'setting', 'working', true]);
+    const task = s.f.store.task(round!.taskId);
+    assert.deepEqual(task.followUp!.conflict, ['change-1.txt']);
+    assert.deepEqual(execFileSync('git', ['-C', s.f.project, 'rev-list', '--parents', '-n', '1', task.followUp!.baseSha], { encoding: 'utf8' }).trim().split(' ').slice(1), [t.commit, theirs], 'the round starts from a local merge of both sides');
+    assert.match(execFileSync('git', ['-C', s.f.project, 'show', `${task.followUp!.baseSha}:change-1.txt`], { encoding: 'utf8' }), /^<<<<<<< [^]*changed\n=======\ntheirs\n>>>>>>> /);
+    assert.match(task.request, /^Resolve the conflict of pull request #42 with main/); assert.match(task.request, /Files with conflicts:\n- change-1\.txt/);
+
+    // A result that still holds a marker is never pushed, and the same commit is not tried again on its own.
+    await s.finishRound(round!.taskId, { 'other.txt': 'unrelated\n' });
+    await s.pulls.syncDue();
+    assert.equal(s.remoteRef(t.branch), t.commit);
+    assert.match(s.pulls.view(t.id).rounds![0]!.detail, /left conflict markers/);
+    await read(); assert.equal(s.pulls.view(t.id).rounds!.length, 1);
+    assert.equal(s.f.store.summaries({ openPullRequest: true }).tasks[0]!.pullRequest!.attention, 'the last fix round stopped');
+    assert.deepEqual(s.pulls.view(t.id).canFix, { conflict: true, checks: false, comments: false });
+
+    const second = await s.pulls.startRound(t.id, { conflict: true }, 'user');
+    const resolved = await s.finishRound(second.taskId, { 'change-1.txt': 'changed and theirs\n' });
+    await s.pulls.syncDue();
+    assert.equal(s.remoteRef(t.branch), resolved);
+    assert.equal(execFileSync('git', ['-C', s.bare, 'merge-base', '--is-ancestor', theirs, resolved], { encoding: 'utf8' }), '', 'the target branch is now part of the pull request');
+    assert.equal(execFileSync('git', ['-C', s.bare, 'merge-base', '--is-ancestor', t.commit, resolved], { encoding: 'utf8' }), '', 'pushed on top, without force');
+    await assert.rejects(s.pulls.startRound(t.id, { conflict: true, checks: ['test'] }, 'user'));
   } finally { await s.f.cleanup(); }
 });

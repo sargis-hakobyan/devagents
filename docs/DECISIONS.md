@@ -635,3 +635,17 @@ Fourth step: the Merge setting and method, the merge on a click or on its own, a
 - **The band links to the pull request instead of merging from the board.** The design drew a Merge button in the band; one place to merge keeps the action next to the checks it depends on.
 - **Not built:** the update-from-target round, re-running a check, thread replies, the "Comments that count" setting, the four-step strip and the round progress track from `U12-PR-Tab`, Overview attention items, and terminal commands.
 - **Not verified against the real GitHub or with a real model.**
+
+## Connected projects start from GitHub, and conflicts get a round — 2026-11-18
+
+The first real pull request (in a project whose local `main` was two days behind GitHub) conflicted with its target branch. The owner decided: a task of a project connected to GitHub fetches the target branch first and starts from it; a project without a connection keeps starting from local `main`; and where two parallel tasks still collide, DevAgents resolves it on its own when the project is set to be autonomous.
+
+- **Fetch, never pull.** The target branch is fetched into `refs/devagents/remote/<branch>`. Updating the user's local `main` was considered and rejected: it changes the checkout, and it fails or merges when local `main` has commits of its own.
+- **Tied to the connection, not to Publish.** A connected project that does not publish also builds on what is on GitHub.
+- **No fallback.** A branch that cannot be fetched fails the task with the reason. Starting from a stale local `main` instead would silently recreate the conflict.
+- **This reverses a documented rule** ("no fallback to `origin/main`, no automatic fetch") for connected projects only.
+- **A conflict round starts from a local merge commit that still holds the conflict markers.** The service makes it with `git merge-tree`; the team resolves the markers. This keeps the round a normal task whose diff is only the resolution, so ownership checks, validation and review work unchanged, and the push stays a fast-forward. The marker commit becomes part of the pull request's history, under the resolving commit.
+- **It follows the Fix failed checks setting,** and counts toward the automatic round limit, with one automatic attempt per commit like every round. The owner did not want a fifth setting.
+- **A result with a conflict marker left in a conflicted file is never pushed.**
+- **The "View on GitHub" link now opens in the same tab** and the board's band says "Open the task": the owner reported that the link reopened the task. The cause was not reproduced; a new-tab link is the likeliest difference between browsers.
+- **Not verified against the real GitHub,** apart from the owner's first publish, which pushed, opened the pull request and read "conflict with main" correctly.

@@ -39,14 +39,18 @@ export type TaskFollowUp = {
   taskId: string; number: number; round: number;
   /** The pull request's latest commit when the round started; the round's worktree starts there. */
   baseSha: string; checks: string[]; comments: string[]; trigger: 'user' | 'setting';
+  /** Set on a round that resolves a conflict with the target branch: the files Git could not merge. The round starts from a local merge of both sides that still holds the conflict markers. */
+  conflict?: string[];
 };
 export type RoundState = 'working' | 'needs-you' | 'pushed' | 'held' | 'failed';
 export type PullRequestRound = {
-  round: number; taskId: string; checks: string[]; comments: number; trigger: 'user' | 'setting'; startedAt: string;
+  round: number; taskId: string; checks: string[]; comments: number; /** The round resolves a conflict with the target branch. */ conflict?: boolean; trigger: 'user' | 'setting'; startedAt: string;
   state: RoundState;
   /** One line about where the round stands, or why it stopped. */
   detail: string; commit?: string;
 };
+/** Where a task of a connected project started: the target branch as it was on GitHub. */
+export const TASK_START = 'task-start';
 export const PR_MERGED = 'pull-request-merged'; export const PR_MERGE_FAILED = 'pull-request-merge-failed';
 export const PR_ROUND = 'pull-request-round'; export const PR_ROUND_PUSHED = 'pull-request-round-pushed'; export const PR_ROUND_HELD = 'pull-request-round-held'; export const PR_ROUND_FAILED = 'pull-request-round-failed';
 
