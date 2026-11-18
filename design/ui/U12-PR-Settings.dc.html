@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — Project page: what happens after a task finishes</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#3B3F5E;text-decoration:none;font-weight:600;font-size:14px}
+.nav a:hover{background:#E6E8F3;color:#1C1A33}.nav a.on{background:#231F4A;color:#FFFFFF}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.c-ok{background:#E1F5EA;color:#135E38}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}.btn.small{min-height:34px;font-size:13px;padding:0 12px}
+.btn:focus-visible,.nav a:focus-visible,.seg button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.step{display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding:14px 24px;border-top:1px solid #EAECF5}
+.step .num{flex:0 0 32px;height:32px;border-radius:50%;background:#EAECF5;color:#3B3F5E;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}
+.step .txt{flex:1 1 320px;min-width:0;display:flex;flex-direction:column}
+.step.dim .txt,.step.dim .num{opacity:.5}
+.seg{display:inline-flex;border:1px solid #D1D4E4;border-radius:12px;overflow:hidden;background:#FFFFFF}
+.seg button{min-height:44px;min-width:104px;padding:0 16px;border:0;border-left:1px solid #D1D4E4;background:#FFFFFF;color:#3B3F5E;font:inherit;font-weight:700;font-size:14px;cursor:pointer}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#231F4A;color:#FFFFFF}
+.seg button[disabled]{cursor:not-allowed;color:#8B8FA6;background:#F8F8FD}
+.field{display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:600}
+.field select,.field input[type=number]{min-height:44px;border:1px solid #D1D4E4;border-radius:10px;padding:0 12px;font:inherit;background:#FFFFFF;color:#1C1A33}
+@media (max-width:760px){.seg{width:100%}.seg button{flex:1;min-width:0}}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+  <header style="background: #231F4A; color: #FFFFFF; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 32px; min-height: 72px; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 24px; letter-spacing: -0.02em"><svg width="26" height="26" viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>devagents</div>
+    <span class="chip" style="background: rgba(255,255,255,0.1); color: #FFFFFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6EE7A8" stroke-width="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Connected</span>
+  </header>
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="nav" aria-label="Main" style="flex: 1 1 220px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #E0E2EE; background: #F8F8FD">
+      <a href="#top">Overview</a><a href="U12-PR-States.dc.html">Tasks</a><a href="#top">Teams</a><a href="#top" class="on" aria-current="page">Projects</a><a href="#top">Tools</a><a href="#top">Settings</a>
+    </nav>
+    <main id="top" style="flex: 999 1 560px; min-width: 0; padding: 24px 40px 48px; display: flex; flex-direction: column; gap: 20px">
+      <a href="#top" style="font-weight: 700; font-size: 14px; text-decoration: none">← All projects</a>
+      <div style="display: flex; flex-direction: column; gap: 4px"><h1 style="margin: 0; font-size: 28px; letter-spacing: -0.02em; line-height: 1.2">website</h1><span class="muted mono">/workspace/website</span></div>
+
+      <section class="card" aria-label="GitHub connection" style="padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap">
+        <div style="display: flex; align-items: center; gap: 14px; min-width: 0">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#1C1A33" stroke-width="1.8" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V10a3 3 0 0 0-3-3h-3"/></svg>
+          <div style="display: flex; flex-direction: column; min-width: 0"><span style="font-weight: 800; font-size: 16px">GitHub</span><span class="muted mono">example-org/website</span></div>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"><span class="chip c-ok"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Connected</span><button class="btn small" type="button">Manage</button></div>
+      </section>
+
+      <section class="card" aria-label="After a task finishes" style="display: flex; flex-direction: column">
+        <h2 style="margin: 0; padding: 20px 24px 16px; font-size: 20px; letter-spacing: -0.01em">After a task finishes</h2>
+
+        <div class="step">
+          <span class="num" aria-hidden="true">1</span>
+          <div class="txt"><span style="font-weight: 800; font-size: 16px">Publish</span><span class="muted" style="font-size: 14px">Push the branch and open a pull request</span></div>
+          <div class="seg" role="group" aria-label="Publish"><button type="button" class="{{pOff}}" aria-pressed="{{pOffOn}}" onClick="{{setPOff}}">Off</button><button type="button" class="{{pAsk}}" aria-pressed="{{pAskOn}}" onClick="{{setPAsk}}">Ask me</button><button type="button" class="{{pAuto}}" aria-pressed="{{pAutoOn}}" onClick="{{setPAuto}}">Automatic</button></div>
+        </div>
+        <div class="step {{dim}}">
+          <span class="num" aria-hidden="true">2</span>
+          <div class="txt"><span style="font-weight: 800; font-size: 16px">Fix failed checks</span><span class="muted" style="font-size: 14px">When a GitHub check fails</span></div>
+          <div class="seg" role="group" aria-label="Fix failed checks"><button type="button" class="{{cOff}}" aria-pressed="{{cOffOn}}" disabled="{{locked}}" onClick="{{setCOff}}">Off</button><button type="button" class="{{cAsk}}" aria-pressed="{{cAskOn}}" disabled="{{locked}}" onClick="{{setCAsk}}">Ask me</button><button type="button" class="{{cAuto}}" aria-pressed="{{cAutoOn}}" disabled="{{locked}}" onClick="{{setCAuto}}">Automatic</button></div>
+        </div>
+        <div class="step {{dim}}">
+          <span class="num" aria-hidden="true">3</span>
+          <div class="txt"><span style="font-weight: 800; font-size: 16px">Fix review comments</span><span class="muted" style="font-size: 14px">When a reviewer comments on GitHub</span></div>
+          <div class="seg" role="group" aria-label="Fix review comments"><button type="button" class="{{rOff}}" aria-pressed="{{rOffOn}}" disabled="{{locked}}" onClick="{{setROff}}">Off</button><button type="button" class="{{rAsk}}" aria-pressed="{{rAskOn}}" disabled="{{locked}}" onClick="{{setRAsk}}">Ask me</button><button type="button" class="{{rAuto}}" aria-pressed="{{rAutoOn}}" disabled="{{locked}}" onClick="{{setRAuto}}">Automatic</button></div>
+        </div>
+        <div class="step {{dim}}">
+          <span class="num" aria-hidden="true">4</span>
+          <div class="txt"><span style="font-weight: 800; font-size: 16px">Merge</span><span class="muted" style="font-size: 14px">As soon as GitHub allows it</span></div>
+          <div class="seg" role="group" aria-label="Merge"><button type="button" class="{{mOff}}" aria-pressed="{{mOffOn}}" disabled="{{locked}}" onClick="{{setMOff}}">Off</button><button type="button" class="{{mAsk}}" aria-pressed="{{mAskOn}}" disabled="{{locked}}" onClick="{{setMAsk}}">Ask me</button><button type="button" class="{{mAuto}}" aria-pressed="{{mAutoOn}}" disabled="{{locked}}" onClick="{{setMAuto}}">Automatic</button></div>
+        </div>
+
+        <div style="padding: 20px 24px; border-top: 1px solid #EAECF5; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px 20px">
+          <label class="field">Target branch<select><option>main</option><option>develop</option><option>release/2026-12</option></select></label>
+          <label class="field">Merge method<select><option>Squash</option><option>Merge commit</option><option>Rebase</option></select></label>
+          <label class="field">Automatic fix rounds, at most<input type="number" min="1" max="5" value="3"></label>
+          <label class="field">Comments that count<select><option>People with write access</option><option>Only me</option></select></label>
+        </div>
+        <div style="padding: 0 24px 20px; display: flex; gap: 10px; flex-wrap: wrap"><button class="btn primary" type="button">Save</button><button class="btn" type="button">Discard changes</button></div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { publish: 'auto', checks: 'auto', comments: 'ask', merge: 'ask' };
+  }
+  renderVals() {
+    const s = this.state;
+    const locked = s.publish === 'off';
+    const out = { locked, dim: locked ? 'dim' : '' };
+    const keys = { p: 'publish', c: 'checks', r: 'comments', m: 'merge' };
+    const names = { Off: 'off', Ask: 'ask', Auto: 'auto' };
+    Object.keys(keys).forEach((k) => {
+      Object.keys(names).forEach((n) => {
+        const on = s[keys[k]] === names[n] && !(locked && k !== 'p');
+        out[k + n] = on ? 'on' : '';
+        out[k + n + 'On'] = on;
+        out['set' + k.toUpperCase() + n] = () => this.setState({ [keys[k]]: names[n] });
+      });
+    });
+    return out;
+  }
+}
+</script>
+</body>
+</html>

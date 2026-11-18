@@ -2,6 +2,8 @@
 
 Status: **proposal**. One part exists outside this plan: a per-project GitHub token can be connected and checked (see "Project integrations" in `docs/REFERENCE.md`); nothing below is implemented. Written 2026-11-12. Design boards: `design/ui/U7-GitHub-*.dc.html` (row U7 on the design canvas). This plan covers milestone M5's "authorized GitHub integration" in `docs/MILESTONES.md`.
 
+**Changed on 2026-11-18** (see "Pull requests: four steps, and DevAgents may merge" in `docs/DECISIONS.md`; boards `design/ui/U12-PR-*.dc.html`). Where this plan and that decision differ, the decision wins: the per-project policy is four steps (publish, fix failed checks, fix review comments, merge), each Off, Ask me or Automatic, in place of the three presets; DevAgents may merge through the pull request and may run a failed check again once; a round that changes a workflow file always waits for a click. The sentences below that say a human merges and that workflows are never re-run are superseded. The architecture, transport, reconciliation and security sections stand.
+
 ## Goal
 
 DevAgents can attach GitHub repositories, push a completed task's branch, open a pull request, read review comments and check results, run follow-up work that addresses them, push again, and repeat until the pull request is green. A human merges.

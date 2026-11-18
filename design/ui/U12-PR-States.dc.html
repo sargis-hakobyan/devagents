@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — Pull request: merge, the three questions and the board</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.c-ok{background:#E1F5EA;color:#135E38}.c-warn{background:#FFF1DB;color:#7A4A00}.c-run{background:#E3ECFF;color:#1C3F99}.c-n{background:#EAECF5;color:#3B3F5E}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid #D1D4E4;background:#FFFFFF;color:#1C1A33;font:inherit;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none}
+.btn.primary{background:#231F4A;border-color:#231F4A;color:#FFFFFF}
+.btn:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.muted{color:#5A5F78}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5A5F78}
+.sec{font-size:20px;font-weight:800;letter-spacing:-0.01em;margin:0}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.st{padding:18px 20px;display:flex;flex-direction:column;gap:10px}
+.st .top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
+.st .t{font-weight:800;font-size:16px}
+.st p{margin:0;font-size:14px}
+.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;padding-top:4px}
+.stop{border-color:#F1D18A}
+pre.cmd{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;background:#F8F8FD;border:1px solid #E0E2EE;border-radius:8px;padding:8px 12px;color:#1C1A33}
+.col{background:#EAECF5;border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.col .name{font-weight:800;font-size:14px;display:flex;justify-content:space-between}
+.tc{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.tc .ti{font-weight:700;font-size:14px;line-height:1.35}
+.band{background:#FFF1DB;border:1px solid #F1D18A;border-radius:14px;padding:12px 16px;display:flex;flex-direction:column;gap:8px}
+.band .it{background:#FFFFFF;border:1px solid #F1D18A;border-radius:10px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+@media (max-width:900px){.grid3{grid-template-columns:minmax(0,1fr)}}
+</style>
+</helmet>
+<div style="max-width: 1360px; margin: 0 auto; padding: 32px 40px 48px; box-sizing: border-box; display: flex; flex-direction: column; gap: 20px">
+
+  <h2 class="sec">Merge</h2>
+  <div class="grid3">
+    <section class="card st" aria-label="Ready to merge, Ask me">
+      <div class="top"><span class="t">Merge is "Ask me"</span><span class="chip c-ok"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Ready to merge</span></div>
+      <p>3 checks passed · no open comments</p>
+      <div class="acts"><button class="btn primary" type="button">Merge pull request</button></div>
+    </section>
+    <section class="card st" aria-label="Merged automatically">
+      <div class="top"><span class="t">Merge is "Automatic"</span><span class="chip c-ok"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Merged 14:02</span></div>
+      <p>Your local <span class="mono">main</span> is 1 commit behind.</p>
+      <pre class="cmd">git pull</pre>
+    </section>
+    <section class="card st" aria-label="Waiting for GitHub">
+      <div class="top"><span class="t">GitHub blocks the merge</span><span class="chip c-n">Waiting for GitHub</span></div>
+      <p><span class="mono">main</span> requires 1 approving review.</p>
+      <div class="acts"><a class="btn" href="https://github.com/">View on GitHub</a></div>
+    </section>
+  </div>
+
+  <h2 class="sec" style="margin-top: 12px">When it asks you</h2>
+  <div class="grid3">
+    <section class="card st stop" aria-label="Round limit reached">
+      <div class="top"><span class="t">Round limit reached</span><span class="chip c-warn">Needs you</span></div>
+      <p>3 of 3 fix rounds used. <span class="mono">test (node 24)</span> still fails.</p>
+      <div class="acts"><button class="btn primary" type="button">Allow 3 more rounds</button></div>
+    </section>
+    <section class="card st stop" aria-label="Check fails again for an unrelated reason">
+      <div class="top"><span class="t">Unrelated failure, twice</span><span class="chip c-warn">Needs you</span></div>
+      <p><span class="mono">deploy-preview</span> timed out again after one re-run.</p>
+      <div class="acts"><button class="btn primary" type="button">Run it again</button><a class="btn" href="https://github.com/">View on GitHub</a></div>
+    </section>
+    <section class="card st stop" aria-label="Workflow file changed">
+      <div class="top"><span class="t">Workflow file changed</span><span class="chip c-warn">Needs you</span></div>
+      <p>Round 2 edits <span class="mono">.github/workflows/ci.yml</span>.</p>
+      <div class="acts"><button class="btn primary" type="button">Review the diff</button><button class="btn" type="button">Push round 2</button></div>
+    </section>
+  </div>
+
+  <h2 class="sec" style="margin-top: 12px">Tasks board</h2>
+  <div class="band" aria-label="Needs you">
+    <span class="h" style="color: #7A4A00">Needs you · 2</span>
+    <div class="it"><span><b>Add input validation to the signup form</b> <span class="muted">· PR #42 · ready to merge</span></span><button class="btn primary" type="button">Merge pull request</button></div>
+    <div class="it"><span><b>Show order totals per month</b> <span class="muted">· PR #17 · round limit reached</span></span><a class="btn" href="U12-PR-Tab.dc.html">Open</a></div>
+  </div>
+  <div class="grid3">
+    <div class="col"><div class="name"><span>Working</span><span class="muted">1</span></div>
+      <div class="tc"><span class="ti">Rename the export endpoint</span><span class="chip c-run">Implementing</span></div>
+    </div>
+    <div class="col"><div class="name"><span>Pull request</span><span class="muted">3</span></div>
+      <div class="tc"><span class="ti">Paginate the audit log</span><span class="chip c-run">PR #44 · checks running</span></div>
+      <div class="tc"><span class="ti">Fix the date filter</span><span class="chip c-run">PR #43 · fixing a check</span></div>
+      <div class="tc"><span class="ti">Cache the price list</span><span class="chip c-n">PR #41 · waiting for GitHub</span></div>
+    </div>
+    <div class="col"><div class="name"><span>Done</span><span class="muted">2</span></div>
+      <div class="tc"><span class="ti">Add a health endpoint</span><span class="chip c-ok">PR #40 · merged</span></div>
+      <div class="tc"><span class="ti">Tidy the README</span><span class="chip c-ok">Completed</span></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1060}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

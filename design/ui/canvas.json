@@ -239,6 +239,31 @@
       "w": 880,
       "h": 800,
       "title": "U11 · Model list from the engine and effort states"
+    },
+    "U12-PR-Settings.dc.html": {
+      "x": 0,
+      "y": 25200,
+      "w": 1360,
+      "h": 900,
+      "title": "U12 · Project page · what happens after a task finishes · try it",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "U12-PR-Tab.dc.html": {
+      "x": 1440,
+      "y": 25200,
+      "w": 1360,
+      "h": 1360,
+      "title": "U12 · Task · Pull request tab: fixing a failed check, then merge",
+      "expand": "fill"
+    },
+    "U12-PR-States.dc.html": {
+      "x": 2880,
+      "y": 25200,
+      "w": 1360,
+      "h": 1060,
+      "title": "U12 · Merge, the three questions and the board",
+      "expand": "fill"
     }
   },
   "order": [
@@ -270,7 +295,10 @@
     "U10-Tasks-Board.dc.html",
     "U11-Member-Role.dc.html",
     "U11-Member-States.dc.html",
-    "U11-Model-Effort.dc.html"
+    "U11-Model-Effort.dc.html",
+    "U12-PR-Settings.dc.html",
+    "U12-PR-Tab.dc.html",
+    "U12-PR-States.dc.html"
   ],
   "notes": {
     "rowA": {
@@ -412,6 +440,27 @@
       "w": 440,
       "text": "The Worker / Planner dropdown becomes four tiles: Plans work, Implements, Reviews, Tests. They write the fields the backend already selects on (delegation and the planning, implementation, review and testing capabilities), so no new role field exists. Planning is exclusive because a member cannot both delegate and receive tasks. Effort is Low, Medium or High and starts at Medium. Implemented on the Teams page on 2026-11-18. The model list is loaded from the engine only when Refresh list is pressed; in the app the dropdown is the browser's own, so \"new\" is text after the model name.",
       "fill": "blue"
+    },
+    "rowU12": {
+      "x": 0,
+      "y": 24900,
+      "text": "U12 — Pull requests: publish, fix failed checks and review comments, merge (design only)",
+      "kind": "title1",
+      "maxW": 10000
+    },
+    "legendU12": {
+      "x": 4320,
+      "y": 25200,
+      "w": 440,
+      "fill": "blue",
+      "text": "Behaviour, kept off the screens. Four steps follow a task that finished locally: publish, fix failed checks, fix review comments, merge. Each is Off, Ask me or Automatic, set per project and frozen into the task when it starts. Publish Off disables the other three. Pull requests open as drafts and are marked ready when checks pass. The service reads GitHub about once a minute; team members never get the token. A fix round is a normal task: plan, implement, validate, DevAgents review, commit, and only then push. The DevAgents reviewer gates every push; the GitHub review is outside input that can start a round. Comments from people who do not count never block a merge and are never acted on unless ticked. Check logs and comments reach the team as quoted text with secrets removed. Merge happens only through the pull request, when no check is failing or running, no counted comment is open and GitHub reports it mergeable. Set to Automatic, DevAgents merges the moment GitHub allows it, also in a repository without checks. It never force-pushes, never pushes to the target branch and never touches the local checkout."
+    },
+    "legendU12b": {
+      "x": 4320,
+      "y": 25900,
+      "w": 440,
+      "fill": "blue",
+      "text": "Carries on by itself, shown only as the status line and the board chip. Same failure again: \"Round 3 is fixing test (node 24)\", told what the last fix tried, until the round limit. Failure not caused by the change: \"Running deploy-preview again\", once, without using a fix round. Someone else pushed: the next round builds on their commit; automatic merge continues. Target branch moved: \"Round 3 is updating from main\"; counts toward the limit. GitHub blocks the merge: \"Waiting for GitHub\", merges when allowed. Asks you in three cases only: the round limit is reached, an unrelated failure happens twice, a fix changes a file under .github/workflows/ (always, no setting). Replaces the three autonomy presets of U7 and its rule that DevAgents never merges."
     }
   },
   "designSystems": []
