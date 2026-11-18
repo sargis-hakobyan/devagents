@@ -48,7 +48,7 @@ Archive teams rather than deleting historical references. Existing tasks remain 
 
 ## Task submission and execution
 
-Submit a request with project, team and autonomy mode. Describe the expected outcome in the request; the browser form has no separate acceptance-criteria field. Respect an explicit task mode and existing project defaults. When no mode is resolved, show the existing blocking choice; do not silently default to autonomous execution. Display a resolved summary before submission.
+Submit a request with project, team and autonomy mode. Describe the expected outcome in the request; the browser form has no separate acceptance-criteria field. Respect an explicit task mode and existing project defaults. When no mode is resolved, show the existing blocking choice; do not silently default to autonomous execution. Display a resolved summary before submission. The task board also supports a direct start: dragging an available ticket into Planning or pressing Start task submits its full content with project defaults. For this explicit planning action only, an unset mode becomes plan approval. Clicking the card retains the existing configurable submission form.
 
 The task detail screen is the main working screen:
 

@@ -560,3 +560,10 @@ The owner asked whether DevAgents should rely on the skills installed for Claude
 - **Not built:** recommending skills from the internet or from repeated review findings, editing skills in the browser, and telling members which skills cannot work here. Skills that need network access or credentials are covered by one sentence asking the member to skip that part and say so.
 - **Not verified with a live model:** the prompts were checked with the fake engine. No run confirmed that a real model opens and follows a matching skill.
 
+
+
+## Drag an available ticket into Planning — 2026-11-18
+
+The owner requested draggable cards on All tasks, with moving a card into Planning starting it. Available tickets now accept native browser dragging into Planning, and Start task performs the same direct submission for keyboard and touch users. Clicking the card retains the existing editable form. This supersedes U10’s form-only Start task action and extends its static design with a highlighted target and a pending card. Other stage columns reject drops; existing tasks continue to follow backend state and approval gates.
+
+Direct start reads the ticket’s full request and records its source, key, link and read time through the existing task API, preserving file loading and the frozen project-default team. It uses the effective project/service mode, falling back to plan approval when no mode is set so the requested planning can begin without authorizing autonomous implementation. A failed ticket read sends no submission. The shared tab-scoped submission attempt stores the exact payload and idempotency key before POST, blocks overlapping starts, and supports retries after a lost response or reload. The board shows pending submission separately from recorded task states and keeps failures actionable. No new API or dependency is needed.

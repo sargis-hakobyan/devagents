@@ -464,6 +464,11 @@ a.kb-card:hover{border-color:#B9BCD0;color:inherit}
 .kb-avail{background:transparent;outline:2px dashed #C9CCDD;outline-offset:-2px}
 .kb-ticket{border-style:dashed;box-shadow:none;background:#FBFBFE;cursor:pointer}
 .kb-ticket:hover{border-color:#B9BCD0}
+.kb-ticket[draggable="true"]{cursor:grab}
+.kb-ticket[draggable="true"]:active{cursor:grabbing}
+.kb-drop-target{outline:2px dashed var(--ink);outline-offset:-2px;min-height:220px}
+.kb-drop-over{background:#E3ECFF;outline-style:solid}
+.kb-drop-hint{font-size:13px;font-weight:700;color:var(--ink);padding:12px 6px;text-align:center}
 .kb-src{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--neutral-text);flex-wrap:wrap}
 .kb-src i{font-style:normal;display:inline-grid;place-items:center;width:18px;height:18px;border-radius:5px;color:#fff;font-size:10px;font-weight:800;background:var(--ink)}
 .kb-src i.jira{background:var(--run-icon)}
@@ -475,6 +480,8 @@ a.kb-card:hover{border-color:#B9BCD0;color:inherit}
 .kb-rail{width:44px;min-height:230px;height:100%;border:0;border-radius:14px;outline:2px dashed #C9CCDD;outline-offset:-2px;background:transparent;padding:10px 0;display:flex;flex-direction:column;align-items:center;gap:10px;cursor:pointer;font:inherit}
 .kb-rail-name{writing-mode:vertical-rl;transform:rotate(180deg);font-weight:800;font-size:13px;color:var(--neutral-text)}
 .kb-over{position:absolute;left:0;top:0;z-index:5;width:250px;background:#FBFBFE;box-shadow:8px 0 24px rgba(28,26,51,.18);max-height:70vh;overflow-y:auto}
+.kb-rail-wrap.kb-dragging{flex-basis:250px}
+.kb-dragging>.kb-rail{visibility:hidden}
 .kb-pin:focus-visible,.kb-rail:focus-visible,.kb-seg button:focus-visible,.kb-more:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
 /* Several values in one rule field */
 .integ-multi{display:flex;flex-direction:column;gap:6px;min-width:0}

@@ -26,7 +26,7 @@ export function SubmitTaskPage() {
   useEffect(() => {
     const from = new URLSearchParams(location.search).get('from');
     if (restored.attempt) { const p = restored.attempt.payload; setProject(p.projectId); setRequest(p.request); setTeam(p.teamId ?? ''); setMode(p.mode ?? ''); return; }
-    // "Start task" on the board hands over a ticket: the form opens filled in, and the user still submits it.
+    // Clicking a card on the board hands over a ticket: the form opens filled in, and the user still submits it.
     try {
       const ticket = sessionStorage.getItem(TICKET_PREFILL); sessionStorage.removeItem(TICKET_PREFILL);
       const value = ticket ? JSON.parse(ticket) as { projectId?: unknown; request?: unknown; key?: unknown; source?: unknown; sourceId?: unknown; url?: unknown } : undefined;

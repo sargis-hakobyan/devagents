@@ -102,9 +102,9 @@ test('tasks are a board by stage, with what needs you above it and available tic
     await expect(form.locator('input[name="mode"][value="plan-approval"]')).toBeChecked();
     await expect(form.getByRole('button', { name: 'Submit task' })).toBeEnabled();
     await page.screenshot({ path: join(shots, 'u11-submit-from-ticket.png'), fullPage: true });
-    // The button on the card does the same, for the keyboard.
+    // Reopening the card restores its original ticket content.
     await page.goto(`${base}/ui/tasks`);
-    await board.getByRole('region', { name: 'Available, 3 tickets' }).getByRole('button', { name: 'Start task' }).first().click();
+    await board.getByRole('region', { name: 'Available, 3 tickets' }).getByText('Add a contact form').click();
     await expect(page.locator('form')).toContainText('From Team board ticket FX-1.');
     // Submitted, the task records its ticket and what it was given from it, and the ticket leaves Available.
     await expect(page.locator('form')).toContainText('Its description and 2 comments');

@@ -4,6 +4,7 @@ import { api, resources, teamLabel, type AvailableTicket, type AvailableTickets,
 import { Card, Empty, ErrorNote, Skeleton, StateChip } from '../components/ui';
 import { activeStates, attentionStates, finishedStates, relative, truncate } from '../format';
 import { useNow, usePoll } from '../state';
+import { availableIdentity, ticketIdentity, useTicketStart } from '../ticket-start';
 
 type Group = 'all' | 'attention' | 'active' | 'finished';
 type View = 'board' | 'list';
@@ -12,7 +13,7 @@ const groups: Record<Group, TaskState[] | undefined> = { all: undefined, attenti
 /** Remembered per browser; a missing or blocked store just means the default. */
 const remembered = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
 const remember = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* the choice lasts for this visit only */ } };
-/** Where "Start task" hands a ticket to the submit form. Session storage keeps ticket text out of the address. */
+/** Where clicking a card hands a ticket to the submit form. Session storage keeps ticket text out of the address. */
 export const TICKET_PREFILL = 'devagents.submit.ticket';
 
 // The board (design/ui/U10-Tasks-Board.dc.html): stages left to right, and what waits for the user lifted into a band above.
@@ -38,7 +39,7 @@ function detail(t: TaskSummary): string {
   return t.mode ?? 'mode not chosen';
 }
 function TaskCard({ task, now }: { task: TaskSummary; now: number }) {
-  return <a class="kb-card" href={`/ui/tasks/${task.id}`}>
+  return <a class="kb-card" href={`/ui/tasks/${task.id}`} draggable={false}>
     <span class="kb-title wrap-anywhere">{truncate(task.request, 140)}</span>
     <StateChip task={task} />
     <span class={`kb-line${task.commit ? ' mono' : ''}`}>{detail(task)}</span>
@@ -60,19 +61,25 @@ function NeedsYou({ tasks, now }: { tasks: TaskSummary[]; now: number }) {
 }
 
 const Pin = ({ on }: { on: boolean }) => <svg width="15" height="15" viewBox="0 0 24 24" fill={on ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3z" /><path d="M12 14v7" fill="none" /></svg>;
-function TicketCard({ ticket }: { ticket: AvailableTicket }) {
+type TicketActions = { disabled: boolean; dragging: AvailableTicket | undefined; onStart: (ticket: AvailableTicket) => void; onDrag: (ticket: AvailableTicket | undefined) => void };
+function TicketCard({ ticket, disabled, onStart, onDrag }: { ticket: AvailableTicket } & TicketActions) {
   const { route } = useLocation();
-  const start = () => {
+  const dragged = useRef(false);
+  const edit = () => {
     const request = `${ticket.key}: ${ticket.title}${ticket.url ? `\n\nTicket: ${ticket.url}` : ''}`;
     try { sessionStorage.setItem(TICKET_PREFILL, JSON.stringify({ projectId: ticket.projectId, request, key: ticket.key, source: ticket.source.name, sourceId: ticket.source.id, ...(ticket.url ? { url: ticket.url } : {}) })); } catch { /* the form opens with the project only */ }
     route(`/ui/tasks/new?project=${encodeURIComponent(ticket.projectId)}`);
   };
-  // The whole card opens the form; the ticket link and the button inside keep their own behaviour.
-  return <div class="kb-card kb-ticket" onClick={e => { if (!(e.target as HTMLElement).closest('a, button')) start(); }}>
-    <span class="kb-src"><i class={ticket.source.kind} aria-hidden="true">{ticket.source.kind === 'jira' ? 'J' : 'T'}</i>{ticket.source.name} · {ticket.url ? <a href={ticket.url} target="_blank" rel="noopener noreferrer">{ticket.key}</a> : <span class="mono">{ticket.key}</span>}</span>
+  // Only a drag originating on this card can start work; never interpret external drag payloads.
+  return <div class="kb-card kb-ticket" draggable={!disabled} title="Drag to Planning to start; click to edit first"
+    onDragStart={e => { if (disabled || (e.target as HTMLElement).closest('a, button')) { e.preventDefault(); return; } dragged.current = true; e.dataTransfer!.effectAllowed = 'move'; e.dataTransfer!.setData('text/plain', ticket.key); onDrag(ticket); }}
+    onDragEnd={() => onDrag(undefined)}
+    onPointerDown={() => { dragged.current = false; }}
+    onClick={e => { if (!dragged.current && !disabled && !(e.target as HTMLElement).closest('a, button')) edit(); }}>
+    <span class="kb-src"><i class={ticket.source.kind} aria-hidden="true">{ticket.source.kind === 'jira' ? 'J' : 'T'}</i>{ticket.source.name} · {ticket.url ? <a href={ticket.url} draggable={false} target="_blank" rel="noopener noreferrer">{ticket.key}</a> : <span class="mono">{ticket.key}</span>}</span>
     <span class="kb-title wrap-anywhere">{ticket.title}</span>
     {ticket.why && <span class="kb-line">{ticket.why}</span>}
-    <button type="button" class="btn small kb-start" onClick={start}>Start task</button>
+    <button type="button" class="btn small kb-start" disabled={disabled} onClick={() => onStart(ticket)}>Start task</button>
     <span class="kb-meta"><span class="kb-project">for {ticket.projectName}</span></span>
   </div>;
 }
@@ -81,10 +88,10 @@ function TicketCard({ ticket }: { ticket: AvailableTicket }) {
  * in its corner keeps the column open; unpinned it folds to a strip that opens over the board while
  * the pointer or the keyboard focus is on it.
  */
-function Available({ project, search }: { project: string; search: string }) {
+function Available({ project, search, hidden, ...actions }: { project: string; search: string; hidden: Set<string> } & TicketActions) {
   const [pinned, setPinned] = useState(() => remembered('devagents.tasks.availablePinned') !== 'false'); const [peek, setPeek] = useState(false);
   const data = usePoll('tickets:available', () => api<AvailableTickets>('/tickets/available', { timeoutMs: 60000 }), 60000);
-  const tickets = (data.data?.tickets ?? []).filter(t => (!project || t.projectId === project) && has(`${t.key} ${t.title}`, search));
+  const tickets = (data.data?.tickets ?? []).filter(t => !hidden.has(availableIdentity(t)) && (!project || t.projectId === project) && has(`${t.key} ${t.title}`, search));
   const problems = (data.data?.problems ?? []);
   const toggle = () => { const next = !pinned; setPinned(next); setPeek(false); remember('devagents.tasks.availablePinned', String(next)); };
   const count = data.data ? String(tickets.length) : '…';
@@ -93,39 +100,60 @@ function Available({ project, search }: { project: string; search: string }) {
       <button type="button" class={`kb-pin${pinned ? ' on' : ''}`} aria-pressed={pinned} aria-label={pinned ? 'Available stays open. Press to let it collapse' : 'Available collapses. Press to keep it open'} title={pinned ? 'Pinned · stays open' : 'Not pinned · opens on hover'} onClick={toggle}><Pin on={pinned} /></button></span></div>
     <div class="kb-cards">
       {data.error && !data.data ? <span class="kb-none">{data.error}</span> : !data.data ? <span class="kb-none">Asking Jira and the ticket tools…</span>
-        : tickets.length === 0 ? <span class="kb-none">No tickets waiting</span> : tickets.map(t => <TicketCard key={`${t.projectId}:${t.source.name}:${t.key}`} ticket={t} />)}
+        : tickets.length === 0 ? <span class="kb-none">No tickets waiting</span> : tickets.map(t => <TicketCard key={availableIdentity(t)} ticket={t} {...actions} />)}
       {problems.map(p => <span key={`${p.projectName}:${p.source}`} class="kb-problem">{p.source} for {p.projectName}: {p.message}</span>)}
     </div>
   </section>;
   if (pinned) return column;
-  return <div class="kb-rail-wrap" onMouseEnter={() => setPeek(true)} onMouseLeave={() => setPeek(false)} onFocusIn={() => setPeek(true)} onFocusOut={e => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) setPeek(false); }} onKeyDown={e => { if (e.key === 'Escape') { setPeek(false); (e.currentTarget.querySelector('.kb-rail') as HTMLElement | null)?.focus(); } }}>
+  return <div class={`kb-rail-wrap${actions.dragging ? ' kb-dragging' : ''}`} onMouseEnter={() => setPeek(true)} onMouseLeave={() => setPeek(false)} onFocusIn={() => setPeek(true)} onFocusOut={e => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) setPeek(false); }} onKeyDown={e => { if (e.key === 'Escape') { setPeek(false); (e.currentTarget.querySelector('.kb-rail') as HTMLElement | null)?.focus(); } }}>
     <button type="button" class="kb-rail" aria-expanded={peek} aria-label={`Available, ${count} tickets. Open`} onClick={() => setPeek(true)}>
       <span class="kb-count">{count}</span><span class="kb-rail-name">Available</span>
     </button>
-    {peek && column}
+    {(peek || actions.dragging) && column}
   </div>;
 }
 
 function Board({ project, search, now, onOlder }: { project: string; search: string; now: number; onOlder: () => void }) {
+  const start = useTicketStart();
+  const [dragging, setDragging] = useState<AvailableTicket>();
+  const [overPlanning, setOverPlanning] = useState(false);
+  const observed = useRef(new Set<string>());
   const open = usePoll(`board:open:${project}`, () => api<TaskPage>(query(OPEN, 200, project)), 5000);
   const done = usePoll(`board:done:${project}`, () => api<TaskPage>(query(['completed'], FOLDED, project)), 5000);
   const stopped = usePoll(`board:stopped:${project}`, () => api<TaskPage>(query(['failed', 'cancelled'], FOLDED, project)), 5000);
+  const loaded = [...(open.data?.tasks ?? []), ...(done.data?.tasks ?? []), ...(stopped.data?.tasks ?? [])];
+  useEffect(() => { for (const task of loaded) observed.current.add(task.id); }, [open.data, done.data, stopped.data]);
+  const added = start.accepted.filter(t => !observed.current.has(t.id) && !loaded.some(current => current.id === t.id) && (!project || t.projectId === project));
+  const hidden = new Set(start.accepted.flatMap(t => t.ticket ? [ticketIdentity(t.projectId, t.ticket.source, t.ticket.key)] : []));
+  if (start.starting) hidden.add(availableIdentity(start.starting));
+  const onDrag = (ticket: AvailableTicket | undefined) => { setDragging(ticket); setOverPlanning(false); };
+  const disabled = start.busy || Boolean(start.attempt);
   const error = open.error ?? done.error ?? stopped.error;
   if (!open.data || !done.data || !stopped.data) return error ? <ErrorNote message={error} /> : <Skeleton rows={5} label="Loading tasks" />;
   const counts = open.data.counts; const shown = (tasks: TaskSummary[]) => tasks.filter(t => has(t.request, search));
   const folded: Record<string, TaskSummary[]> = { done: done.data.tasks, stopped: stopped.data.tasks };
-  const waiting = shown(open.data.tasks.filter(t => WAITING.includes(t.state)));
+  const waiting = shown([...open.data.tasks, ...added].filter(t => WAITING.includes(t.state)));
   return <>
+    {start.error && <div class="note bad" role="alert">{start.error}</div>}
+    {start.notice && <div class="note info" role="status">{start.notice}</div>}
+    {start.attempt && !start.busy && <div class="note warn" role="status">A submission is unresolved. It may already have started; retry checks the same request without creating a duplicate.<div class="actions"><button type="button" class="btn small" onClick={() => void start.start()}>Retry start</button><a class="btn small" href="/ui/tasks/new">Review submission</a></div></div>}
     <NeedsYou tasks={waiting} now={now} />
     <div class="kb-board" aria-label="Tickets and tasks by stage">
-      <Available project={project} search={search} />
+      <Available project={project} search={search} hidden={hidden} disabled={disabled} dragging={dragging} onDrag={onDrag} onStart={ticket => void start.start(ticket)} />
       {STAGES.map(stage => {
-        const tasks = shown(stage.folds ? folded[stage.id]! : open.data!.tasks.filter(t => stage.states.includes(t.state)));
-        const total = stage.states.reduce((sum, state) => sum + (counts[state] ?? 0), 0); const older = stage.folds ? total - folded[stage.id]!.length : 0;
-        return <section key={stage.id} class="kb-col" aria-label={`${stage.name}, ${total} task${total === 1 ? '' : 's'}`}>
+        const extra = added.filter(t => stage.states.includes(t.state));
+        const tasks = shown([...(stage.folds ? folded[stage.id]! : open.data!.tasks.filter(t => stage.states.includes(t.state))), ...extra]);
+        const total = stage.states.reduce((sum, state) => sum + (counts[state] ?? 0), 0) + extra.length; const older = stage.folds ? total - folded[stage.id]!.length - extra.length : 0;
+        const target = stage.id === 'planning' && Boolean(dragging) && !disabled;
+        return <section key={stage.id} class={`kb-col${target ? ' kb-drop-target' : ''}${target && overPlanning ? ' kb-drop-over' : ''}`} aria-label={`${stage.name}, ${total} task${total === 1 ? '' : 's'}`}
+          onDragOver={e => { if (target) { e.preventDefault(); e.dataTransfer!.dropEffect = 'move'; setOverPlanning(true); } }}
+          onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOverPlanning(false); }}
+          onDrop={e => { if (target && dragging) { e.preventDefault(); const ticket = dragging; onDrag(undefined); void start.start(ticket); } }}>
           <div class="kb-col-head"><b>{stage.name}</b><span class="kb-count">{total}</span></div>
           <div class="kb-cards">
-            {tasks.length === 0 ? <span class="kb-none">No tasks here</span> : tasks.map(task => <TaskCard key={task.id} task={task} now={now} />)}
+            {target && <span class="kb-drop-hint">Drop to start planning</span>}
+            {stage.id === 'planning' && start.busy && <div class="kb-card" role="status" aria-busy="true"><b class="kb-title">{start.starting ? `${start.starting.key}: ${start.starting.title}` : start.attempt?.payload.request.split('\n')[0]}</b><span>Starting…</span><span class="kb-line">{start.starting ? 'Loading and submitting ticket' : 'Checking submission'}</span></div>}
+            {tasks.length === 0 ? !(stage.id === 'planning' && (start.busy || target)) && <span class="kb-none">No tasks here</span> : tasks.map(task => <TaskCard key={task.id} task={task} now={now} />)}
             {older > 0 && <button type="button" class="kb-more" onClick={onOlder}>Show {older} older →</button>}
           </div>
         </section>;
