@@ -106,7 +106,7 @@ cli.command('serve').description('Start the local API').action(async () => {
   await service.diskReserve.replenish();
   log('service_started', { host, port: port(), publicPort, recovered, projects: store.projects().length, executionEnabled: true, ui: uiRoot ? `http://127.0.0.1:${publicPort}/ui/` : 'not built' });
   log('setup', { message: 'Register an existing checkout and authenticate Codex. Use tasks submit, show and evidence to follow work. Open the browser UI with a one-time link from: devagents ui' });
-  const publishing = setInterval(() => { void pullRequests.publishDue(); }, 15000); publishing.unref();
+  const publishing = setInterval(() => { void pullRequests.publishDue().then(() => pullRequests.syncDue()); }, 15000); publishing.unref();
   let closing = false;
   const shutdown = () => {
     if (closing) return; closing = true; clearInterval(publishing);

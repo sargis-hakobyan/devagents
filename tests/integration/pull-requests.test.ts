@@ -13,7 +13,7 @@ import { fixture } from '../helpers.js';
 
 const TOKEN = `github_pat_${'Fixture1'.repeat(6)}`;
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
-type Remote = { drafts?: boolean; pulls: { number: number; head: string; base: string; draft: boolean; title: string; body: string }[]; posts: number; calls: string[] };
+type Remote = { github?: { merged?: boolean; closed?: boolean; mergeable?: string; runs?: unknown[]; statuses?: unknown[]; threads?: unknown[]; down?: boolean }; drafts?: boolean; pulls: { number: number; head: string; base: string; draft: boolean; title: string; body: string }[]; posts: number; calls: string[] };
 
 /** A project connected to a GitHub that is a local bare repository plus a recorded fake API. */
 async function setup(options: { connected?: boolean } = {}) {
@@ -27,6 +27,12 @@ async function setup(options: { connected?: boolean } = {}) {
     const url = String(input); const method = init?.method ?? 'GET'; state.calls.push(`${method} ${url}`);
     assert.equal((init?.headers as Record<string, string>).authorization, `Bearer ${TOKEN}`);
     const path = url.replace('https://api.github.test/repos/example-org/website', '');
+    const g = state.github ?? {};
+    if (g.down && (url.endsWith('/graphql') || /\/(pulls\/\d+|commits\/)/.test(path))) return json({ message: 'Bad credentials' }, 401);
+    if (url === 'https://api.github.test/graphql') { assert.deepEqual(JSON.parse(String(init!.body)).variables, { owner: 'example-org', name: 'website', number: 42 }); return json({ data: { repository: { pullRequest: { reviewThreads: { nodes: g.threads ?? [] } } } } }); }
+    if (/^\/pulls\/42$/.test(path)) return json({ number: 42, state: g.closed || g.merged ? 'closed' : 'open', merged: g.merged === true, draft: true, mergeable: g.mergeable === 'dirty' ? false : true, mergeable_state: g.mergeable ?? 'clean', head: { sha: 'f'.repeat(40) }, base: { ref: 'main' } });
+    if (path.startsWith(`/commits/${'f'.repeat(40)}/check-runs`)) return json({ check_runs: g.runs ?? [] });
+    if (path.startsWith(`/commits/${'f'.repeat(40)}/status`)) return json({ statuses: g.statuses ?? [] });
     if (path === '') return json({ default_branch: 'main' });
     if (path.startsWith('/branches')) return json([{ name: 'main' }, { name: 'develop' }, { name: 'devagents/old-task-00000000' }]);
     if (path.startsWith('/pulls?')) { const head = new URL(url).searchParams.get('head'); return json(state.pulls.filter(p => `example-org:${p.head}` === head).map(p => ({ number: p.number, html_url: `https://github.test/example-org/website/pull/${p.number}`, draft: p.draft, base: { ref: p.base } }))); }
@@ -74,7 +80,8 @@ test('a click pushes the task branch once and opens one draft pull request into 
     assert.equal(s.remoteRef(t.branch), t.commit);
     assert.deepEqual(s.state.pulls[0], { number: 42, head: t.branch, base: 'main', draft: true, title: 'Add input validation to the signup form', body: `Validates the form.\n\nOpened by DevAgents from task ${t.id}.` });
     assert.deepEqual(s.kinds(t.id), ['pull-request-settings', 'pull-request-pushed', 'pull-request-opened']);
-    assert.deepEqual(s.pulls.view(t.id), { mode: 'ask', canPublish: false, publishing: false, pullRequest: first });
+    const { github, ...shown } = s.pulls.view(t.id);
+    assert.deepEqual(shown, { mode: 'ask', canPublish: false, publishing: false, pullRequest: first }); assert.equal(github!.state, 'open');
     assert.equal(await s.pulls.publish(t.id, 'user').then(p => p.number), 42);
     assert.equal(s.state.posts, 1);
     assert.doesNotMatch(JSON.stringify(s.f.store.evidence(t.id)), /github_pat_/);
@@ -158,4 +165,47 @@ test('settings need a connection, and the routes return the same views', async (
     const draft = s.f.service.submit({ projectId: 'fixture', request: 'Not finished', mode: 'autonomous' }, 'draft');
     assert.equal((await call(`/tasks/${draft.id}/pull-request`, 'POST')).data.error, 'not_publishable');
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await s.f.cleanup(); }
+});
+
+test('GitHub is read once a minute: checks, unresolved comments from writers, and the end of the pull request', async () => {
+  const s = await setup(); let now = new Date('2026-11-18T12:00:00Z');
+  try {
+    (s.pulls as unknown as { now: () => Date }).now = () => now;
+    s.pulls.save('fixture', { publish: 'ask' });
+    const t = await s.finished(); await s.pulls.publish(t.id, 'user');
+    const summary = () => s.f.store.summaries({ openPullRequest: true }).tasks.map(x => x.pullRequest);
+    assert.deepEqual(s.pulls.view(t.id).github!.status, { code: 'not-read', text: 'opened' });
+    assert.deepEqual(summary(), [{ number: 42, state: 'open', status: 'opened', code: 'not-read' }]);
+    const thread = (id: string, association: string, resolved = false) => ({ id, isResolved: resolved, path: 'src/form.ts', line: 71, comments: { nodes: [{ author: { login: `user-${id}` }, authorAssociation: association, body: `Comment ${id} fixture-secret-value`, url: `https://github.test/c/${id}` }] } });
+    s.state.github = {
+      runs: [{ name: 'build', status: 'completed', conclusion: 'success', html_url: 'https://github.test/runs/1' }, { name: 'test', status: 'completed', conclusion: 'failure', html_url: 'javascript:alert(1)', output: { title: '1 failed, 23 passed' } }, { name: 'deploy', status: 'completed', conclusion: 'skipped' }],
+      statuses: [{ context: 'lint', state: 'pending', description: 'Queued' }, { context: 'build', state: 'failure' }],
+      threads: [thread('a', 'MEMBER'), thread('b', 'NONE'), thread('c', 'OWNER', true)],
+    };
+    await s.pulls.syncDue();
+    const read = s.pulls.view(t.id).github!;
+    assert.deepEqual(read.checks, [{ name: 'build', status: 'passed', url: 'https://github.test/runs/1' }, { name: 'test', status: 'failed', summary: '1 failed, 23 passed' }, { name: 'deploy', status: 'skipped' }, { name: 'lint', status: 'running', summary: 'Queued' }]);
+    assert.deepEqual(read.comments.map(c => [c.id, c.author, c.counts, c.path, c.line]), [['a', 'user-a', true, 'src/form.ts', 71], ['b', 'user-b', false, 'src/form.ts', 71]]);
+    assert.doesNotMatch(JSON.stringify(read), /fixture-secret-value/, 'remote text is redacted before it is stored');
+    assert.deepEqual(read.status, { code: 'checks-failed', text: '1 check failed' }); assert.equal(read.headSha, 'f'.repeat(40)); assert.equal(read.draft, true);
+    const calls = s.state.calls.length;
+    await s.pulls.syncDue();
+    assert.equal(s.state.calls.length, calls, 'nothing is read again within a minute');
+
+    const step = async (change: NonNullable<Remote['github']>) => { now = new Date(now.getTime() + 61000); s.state.github = { ...s.state.github, ...change }; await s.pulls.syncDue(); return s.pulls.view(t.id).github!; };
+    assert.equal((await step({ runs: [{ name: 'test', status: 'in_progress' }], statuses: [] })).status.text, 'checks running');
+    assert.equal((await step({ runs: [{ name: 'test', status: 'completed', conclusion: 'success' }] })).status.text, '1 comment open');
+    assert.equal((await step({ threads: [thread('b', 'NONE')], mergeable: 'dirty' })).status.text, 'conflict with main');
+    assert.equal((await step({ mergeable: 'blocked' })).status.text, 'waiting for GitHub');
+    assert.equal((await step({ mergeable: 'clean' })).status.text, 'ready to merge');
+    const failed = await step({ down: true });
+    assert.match(failed.error!, /did not accept the token/); assert.equal(failed.status.text, 'ready to merge', 'a failed read keeps what the last one found'); assert.equal(failed.checks.length, 1);
+    const merged = await step({ down: false, merged: true });
+    assert.deepEqual(merged.status, { code: 'merged', text: 'merged into main' }); assert.equal(merged.error, undefined);
+    assert.deepEqual(summary(), []);
+    assert.deepEqual(s.f.store.summaries({ states: ['completed'] }).tasks.find(x => x.id === t.id)!.pullRequest, { number: 42, state: 'merged', status: 'merged into main', code: 'merged' });
+    const after = s.state.calls.length; now = new Date(now.getTime() + 61000);
+    await s.pulls.syncDue();
+    assert.equal(s.state.calls.length, after, 'a merged pull request is not read any more');
+  } finally { await s.f.cleanup(); }
 });

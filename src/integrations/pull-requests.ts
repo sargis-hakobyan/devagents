@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import { AppError } from '../domain/errors.js';
-import { NO_PULL_REQUESTS, PR_FAILED, PR_OPENED, PR_PUSHED, PR_SETTINGS, PullRequestSettings, type PublishFailure, type StepMode, type TaskPullRequest } from '../domain/pull-requests.js';
+import { NO_PULL_REQUESTS, PR_FAILED, PR_OPENED, PR_PUSHED, PR_SETTINGS, PullRequestSettings, pullRequestStatus, type CheckStatus, type PublishFailure, type PullRequestCheck, type PullRequestComment, type PullRequestSnapshot, type StepMode, type TaskPullRequest } from '../domain/pull-requests.js';
 import type { Task } from '../domain/schemas.js';
 import type { Store } from '../persistence/store.js';
 import type { SecretStore } from '../security/secret-store.js';
@@ -11,6 +11,7 @@ import { GITHUB_API } from './github.js';
 import { list, record, remote, text, type Fetch } from './http.js';
 
 const exec = promisify(execFile);
+const THREADS = 'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved path line comments(first:1){nodes{author{login} authorAssociation body url}}}}}}}';
 export type PullRequestOptions = {
   fetch?: Fetch; githubApiUrl?: string; now?: () => Date;
   /** Where a repository is pushed to. Tests point this at a local bare repository. */
@@ -23,7 +24,11 @@ export type TaskPullRequestView = {
   /** A click can publish it now. */
   canPublish: boolean; publishing: boolean;
   pullRequest?: TaskPullRequest; failure?: PublishFailure;
+  /** What GitHub last said about the pull request. */
+  github?: PullRequestSnapshot;
 };
+const SYNC_EVERY_MS = 60000; const WRITERS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+const FAILED = new Set(['failure', 'timed_out', 'cancelled', 'action_required', 'startup_failure', 'stale']);
 type Trigger = TaskPullRequest['trigger'];
 
 /**
@@ -49,7 +54,7 @@ async function remoteGit(cwd: string, args: string[], url: string, token: string
  */
 export class PullRequestService {
   private readonly fetcher: Fetch; private readonly api: string; private readonly now: () => Date; private readonly remoteUrl: (repository: string) => string;
-  private readonly running = new Map<string, Promise<TaskPullRequest>>(); private sweeping = false;
+  private readonly running = new Map<string, Promise<TaskPullRequest>>(); private sweeping = false; private syncing = false;
   constructor(private readonly store: Store, private readonly secrets: SecretStore, options: PullRequestOptions = {}) {
     this.fetcher = options.fetch ?? fetch; this.api = options.githubApiUrl ?? GITHUB_API; this.now = options.now ?? (() => new Date());
     this.remoteUrl = options.remoteUrl ?? (repository => `https://github.com/${repository}.git`);
@@ -96,6 +101,7 @@ export class PullRequestService {
       mode: frozen?.publish ?? 'off', publishing: this.running.has(taskId),
       canPublish: offered && !opened && task.state === 'completed' && Boolean(task.outcome?.commit && task.workspace?.branch),
       ...(opened ? { pullRequest: opened.data as TaskPullRequest } : {}),
+      ...(opened ? { github: this.snapshot(taskId, opened.data as TaskPullRequest) } : {}),
       ...(failed && (!opened || failed.sequence > opened.sequence) ? { failure: failed.data as PublishFailure } : {}),
     };
   }
@@ -123,6 +129,85 @@ export class PullRequestService {
         if (this.frozen(id)?.publish === 'auto') await this.publish(id, 'setting').catch(() => {});
       }
     } finally { this.sweeping = false; }
+  }
+
+  /** The stored state of a pull request; created the first time it is asked for. */
+  private snapshot(taskId: string, opened: TaskPullRequest): PullRequestSnapshot {
+    const saved = this.store.pullRequest(taskId);
+    if (saved) return saved;
+    const first = { number: opened.number, base: opened.base, state: 'open' as const, draft: opened.draft, headSha: opened.commit, mergeable: 'unknown' as const, checks: [], comments: [] };
+    const snapshot = { ...first, status: pullRequestStatus(first) };
+    this.store.savePullRequest(taskId, snapshot);
+    return snapshot;
+  }
+  /** Reads the open pull requests that were last read more than a minute ago. */
+  async syncDue(): Promise<void> {
+    if (this.syncing) return; this.syncing = true;
+    try {
+      const due = this.store.openPullRequests().filter(id => { const s = this.store.pullRequest(id); return !s?.attemptedAt || this.now().getTime() - Date.parse(s.attemptedAt) >= SYNC_EVERY_MS; });
+      for (const id of due.slice(0, 20)) await this.sync(id).catch(() => {});
+    } finally { this.syncing = false; }
+  }
+  /** One read of a pull request: its state, the checks on its latest commit and its unresolved review comments. A failed read keeps what the last one found. */
+  async sync(taskId: string): Promise<PullRequestSnapshot> {
+    const opened = this.store.lastEvidence(taskId, PR_OPENED)?.data as TaskPullRequest | undefined;
+    if (!opened) throw new AppError('not_published', 'This task has no pull request.', 404);
+    const previous = this.snapshot(taskId, opened); const at = this.now().toISOString();
+    try {
+      const { token } = await this.access(this.store.task(taskId).projectId); const repo = `/repos/${opened.repository}`;
+      const pull = await this.github(token, 'GET', `${repo}/pulls/${opened.number}`);
+      if (pull.status !== 200) throw this.refused(pull.status, `read pull request #${opened.number}`);
+      const pr = record(pull.json); const headSha = text(record(pr.head).sha, 64) || previous.headSha;
+      const state = pr.merged === true ? 'merged' as const : pr.state === 'closed' ? 'closed' as const : 'open' as const;
+      const verdict = text(pr.mergeable_state, 40);
+      const mergeable = pr.mergeable === false || verdict === 'dirty' ? 'conflict' as const : verdict === 'blocked' ? 'blocked' as const : verdict ? 'clean' as const : 'unknown' as const;
+      let checks = previous.checks; let comments = previous.comments;
+      if (state === 'open') {
+        const [runs, statuses, threads] = await Promise.all([
+          this.github(token, 'GET', `${repo}/commits/${headSha}/check-runs?per_page=100`), this.github(token, 'GET', `${repo}/commits/${headSha}/status?per_page=100`),
+          this.github(token, 'POST', '/graphql', { query: THREADS, variables: { owner: opened.repository.split('/')[0], name: opened.repository.split('/')[1], number: opened.number } }),
+        ]);
+        if (runs.status !== 200) throw this.refused(runs.status, 'read the checks of the pull request');
+        if (statuses.status !== 200) throw this.refused(statuses.status, 'read the checks of the pull request');
+        if (threads.status !== 200 || record(threads.json).errors) throw this.refused(threads.status === 200 ? 403 : threads.status, 'read the review comments of the pull request');
+        checks = this.checks(record(runs.json).check_runs, record(statuses.json).statuses);
+        comments = this.comments(record(record(record(record(record(threads.json).data).repository).pullRequest).reviewThreads).nodes);
+      }
+      const read = { number: opened.number, base: text(record(pr.base).ref, 200) || previous.base, state, draft: pr.draft === true, headSha, mergeable, checks, comments, syncedAt: at, attemptedAt: at };
+      const snapshot = { ...read, status: pullRequestStatus(read) };
+      this.store.savePullRequest(taskId, snapshot);
+      return snapshot;
+    } catch (error) {
+      const { error: _, ...kept } = previous;
+      const snapshot = { ...kept, attemptedAt: at, error: error instanceof AppError ? error.message : 'GitHub could not be read.' };
+      this.store.savePullRequest(taskId, snapshot);
+      return snapshot;
+    }
+  }
+  private checks(runs: unknown, statuses: unknown): PullRequestCheck[] {
+    const found = new Map<string, PullRequestCheck>();
+    const add = (name: string, status: CheckStatus, url: string, summary: string) => { if (name && !found.has(name)) found.set(name, { name, status, ...(/^https:\/\//.test(url) ? { url } : {}), ...(summary ? { summary } : {}) }); };
+    for (const value of list(runs)) {
+      const run = record(value); const conclusion = text(run.conclusion, 40);
+      const status = run.status !== 'completed' ? 'running' : conclusion === 'success' ? 'passed' : FAILED.has(conclusion) ? 'failed' : 'skipped';
+      add(text(run.name, 200), status, text(run.html_url, 500), text(record(run.output).title, 300));
+    }
+    for (const value of list(statuses)) {
+      const entry = record(value); const state = text(entry.state, 40);
+      add(text(entry.context, 200), state === 'success' ? 'passed' : state === 'pending' ? 'running' : 'failed', text(entry.target_url, 500), text(entry.description, 300));
+    }
+    return [...found.values()].slice(0, 100);
+  }
+  /** Unresolved review threads, each shown by its first comment. */
+  private comments(threads: unknown): PullRequestComment[] {
+    const open: PullRequestComment[] = [];
+    for (const value of list(threads)) {
+      const thread = record(value); const first = record(list(record(thread.comments).nodes)[0]); const id = text(thread.id, 200);
+      if (thread.isResolved === true || !id) continue;
+      const path = text(thread.path, 500); const line = Number(thread.line); const url = text(first.url, 500);
+      open.push({ id, author: text(record(first.author).login, 100) || 'unknown', counts: WRITERS.has(text(first.authorAssociation, 40)), body: text(first.body, 2000), ...(path ? { path } : {}), ...(Number.isInteger(line) && line > 0 ? { line } : {}), ...(/^https:\/\//.test(url) ? { url } : {}) });
+    }
+    return open;
   }
 
   private async access(projectId: string): Promise<{ repository: string; token: string; canPush: boolean | null }> {
@@ -165,6 +250,7 @@ export class PullRequestService {
     await this.push(project.path, repository, token, branch, commit, taskId);
     const pullRequest = await this.open(task, repository, token, branch, base, commit, trigger);
     this.store.record(taskId, PR_OPENED, pullRequest);
+    this.snapshot(taskId, pullRequest);
     return pullRequest;
   }
   private async push(cwd: string, repository: string, token: string, branch: string, commit: string, taskId: string): Promise<void> {

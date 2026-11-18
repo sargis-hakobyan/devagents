@@ -11,6 +11,7 @@ import { limitationCount, normalizeLegacyLimitations, redactReportProse } from '
 import { STARTER_TEAM_ID } from '../domain/starter-team.js';
 import type { DispatchClaim, DispatchRecord } from '../domain/dispatch.js';
 import type { ProjectIntegrations } from '../domain/integrations.js';
+import type { PullRequestSnapshot } from '../domain/pull-requests.js';
 import type { Tracker } from '../domain/trackers.js';
 import type { TaskTicket, TicketRef } from '../domain/tickets.js';
 import type { ModelCatalog } from '../domain/model-catalog.js';
@@ -26,7 +27,7 @@ export class Store {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
     // Version 4 added optional QA settings. Preserve that table when the QA feature is stashed.
-    if (version > 8) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
+    if (version > 9) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
     if (version === 0) this.db.exec(`
       BEGIN IMMEDIATE;
       CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, data TEXT NOT NULL);
@@ -83,6 +84,24 @@ export class Store {
       PRAGMA user_version=8;
       COMMIT;
     `);
+    // Schema 9: what GitHub last said about each task's pull request. Rewritten on every read, so it is not evidence.
+    if (version < 9) this.db.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS pull_requests (task_id TEXT PRIMARY KEY REFERENCES tasks(id), state TEXT NOT NULL, data TEXT NOT NULL);
+      PRAGMA user_version=9;
+      COMMIT;
+    `);
+  }
+  pullRequest(taskId: string): PullRequestSnapshot | undefined {
+    const row = this.db.prepare('SELECT data FROM pull_requests WHERE task_id=?').get(taskId) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) as PullRequestSnapshot : undefined;
+  }
+  savePullRequest(taskId: string, snapshot: PullRequestSnapshot): void {
+    this.db.prepare('INSERT INTO pull_requests VALUES (?, ?, ?) ON CONFLICT(task_id) DO UPDATE SET state=excluded.state, data=excluded.data').run(taskId, snapshot.state, this.json(snapshot));
+  }
+  /** Tasks whose pull request is still open, oldest first. */
+  openPullRequests(): string[] {
+    return (this.db.prepare("SELECT task_id FROM pull_requests WHERE state='open' ORDER BY rowid").all() as { task_id: string }[]).map(r => r.task_id);
   }
   trackers(): Tracker[] {
     return (this.db.prepare('SELECT data FROM trackers').all() as { data: string }[]).map(row => JSON.parse(row.data) as Tracker).sort((a, b) => a.name.localeCompare(b.name));
@@ -422,7 +441,7 @@ export class Store {
   }
   tasks(): Task[] { return this.db.prepare('SELECT data FROM tasks ORDER BY rowid DESC').all().map(r => this.safeTask(JSON.parse(r.data as string) as Task)); }
   private summarize(t: Task, sequence: number): TaskSummary {
-    t = this.safeTask(t);
+    t = this.safeTask(t); const pr = t.state === 'completed' ? this.pullRequest(t.id) : undefined;
     return {
       id: t.id, projectId: t.projectId, state: t.state, version: t.version, createdAt: t.createdAt, updatedAt: t.updatedAt, sequence,
       request: t.request.length > 200 ? `${t.request.slice(0, 200)}…` : t.request,
@@ -430,15 +449,16 @@ export class Store {
       ...(t.outcome?.commit ? { commit: t.outcome.commit } : {}), ...(t.outcome?.error ? { error: t.outcome.error } : {}),
       ...(t.team ? { team: { id: t.team.id, revision: t.team.revision, name: t.team.name } } : {}), ...(t.ticket ? { ticket: t.ticket } : {}),
       ...(limitationCount(t.outcome) ? { limitations: limitationCount(t.outcome), ...(t.outcome?.limitationOverflow ? { limitationOverflow: t.outcome.limitationOverflow } : {}) } : {}),
+      ...(pr ? { pullRequest: { number: pr.number, state: pr.state, status: pr.status.text, code: pr.status.code } } : {}),
     };
   }
   /** The list view: no agent snapshots, plans or instructions, which grow to hundreds of kilobytes per task. Newest first, cursor by row id. */
-  summaries(options: { limit?: number; before?: number; projectId?: string; state?: TaskState; states?: TaskState[] } = {}): { tasks: TaskSummary[]; nextBefore?: number } {
+  summaries(options: { limit?: number; before?: number; projectId?: string; state?: TaskState; states?: TaskState[]; /** Only tasks whose pull request is open. */ openPullRequest?: boolean } = {}): { tasks: TaskSummary[]; nextBefore?: number } {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
     const states = options.states ?? (options.state ? [options.state] : undefined);
     const filter = states ? JSON.stringify(states) : null;
-    const rows = this.db.prepare('SELECT rowid AS sequence, data FROM tasks WHERE (? IS NULL OR rowid < ?) AND (? IS NULL OR project_id = ?) AND (? IS NULL OR state IN (SELECT value FROM json_each(?))) ORDER BY rowid DESC LIMIT ?')
-      .all(options.before ?? null, options.before ?? null, options.projectId ?? null, options.projectId ?? null, filter, filter, limit + 1) as { sequence: number; data: string }[];
+    const rows = this.db.prepare('SELECT rowid AS sequence, data FROM tasks WHERE (? IS NULL OR rowid < ?) AND (? IS NULL OR project_id = ?) AND (? IS NULL OR state IN (SELECT value FROM json_each(?))) AND (? = 0 OR id IN (SELECT task_id FROM pull_requests WHERE state=\'open\')) ORDER BY rowid DESC LIMIT ?')
+      .all(options.before ?? null, options.before ?? null, options.projectId ?? null, options.projectId ?? null, filter, filter, options.openPullRequest ? 1 : 0, limit + 1) as { sequence: number; data: string }[];
     const page = rows.slice(0, limit).map(r => this.summarize(JSON.parse(r.data) as Task, Number(r.sequence)));
     return rows.length > limit ? { tasks: page, nextBefore: page[page.length - 1]!.sequence } : { tasks: page };
   }

@@ -595,3 +595,15 @@ The owner asked for the pull request design to be built step by step. This is th
 - **This changes a product rule:** `AGENTS.md` and `README.md` said DevAgents never pushes. It now pushes a completed task's own `devagents/` branch to the connected repository when the project's Publish setting allows it, and nothing else.
 - **Not built:** terminal commands, a pull request description from validation evidence, a managed clone, and keeping pull request state up to date after opening.
 - **Not verified against the real GitHub.** No authenticated call was made; tests use a local bare repository and recorded API answers.
+
+## Pull requests, step 2: GitHub is read and shown — 2026-11-18
+
+Second step of the pull request work: the service reads each open pull request about once a minute and the task page and the board show it. Nothing acts on what is read yet.
+
+- **A table for the last read** (`pull_requests`, schema 9). The state changes every minute, so it is not evidence; evidence stays the record of what DevAgents did.
+- **One status per pull request,** computed on the server so the tab, the header chip and the board card agree: failed checks, running checks, conflict, open comments, waiting for GitHub, ready.
+- **Review threads come from GraphQL,** because only it says whether a thread is resolved. A thread is shown by its first comment.
+- **Whose comments count is fixed for now:** people who can write to the repository. The "Comments that count" setting comes with the step that acts on comments.
+- **The board column is `U12-PR-States` as drawn,** except that it is hidden while empty, so a workspace without GitHub looks as before.
+- **Not built:** reading check logs (needed to hand a failure to the team), general comments and review summaries, marking a draft ready, a "read now" control, and attention items on the Overview.
+- **Not verified against the real GitHub.** The answers GitHub gives for check runs, statuses and review threads are recorded fixtures written from its documentation.

@@ -306,7 +306,7 @@ The GitHub and Jira calls are covered by deterministic fixtures only. They have 
 
 ## Pull requests
 
-A project that is connected to GitHub shows **After a task finishes** on its page. **Publish** is `Off` (the default), `Ask me` or `Automatic`, and **Target branch** is the branch pull requests open into; without one, the repository's default branch is used. The other steps of the design (fixing failed checks and review comments, merging) are not implemented.
+A project that is connected to GitHub shows **After a task finishes** on its page. **Publish** is `Off` (the default), `Ask me` or `Automatic`, and **Target branch** is the branch pull requests open into; without one, the repository's default branch is used. DevAgents then reads the pull request from GitHub and shows what it finds. The other steps of the design (fixing failed checks and review comments, merging) are not implemented.
 
 - **Ask me:** a completed task gets a **Pull request** tab with **Open pull request**.
 - **Automatic:** a completed task is published within about 15 seconds. A publish that fails is recorded on the tab and waits for a click; it is not retried on its own.
@@ -320,12 +320,22 @@ Publishing pushes the task's commit to a branch of the same name in the connecte
 - The token needs read and write access to **Contents** and **Pull requests** of the repository.
 - The task records `pull-request-settings`, `pull-request-pushed`, `pull-request-opened` and `pull-request-failed` as evidence, visible under Activity.
 
+**Reading GitHub.** While a pull request is open, the service reads it about once a minute: its state, the checks on its latest commit (check runs and commit statuses), whether it can be merged, and its unresolved review threads. A merged or closed pull request is not read again.
+
+- The task's **Pull request** tab shows the result: one status, the checks with GitHub's own short result line, and the open review comments. The task header and the board card carry the same status, for example `PR #42 · 1 check failed`.
+- The status names the first thing in the way, in this order: failed checks, running checks, a conflict with the target branch, open comments, GitHub blocking the merge (for example a required approval), otherwise "ready to merge".
+- A comment counts when its author can write to the repository (owner, member or collaborator). Other comments are shown with **Does not count** and never change the status.
+- On **Tasks**, a finished task with an open pull request sits in a **Pull request** column between Working and Done. It moves to Done when the pull request is merged or closed. The column only appears when it has a task.
+- A read that fails keeps what the last read found and shows the reason on the tab.
+- Reading comments uses GitHub's GraphQL API, so the token must be allowed to read pull requests there too. Check logs, general (non-line) comments and review summaries are not read. Text from GitHub is redacted and stored as plain text; nothing is done with it yet.
+
 | Route | Purpose |
 | --- | --- |
 | `GET /projects/<id>/pull-requests` | Whether GitHub is connected, and the saved choices |
 | `PUT /projects/<id>/pull-requests` | Save `{ "publish": "off" \| "ask" \| "auto", "targetBranch"?: "<branch>" }` |
 | `GET /projects/<id>/pull-requests/branches` | Branch names read from GitHub, and the default branch |
-| `GET /tasks/<id>/pull-request` | The task's choice, whether a click can publish it, the pull request or the last failure |
+| `GET /tasks/<id>/pull-request` | The task's choice, whether a click can publish it, the pull request or the last failure, and under `github` what was last read |
+| `GET /tasks?pullRequest=open` | Only tasks whose pull request is open; every task summary carries `pullRequest` when it has one |
 | `POST /tasks/<id>/pull-request` | Publish now |
 
 There are no terminal commands for this yet. Not verified against the real GitHub: the push and the API calls are tested with a local bare repository and recorded answers.

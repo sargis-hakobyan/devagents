@@ -1,5 +1,5 @@
 import { useRef, useState } from 'preact/hooks';
-import { api, SignedOutError, type ProjectPullRequests, type StepMode, type TaskPullRequestView } from '../api';
+import { api, SignedOutError, type ProjectPullRequests, type PullRequestCheck, type PullRequestStatusCode, type StepMode, type TaskPullRequestView } from '../api';
 import { formatTime } from '../format';
 import { onSignedOut, retryNow, usePoll } from '../state';
 import { Card, Chip, ErrorNote, Skeleton } from './ui';
@@ -56,10 +56,19 @@ export const useTaskPullRequest = (taskId: string) => usePoll(`task-pull-request
 /** Whether the task page has anything to show about a pull request. */
 export const hasPullRequest = (view: TaskPullRequestView | undefined): view is TaskPullRequestView => Boolean(view && (view.pullRequest || view.canPublish || view.publishing || view.failure));
 
+type Tone = 'ok' | 'run' | 'warn' | 'bad' | 'neutral';
+const TONES: Record<PullRequestStatusCode, Tone> = { 'not-read': 'run', merged: 'ok', closed: 'neutral', 'checks-failed': 'bad', 'checks-running': 'run', conflict: 'bad', 'comments-open': 'warn', waiting: 'neutral', ready: 'ok' };
+/** `PR #42 · checks running`, coloured by what stands between the pull request and a merge. */
+export function PullRequestStatusChip({ pullRequest }: { pullRequest: { number: number; status: string; code: PullRequestStatusCode } }) {
+  return <Chip tone={TONES[pullRequest.code]}>PR #{pullRequest.number} · {pullRequest.status}</Chip>;
+}
 export function PullRequestChip({ view }: { view: TaskPullRequestView | undefined }) {
   if (!view?.pullRequest) return null;
-  return <Chip tone="run">PR #{view.pullRequest.number}</Chip>;
+  return view.github ? <PullRequestStatusChip pullRequest={{ number: view.github.number, status: view.github.status.text, code: view.github.status.code }} /> : <Chip tone="run">PR #{view.pullRequest.number}</Chip>;
 }
+
+const CHECK: Record<PullRequestCheck['status'], { icon: string; label: string; tone: string }> = { passed: { icon: '✓', label: 'Passed', tone: 'ok' }, failed: { icon: '✕', label: 'Failed', tone: 'bad' }, running: { icon: '…', label: 'Running', tone: 'run' }, skipped: { icon: '–', label: 'Skipped', tone: 'neutral' } };
+const count = (n: number, word: string) => `${n} ${word}`;
 
 export function PullRequestTab({ taskId, view, reload }: { taskId: string; view: TaskPullRequestView; reload: () => void }) {
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const lock = useRef(false);
@@ -69,16 +78,43 @@ export function PullRequestTab({ taskId, view, reload }: { taskId: string; view:
     catch (e) { if (e instanceof SignedOutError) onSignedOut(); else setError(message(e)); }
     finally { lock.current = false; setBusy(false); reload(); }
   };
-  const pr = view.pullRequest; const working = busy || view.publishing; const failure = error || view.failure?.message;
-  return <Card title={pr ? `Pull request #${pr.number}` : 'Pull request'} right={pr && <a class="btn small" href={pr.url} target="_blank" rel="noreferrer">View on GitHub</a>}>
-    <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'flex-start' }}>
-      {pr ? <>
-        <Chip tone="ok">✓ Opened {formatTime(pr.openedAt)}{pr.draft ? ' · draft' : ''}</Chip>
-        <span class="muted wrap-anywhere" style={{ fontSize: '13.5px' }}><span class="mono">{pr.repository}</span> · <span class="mono">{pr.branch}</span> → <span class="mono">{pr.base}</span></span>
-      </> : <>
-        {failure && <div class="note bad" role="alert">{failure}</div>}
-        <button type="button" class="btn primary" disabled={working || !view.canPublish} onClick={() => void publish()}>{working ? 'Opening the pull request…' : failure ? 'Try again' : 'Open pull request'}</button>
-      </>}
-    </div>
-  </Card>;
+  const pr = view.pullRequest; const github = view.github; const working = busy || view.publishing; const failure = error || view.failure?.message;
+  if (!pr) return <Card title="Pull request"><div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'flex-start' }}>
+    {failure && <div class="note bad" role="alert">{failure}</div>}
+    <button type="button" class="btn primary" disabled={working || !view.canPublish} onClick={() => void publish()}>{working ? 'Opening the pull request…' : failure ? 'Try again' : 'Open pull request'}</button>
+  </div></Card>;
+  const checks = github?.checks ?? []; const comments = github?.comments ?? []; const open = github?.state === 'open';
+  const failed = checks.filter(c => c.status === 'failed').length; const running = checks.filter(c => c.status === 'running').length; const passed = checks.filter(c => c.status === 'passed').length;
+  const counted = comments.filter(c => c.counts).length;
+  return <>
+    <Card title={`Pull request #${pr.number}`} right={<a class="btn small" href={pr.url} target="_blank" rel="noreferrer">View on GitHub</a>}>
+      <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-start' }}>
+        <span style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {github ? <Chip tone={TONES[github.status.code]}>{github.status.text.replace(/^./, c => c.toUpperCase())}</Chip> : <Chip tone="ok">✓ Opened</Chip>}
+          {open && github?.draft && <Chip tone="neutral">Draft</Chip>}
+        </span>
+        <span class="muted wrap-anywhere" style={{ fontSize: '13.5px' }}><span class="mono">{pr.repository}</span> · <span class="mono">{pr.branch}</span> → <span class="mono">{github?.base ?? pr.base}</span> · opened {formatTime(pr.openedAt)}{github?.syncedAt ? ` · GitHub read ${formatTime(github.syncedAt)}` : ''}</span>
+        {github?.error && <div class="note warn" role="alert">⚠ GitHub could not be read. {github.error}</div>}
+      </div>
+    </Card>
+    {open && github?.syncedAt && <div class="pr-two">
+      <Card title="GitHub checks" right={checks.length > 0 && <Chip tone={failed ? 'bad' : running ? 'run' : 'ok'}>{[failed && count(failed, 'failed'), running && count(running, 'running'), passed && count(passed, 'passed')].filter(Boolean).join(' · ') || 'None counted'}</Chip>}>
+        {checks.length === 0 ? <div class="pr-none">No checks on this commit</div> : <ul class="pr-list">{checks.map(c => <li key={c.name} class={c.status === 'failed' ? 'pr-failed' : ''}>
+          <span class={`pr-ico ${CHECK[c.status].tone}`} aria-hidden="true">{CHECK[c.status].icon}</span>
+          <div style={{ minWidth: 0, flex: 1 }}><b class="wrap-anywhere">{c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.name}</a> : c.name}</b><div class="muted wrap-anywhere" style={{ fontSize: '13px' }}>{CHECK[c.status].label}{c.summary ? ` · ${c.summary}` : ''}</div></div>
+        </li>)}</ul>}
+      </Card>
+      <Card title="GitHub review comments" right={comments.length > 0 && <Chip tone={counted ? 'warn' : 'neutral'}>{counted} open</Chip>}>
+        {comments.length === 0 ? <div class="pr-none">No open comments</div> : <ul class="pr-list">{comments.map(c => <li key={c.id}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <span class="wrap-anywhere">{c.path ? <><b class="mono">{c.path}</b>{c.line ? <span class="muted"> line {c.line}</span> : null}</> : <b>General comment</b>}</span>
+              <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}><span class="muted" style={{ fontSize: '13px' }}>@{c.author}</span>{!c.counts && <Chip tone="neutral">Does not count</Chip>}</span>
+            </div>
+            <div class="pr-quote wrap-anywhere">{c.body}</div>
+          </div>
+        </li>)}</ul>}
+      </Card>
+    </div>}
+  </>;
 }

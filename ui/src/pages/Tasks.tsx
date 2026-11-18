@@ -1,7 +1,9 @@
+import { Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { api, resources, teamLabel, type AvailableTicket, type AvailableTickets, type TaskSummary, type TaskState } from '../api';
 import { Card, Empty, ErrorNote, Skeleton, StateChip } from '../components/ui';
+import { PullRequestStatusChip } from '../components/PullRequests';
 import { activeStates, attentionStates, finishedStates, relative, truncate } from '../format';
 import { useNow, usePoll } from '../state';
 import { availableIdentity, ticketIdentity, useTicketStart } from '../ticket-start';
@@ -41,7 +43,7 @@ function detail(t: TaskSummary): string {
 function TaskCard({ task, now }: { task: TaskSummary; now: number }) {
   return <a class="kb-card" href={`/ui/tasks/${task.id}`} draggable={false}>
     <span class="kb-title wrap-anywhere">{truncate(task.request, 140)}</span>
-    <StateChip task={task} />
+    {task.pullRequest ? <PullRequestStatusChip pullRequest={task.pullRequest} /> : <StateChip task={task} />}
     <span class={`kb-line${task.commit ? ' mono' : ''}`}>{detail(task)}</span>
     <span class="kb-meta"><span class="kb-project">{task.projectName ?? task.projectId}</span><span>{relative(task.updatedAt, now)}</span></span>
   </a>;
@@ -119,6 +121,7 @@ function Board({ project, search, now, onOlder }: { project: string; search: str
   const [overPlanning, setOverPlanning] = useState(false);
   const observed = useRef(new Set<string>());
   const open = usePoll(`board:open:${project}`, () => api<TaskPage>(query(OPEN, 200, project)), 5000);
+  const pulls = usePoll(`board:pulls:${project}`, () => api<TaskPage>(`${query(['completed'], 200, project)}&pullRequest=open`), 5000);
   const done = usePoll(`board:done:${project}`, () => api<TaskPage>(query(['completed'], FOLDED, project)), 5000);
   const stopped = usePoll(`board:stopped:${project}`, () => api<TaskPage>(query(['failed', 'cancelled'], FOLDED, project)), 5000);
   const loaded = [...(open.data?.tasks ?? []), ...(done.data?.tasks ?? []), ...(stopped.data?.tasks ?? [])];
@@ -131,7 +134,9 @@ function Board({ project, search, now, onOlder }: { project: string; search: str
   const error = open.error ?? done.error ?? stopped.error;
   if (!open.data || !done.data || !stopped.data) return error ? <ErrorNote message={error} /> : <Skeleton rows={5} label="Loading tasks" />;
   const counts = open.data.counts; const shown = (tasks: TaskSummary[]) => tasks.filter(t => has(t.request, search));
-  const folded: Record<string, TaskSummary[]> = { done: done.data.tasks, stopped: stopped.data.tasks };
+  // A finished task whose pull request is still open sits in its own column until the pull request is merged or closed.
+  const published = pulls.data?.tasks ?? []; const inReview = new Set(published.map(t => t.id));
+  const folded: Record<string, TaskSummary[]> = { done: done.data.tasks.filter(t => !inReview.has(t.id)), stopped: stopped.data.tasks };
   const waiting = shown([...open.data.tasks, ...added].filter(t => WAITING.includes(t.state)));
   return <>
     {start.error && <div class="note bad" role="alert">{start.error}</div>}
@@ -143,9 +148,13 @@ function Board({ project, search, now, onOlder }: { project: string; search: str
       {STAGES.map(stage => {
         const extra = added.filter(t => stage.states.includes(t.state));
         const tasks = shown([...(stage.folds ? folded[stage.id]! : open.data!.tasks.filter(t => stage.states.includes(t.state))), ...extra]);
-        const total = stage.states.reduce((sum, state) => sum + (counts[state] ?? 0), 0) + extra.length; const older = stage.folds ? total - folded[stage.id]!.length - extra.length : 0;
+        const total = stage.states.reduce((sum, state) => sum + (counts[state] ?? 0), 0) + extra.length - (stage.id === 'done' ? published.length : 0); const older = stage.folds ? Math.max(0, total - folded[stage.id]!.length - extra.length) : 0;
         const target = stage.id === 'planning' && Boolean(dragging) && !disabled;
-        return <section key={stage.id} class={`kb-col${target ? ' kb-drop-target' : ''}${target && overPlanning ? ' kb-drop-over' : ''}`} aria-label={`${stage.name}, ${total} task${total === 1 ? '' : 's'}`}
+        const before = stage.id === 'done' && published.length > 0 && <section key="pull-request" class="kb-col" aria-label={`Pull request, ${published.length} task${published.length === 1 ? '' : 's'}`}>
+          <div class="kb-col-head"><b>Pull request</b><span class="kb-count">{published.length}</span></div>
+          <div class="kb-cards">{shown(published).map(task => <TaskCard key={task.id} task={task} now={now} />)}</div>
+        </section>;
+        return <Fragment key={stage.id}>{before}<section class={`kb-col${target ? ' kb-drop-target' : ''}${target && overPlanning ? ' kb-drop-over' : ''}`} aria-label={`${stage.name}, ${total} task${total === 1 ? '' : 's'}`}
           onDragOver={e => { if (target) { e.preventDefault(); e.dataTransfer!.dropEffect = 'move'; setOverPlanning(true); } }}
           onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOverPlanning(false); }}
           onDrop={e => { if (target && dragging) { e.preventDefault(); const ticket = dragging; onDrag(undefined); void start.start(ticket); } }}>
@@ -156,7 +165,7 @@ function Board({ project, search, now, onOlder }: { project: string; search: str
             {tasks.length === 0 ? !(stage.id === 'planning' && (start.busy || target)) && <span class="kb-none">No tasks here</span> : tasks.map(task => <TaskCard key={task.id} task={task} now={now} />)}
             {older > 0 && <button type="button" class="kb-more" onClick={onOlder}>Show {older} older →</button>}
           </div>
-        </section>;
+        </section></Fragment>;
       })}
     </div>
   </>;

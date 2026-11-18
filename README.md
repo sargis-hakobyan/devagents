@@ -57,7 +57,7 @@ The starter team includes a **Tech Lead**, **Frontend Developer**, **Backend Dev
 | **Visible execution** | A browser timeline of agent runs, parallel work, automated checks, reviewer findings, and repair attempts. |
 | **Quality gates** | Developer validation and independent, read-only code review. Optional QA verifies acceptance criteria. |
 | **Usage tracking** | Reported tokens by step and attempt. Available cost estimates are labelled; missing data stays unavailable. |
-| **Project connections** | Connect GitHub, Jira and ticket tools. Drag an available ticket into Planning to start it with its full content and project defaults, or edit it first. A project connected to GitHub can publish a finished task as a pull request, on a click or on its own. Automatic ticket pickup, fixing failed checks or review comments, and merging are not implemented yet. |
+| **Project connections** | Connect GitHub, Jira and ticket tools. Drag an available ticket into Planning to start it with its full content and project defaults, or edit it first. A project connected to GitHub can publish a finished task as a pull request, on a click or on its own, and then shows its checks and review comments. Automatic ticket pickup, fixing failed checks or review comments, and merging are not implemented yet. |
 | **Project archive** | Take a project out of use and register its repository again under a new name; its task history stays and it can be restored. |
 | **Local results** | Read-only diffs, local branches and commits, persistent task history, and automatic cleanup with recovery snapshots for unfinished work. |
 

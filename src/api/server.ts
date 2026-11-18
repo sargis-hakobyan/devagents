@@ -343,6 +343,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
           ...(before ? { before: integer(before, 0) } : {}),
           ...(projectId ? { projectId } : {}),
           ...(states.length ? { states } : {}),
+          ...(url.searchParams.get('pullRequest') === 'open' ? { openPullRequest: true } : {}),
         });
         const names = projectNames();
         return send(res, 200, { ...page, tasks: page.tasks.map(task => ({ ...named(task, names), scheduling: service.taskScheduling(task.id) })), counts: service.store.stateCounts(projectId) });
