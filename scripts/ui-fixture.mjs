@@ -110,7 +110,14 @@ const fixtureRemote = async (input, init = {}) => {
     if (path === '/repos/example-org/website/branches') return reply([{ name: 'main' }, { name: 'develop' }]);
     // Reading a pull request: one failed and one passed check, one comment that counts and one that does not.
     const onePull = /^\/repos\/example-org\/website\/pulls\/(\d+)$/.exec(path); const pull = onePull && fixturePulls.find(p => p.number === Number(onePull[1]));
-    if (pull) return reply({ number: pull.number, state: 'open', merged: false, draft: pull.draft, mergeable: true, mergeable_state: 'unstable', head: { sha: execFileSync('git', ['-C', fixtureGitHub, 'rev-parse', `refs/heads/${pull.head}`], { encoding: 'utf8' }).trim() }, base: { ref: pull.base } });
+    // The pull request of the "three modules" task has a failed check and comments; every other one is clean and can be merged.
+    if (pull) { fixtureReading = pull; const troubled = pull.head.includes('three-modules'); return reply({ node_id: `PR_${pull.number}`, number: pull.number, state: pull.merged ? 'closed' : 'open', merged: pull.merged === true, draft: pull.draft, mergeable: true, mergeable_state: troubled ? 'unstable' : 'clean', head: { sha: execFileSync('git', ['-C', fixtureGitHub, 'rev-parse', `refs/heads/${pull.head}`], { encoding: 'utf8' }).trim() }, base: { ref: pull.base } }); }
+    const mergeOf = /^\/repos\/example-org\/website\/pulls\/(\d+)\/merge$/.exec(path); const merging = mergeOf && fixturePulls.find(p => p.number === Number(mergeOf[1]));
+    if (merging) { merging.merged = true; return reply({ merged: true, sha: 'c'.repeat(40) }); }
+    const clean = fixtureReading && !fixtureReading.head.includes('three-modules');
+    if (path === '/graphql' && String(JSON.parse(init.body).query).startsWith('mutation')) return reply({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } });
+    if (clean && path.endsWith('/check-runs')) return reply({ check_runs: [{ id: 1, name: 'build', status: 'completed', conclusion: 'success' }] });
+    if (clean && path === '/graphql') return reply({ data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } } });
     if (path.endsWith('/check-runs')) return reply({ check_runs: [{ name: 'build', status: 'completed', conclusion: 'success', html_url: 'https://github.com/example-org/website/actions/runs/1' }, { id: 2, name: 'test (node 24)', status: 'completed', conclusion: 'failure', html_url: 'https://github.com/example-org/website/actions/runs/2', output: { title: '1 failed, 23 passed' } }] });
     if (path.endsWith('/status')) return reply({ statuses: [] });
     if (path === '/graphql') return reply({ data: { repository: { pullRequest: { reviewThreads: { nodes: [
@@ -145,7 +152,7 @@ const fixtureRemote = async (input, init = {}) => {
 };
 const integrations = new ProjectIntegrationService(store, fixtureSecrets, { fetch: fixtureRemote, githubApiUrl: 'https://github.fixture.invalid' });
 // Pull requests: the fixture's GitHub is a bare repository in the temporary folder and the canned API above.
-const fixturePulls = []; const fixtureGitHub = join(root, 'github-remote.git');
+const fixturePulls = []; let fixtureReading; const fixtureGitHub = join(root, 'github-remote.git');
 execFileSync('git', ['init', '-q', '--bare', fixtureGitHub]);
 const pullRequests = new PullRequestService(store, fixtureSecrets, { fetch: fixtureRemote, githubApiUrl: 'https://github.fixture.invalid', remoteUrl: () => fixtureGitHub });
 service.onSubmitted(task => pullRequests.freeze(task.id, task.projectId));

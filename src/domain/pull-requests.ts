@@ -17,9 +17,12 @@ export const PullRequestSettings = z.strictObject({
   fixComments: StepMode.default('off'),
   /** Fix rounds DevAgents may start on its own for one pull request. */
   maxFixRounds: z.number().int().min(1).max(5).default(3),
+  /** Merge the pull request once nothing stands in its way and GitHub allows it. Needs Publish. */
+  merge: StepMode.default('off'),
+  mergeMethod: z.enum(['squash', 'merge', 'rebase']).default('squash'),
 });
 export type PullRequestSettings = z.infer<typeof PullRequestSettings>;
-export const NO_PULL_REQUESTS: PullRequestSettings = { publish: 'off', fixChecks: 'off', fixComments: 'off', maxFixRounds: 3 };
+export const NO_PULL_REQUESTS: PullRequestSettings = { publish: 'off', fixChecks: 'off', fixComments: 'off', maxFixRounds: 3, merge: 'off', mergeMethod: 'squash' };
 
 /** The pull request a task was published as. */
 export type TaskPullRequest = { number: number; url: string; repository: string; branch: string; base: string; commit: string; draft: boolean; openedAt: string; trigger: 'user' | 'setting' };
@@ -44,6 +47,7 @@ export type PullRequestRound = {
   /** One line about where the round stands, or why it stopped. */
   detail: string; commit?: string;
 };
+export const PR_MERGED = 'pull-request-merged'; export const PR_MERGE_FAILED = 'pull-request-merge-failed';
 export const PR_ROUND = 'pull-request-round'; export const PR_ROUND_PUSHED = 'pull-request-round-pushed'; export const PR_ROUND_HELD = 'pull-request-round-held'; export const PR_ROUND_FAILED = 'pull-request-round-failed';
 
 /** What GitHub last said about a task's pull request. Read by the service about once a minute while the pull request is open. */
@@ -66,6 +70,10 @@ export type PullRequestSnapshot = {
   /** Why the last read failed; the rest is what the read before it found. */
   error?: string;
   status: PullRequestStatus;
+  /** GitHub's node id, needed to mark a draft as ready. */
+  nodeId?: string;
+  /** Set while the pull request waits for the user: what for, in a few words. */
+  attention?: string;
 };
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 /** One line for the task page and the board: the first thing that stands between this pull request and a merge. */

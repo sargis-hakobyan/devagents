@@ -33,6 +33,8 @@ test('a connected project turns on Publish, and a finished task is opened as a p
     const fixChecks = page.getByRole('group', { name: 'Fix failed checks' }); const fixComments = page.getByRole('group', { name: 'Fix review comments' });
     await fixChecks.getByRole('button', { name: 'Ask me' }).click(); await fixComments.getByRole('button', { name: 'Ask me' }).click();
     await expect(page.getByLabel('Automatic fix rounds, at most')).toHaveValue('3');
+    await page.getByRole('group', { name: 'Merge' }).getByRole('button', { name: 'Ask me' }).click();
+    await page.getByLabel('Merge method').selectOption('Rebase');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
     await expect(publish.getByRole('button', { name: 'Ask me' })).toHaveAttribute('aria-pressed', 'true');
@@ -66,6 +68,22 @@ test('a connected project turns on Publish, and a finished task is opened as a p
     const column = page.getByRole('region', { name: /^Pull request, 1 task/ });
     await expect(column).toContainText('Implement three modules'); await expect(column).toContainText('1 check failed');
     await expect(page.getByRole('region', { name: /^Done,/ })).not.toContainText('Implement three modules');
+
+    // Merge: another finished task has a clean pull request. It waits in the band, and one click merges it.
+    const clean = tasks.tasks.find(t => t.state === 'completed' && t.request.startsWith('Fix the greeting so'))!;
+    expect((await call(`/tasks/${clean.id}/pull-request`, 'POST', {})).status).toBe(200);
+    await page.goto(`${base}/ui/tasks`);
+    const band = page.getByRole('region', { name: /^Needs you/ });
+    await expect(band).toContainText(/PR #\d+ · ready to merge/, { timeout: 20000 });
+    await band.getByRole('link', { name: 'Open the pull request' }).click();
+    await page.getByRole('tab', { name: /Pull request · #\d+/ }).click();
+    await expect(page.getByRole('button', { name: /Start a fix round/ })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Merge pull request' }).click();
+    await expect(page.getByText('Merged into main', { exact: true })).toBeVisible();
+    await expect(page.getByText('git pull', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Merge pull request' })).toHaveCount(0);
+    await page.goto(`${base}/ui/tasks`);
+    await expect(page.getByRole('region', { name: /^Done,/ })).toContainText(/PR #\d+ · merged into main/);
   } finally {
     if (roundId) { const round = await (await call(`/tasks/${roundId}`, 'GET')).json() as { version: number }; await call(`/tasks/${roundId}/cancel`, 'POST', { expectedVersion: round.version }); }
     await call('/projects/fixture/pull-requests', 'PUT', { publish: 'off' });

@@ -31,7 +31,7 @@ export function ProjectPullRequestsCard({ projectId }: { projectId: string }) {
       <span class="step-num" aria-hidden="true">1</span>
       <div class="step-text"><b id={`publish-${projectId}`}>Publish</b><span class="muted">Push the branch and open a pull request</span></div>
       <div class="step-seg" role="group" aria-labelledby={`publish-${projectId}`}>
-        {MODES.map(m => <button key={m.key} type="button" aria-pressed={settings.publish === m.key} disabled={busy} onClick={() => change(m.key === 'off' ? { publish: 'off', fixChecks: 'off', fixComments: 'off' } : { publish: m.key })}>{m.title}</button>)}
+        {MODES.map(m => <button key={m.key} type="button" aria-pressed={settings.publish === m.key} disabled={busy} onClick={() => change(m.key === 'off' ? { publish: 'off', fixChecks: 'off', fixComments: 'off', merge: 'off' } : { publish: m.key })}>{m.title}</button>)}
       </div>
     </div>
     <div class={`step-row${off ? ' dim' : ''}`}>
@@ -48,6 +48,13 @@ export function ProjectPullRequestsCard({ projectId }: { projectId: string }) {
         {MODES.map(m => <button key={m.key} type="button" aria-pressed={!off && settings.fixComments === m.key} disabled={busy || off} onClick={() => change({ fixComments: m.key })}>{m.title}</button>)}
       </div>
     </div>
+    <div class={`step-row${off ? ' dim' : ''}`}>
+      <span class="step-num" aria-hidden="true">4</span>
+      <div class="step-text"><b id={`merge-${projectId}`}>Merge</b><span class="muted">As soon as GitHub allows it</span></div>
+      <div class="step-seg" role="group" aria-labelledby={`merge-${projectId}`}>
+        {MODES.map(m => <button key={m.key} type="button" aria-pressed={!off && settings.merge === m.key} disabled={busy || off} onClick={() => change({ merge: m.key })}>{m.title}</button>)}
+      </div>
+    </div>
     <div class="step-fields">
       <label class="field">Target branch
         {names.length > 0 || !branches.error
@@ -57,6 +64,9 @@ export function ProjectPullRequestsCard({ projectId }: { projectId: string }) {
             {names.map(name => <option key={name} value={name}>{name}</option>)}
           </select>
           : <input type="text" value={target} maxLength={200} placeholder="Default branch" disabled={busy || off} onInput={e => setTarget(e.currentTarget.value.trim())} />}
+      </label>
+      <label class="field">Merge method
+        <select value={settings.mergeMethod} disabled={busy || off || settings.merge === 'off'} onChange={e => change({ mergeMethod: e.currentTarget.value as 'squash' | 'merge' | 'rebase' })}><option value="squash">Squash</option><option value="merge">Merge commit</option><option value="rebase">Rebase</option></select>
       </label>
       <label class="field">Automatic fix rounds, at most
         <input type="number" min={1} max={5} value={settings.maxFixRounds} disabled={busy || off} onInput={e => { const n = Math.round(Number(e.currentTarget.value)); if (n >= 1 && n <= 5) change({ maxFixRounds: n }); }} />
@@ -129,6 +139,9 @@ export function PullRequestTab({ taskId, view, reload }: { taskId: string; view:
         <span class="muted wrap-anywhere" style={{ fontSize: '13.5px' }}><span class="mono">{pr.repository}</span> · <span class="mono">{pr.branch}</span> → <span class="mono">{github?.base ?? pr.base}</span> · opened {formatTime(pr.openedAt)}{github?.syncedAt ? ` · GitHub read ${formatTime(github.syncedAt)}` : ''}</span>
         {github?.error && <div class="note warn" role="alert">⚠ GitHub could not be read. {github.error}</div>}
         {error && <div class="note bad" role="alert">{error}</div>}
+        {!error && view.mergeFailure && <div class="note warn" role="alert">{view.mergeFailure}</div>}
+        {view.localBehind && <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}><span style={{ fontSize: '13.5px' }}>Your local <span class="mono">{github?.base ?? pr.base}</span> does not have this merge yet.</span><pre class="pr-cmd">git pull</pre></div>}
+        {view.canMerge && <button type="button" class="btn primary" disabled={busy} onClick={() => void act('merge', {})}>{busy ? 'Merging…' : 'Merge pull request'}</button>}
         {(canFix.checks || canFix.comments) && <button type="button" class="btn primary" disabled={busy || chosen === 0} onClick={() => void act('rounds', { checks: fixChecks, comments: fixComments })}>{busy ? 'Starting…' : `Start a fix round · ${chosen} item${chosen === 1 ? '' : 's'}`}</button>}
       </div>
     </Card>

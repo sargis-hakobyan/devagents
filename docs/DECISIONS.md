@@ -622,3 +622,16 @@ Third step: a failed GitHub check or a review comment becomes a fix round, by a 
 - **Differs from the design:** the tab has no four-step strip yet; rounds show a state and a link, not the plan-to-push track; "Comments that count" is still fixed to people who can write to the repository.
 - **Not built:** replies on review threads, running an unrelated failed check again, the update-from-target round, detecting "the same failure came back", and merging.
 - **Not verified against the real GitHub or with a real model.** The round's path through planning, implementation and review was exercised by fixtures that play the team.
+
+## Pull requests, step 4: merging — 2026-11-18
+
+Fourth step: the Merge setting and method, the merge on a click or on its own, and pull requests in the board's Needs-you band. With this, "DevAgents never merges" no longer holds for pull requests; it still never merges into, or changes, a user's checkout.
+
+- **Ready means the status is "ready to merge",** the same computed status the tab and the board show, so what is offered and what is displayed cannot disagree.
+- **Automatic merges without asking, also without checks,** as the owner decided on 2026-11-18. The only guards are GitHub's own: the merge names the commit that was read, and branch protection applies.
+- **One automatic attempt per commit.** A refusal is recorded and waits for a click, in line with the rule against repeating what was refused.
+- **A draft is marked ready only when it is about to be merged.** In a project with Merge off the pull request stays a draft for the user to handle.
+- **The Needs-you marker is stored with the last read** and computed by the service, because it depends on the task's choices and its rounds, which the task list does not load. For a task from before the project published it is judged by the project's current choices; automatic actions still follow only what a task started with.
+- **The band links to the pull request instead of merging from the board.** The design drew a Merge button in the band; one place to merge keeps the action next to the checks it depends on.
+- **Not built:** the update-from-target round, re-running a check, thread replies, the "Comments that count" setting, the four-step strip and the round progress track from `U12-PR-Tab`, Overview attention items, and terminal commands.
+- **Not verified against the real GitHub or with a real model.**

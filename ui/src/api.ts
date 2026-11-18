@@ -33,7 +33,7 @@ export async function logout(): Promise<void> {
 }
 
 export type TaskState = 'draft' | 'awaiting_mode' | 'planning' | 'awaiting_plan_approval' | 'ready' | 'running' | 'validating' | 'reviewing' | 'committing' | 'repairing' | 'awaiting_external_approval' | 'completed' | 'failed' | 'cancelled';
-export type TaskSummary = { scheduling?: TaskScheduling; id: string; projectId: string; /** Current name of the task's project. */ projectName?: string; state: TaskState; version: number; createdAt: string; updatedAt: string; sequence: number; request: string; mode?: 'autonomous' | 'plan-approval'; branch?: string; items?: number; commit?: string; error?: string; team?: TeamRef; limitations?: number; limitationOverflow?: number; /** The task's pull request as GitHub last described it. */ pullRequest?: { number: number; state: 'open' | 'merged' | 'closed'; status: string; code: PullRequestStatusCode }; /** The ticket the task was started from. */ ticket?: { source: string; name: string; key: string; url?: string; readAt?: string } };
+export type TaskSummary = { scheduling?: TaskScheduling; id: string; projectId: string; /** Current name of the task's project. */ projectName?: string; state: TaskState; version: number; createdAt: string; updatedAt: string; sequence: number; request: string; mode?: 'autonomous' | 'plan-approval'; branch?: string; items?: number; commit?: string; error?: string; team?: TeamRef; limitations?: number; limitationOverflow?: number; /** The task's pull request as GitHub last described it. */ pullRequest?: { number: number; state: 'open' | 'merged' | 'closed'; status: string; code: PullRequestStatusCode; attention?: string }; /** The ticket the task was started from. */ ticket?: { source: string; name: string; key: string; url?: string; readAt?: string } };
 export type TeamRef = { id: string; revision: number; name: string };
 export type Command = { executable: string; args: string[] };
 export type WorkItem = { id: string; title: string; description: string; acceptanceCriteria: string[]; dependsOn: string[]; requiredCapabilities: string[]; projectId: string; branch: string; validation: Command[]; assignedAgent?: string; ownedPaths?: string[] };
@@ -91,7 +91,7 @@ export const evidenceFacts = (e: Evidence): Record<string, unknown> => e.truncat
 
 /** What happens on GitHub after a task finishes: each step is skipped, waits for a click, or runs on its own. */
 export type StepMode = 'off' | 'ask' | 'auto';
-export type ProjectPullRequests = { connected: boolean; repository?: string; settings: { publish: StepMode; targetBranch?: string; fixChecks: StepMode; fixComments: StepMode; maxFixRounds: number } };
+export type ProjectPullRequests = { connected: boolean; repository?: string; settings: { publish: StepMode; targetBranch?: string; fixChecks: StepMode; fixComments: StepMode; maxFixRounds: number; merge: StepMode; mergeMethod: 'squash' | 'merge' | 'rebase' } };
 /** A fix round: a normal task that adds one commit to the pull request. */
 export type PullRequestRound = { round: number; taskId: string; checks: string[]; comments: number; trigger: 'user' | 'setting'; startedAt: string; state: 'working' | 'needs-you' | 'pushed' | 'held' | 'failed'; detail: string; commit?: string };
 export type TaskPullRequest = { number: number; url: string; repository: string; branch: string; base: string; commit: string; draft: boolean; openedAt: string; trigger: 'user' | 'setting' };
@@ -100,7 +100,7 @@ export type PullRequestComment = { id: string; author: string; counts: boolean; 
 export type PullRequestStatusCode = 'not-read' | 'merged' | 'closed' | 'checks-failed' | 'checks-running' | 'conflict' | 'comments-open' | 'waiting' | 'ready';
 /** What GitHub last said about a pull request; `error` is why the newest read failed. */
 export type PullRequestSnapshot = { number: number; base: string; state: 'open' | 'merged' | 'closed'; draft: boolean; headSha: string; mergeable: 'clean' | 'conflict' | 'blocked' | 'unknown'; checks: PullRequestCheck[]; comments: PullRequestComment[]; syncedAt?: string; attemptedAt?: string; error?: string; status: { code: PullRequestStatusCode; text: string } };
-export type TaskPullRequestView = { mode: StepMode; canPublish: boolean; publishing: boolean; pullRequest?: TaskPullRequest; failure?: { message: string; at: string; trigger: 'user' | 'setting' }; github?: PullRequestSnapshot; rounds?: PullRequestRound[]; canFix?: { checks: boolean; comments: boolean }; roundOf?: { taskId: string; number: number; round: number } };
+export type TaskPullRequestView = { mode: StepMode; canPublish: boolean; publishing: boolean; pullRequest?: TaskPullRequest; failure?: { message: string; at: string; trigger: 'user' | 'setting' }; github?: PullRequestSnapshot; rounds?: PullRequestRound[]; canFix?: { checks: boolean; comments: boolean }; canMerge?: boolean; mergeFailure?: string; localBehind?: boolean; roundOf?: { taskId: string; number: number; round: number } };
 
 /** Per-project GitHub and Jira connections. A token is write-only: it is sent once and never returned. */
 export type ConnectionState = 'connected' | 'expiring' | 'expired' | 'rejected' | 'unreachable' | 'locked';

@@ -13,7 +13,7 @@ import { fixture } from '../helpers.js';
 
 const TOKEN = `github_pat_${'Fixture1'.repeat(6)}`;
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
-type Remote = { github?: { head?: () => string; merged?: boolean; closed?: boolean; mergeable?: string; runs?: unknown[]; statuses?: unknown[]; threads?: unknown[]; down?: boolean }; drafts?: boolean; pulls: { number: number; head: string; base: string; draft: boolean; title: string; body: string }[]; posts: number; calls: string[] };
+type Remote = { merges: unknown[]; readied: number; github?: { refuseMerge?: boolean; head?: () => string; merged?: boolean; closed?: boolean; mergeable?: string; runs?: unknown[]; statuses?: unknown[]; threads?: unknown[]; down?: boolean }; drafts?: boolean; pulls: { number: number; head: string; base: string; draft: boolean; title: string; body: string }[]; posts: number; calls: string[] };
 
 /** A project connected to a GitHub that is a local bare repository plus a recorded fake API. */
 async function setup(options: { connected?: boolean } = {}) {
@@ -22,7 +22,7 @@ async function setup(options: { connected?: boolean } = {}) {
   const values = new Map([['github-fixture-user', TOKEN]]);
   const secrets: SecretStore = { mode: 'vault', variable: name => `VAR_${name}`, locked: async () => false, get: async name => values.get(name), set: async (name, value) => { values.set(name, value); }, remove: async name => { values.delete(name); } };
   if (options.connected !== false) f.store.setProjectIntegrations('fixture', () => ({ github: { savedToken: 'github-fixture-user', repository: 'example-org/website', login: 'fixture-user', tokenKind: 'fine-grained', canPush: true, connectedAt: '2026-11-18T10:00:00.000Z', checkedAt: '2026-11-18T10:00:00.000Z' } }));
-  const state: Remote = { pulls: [], posts: 0, calls: [] };
+  const state: Remote = { pulls: [], posts: 0, calls: [], merges: [], readied: 0 };
   const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input); const method = init?.method ?? 'GET'; state.calls.push(`${method} ${url}`);
     // A job log is served from a signed address; the token must stay with GitHub's API.
@@ -32,8 +32,10 @@ async function setup(options: { connected?: boolean } = {}) {
     const path = url.replace('https://api.github.test/repos/example-org/website', '');
     const g = state.github ?? {};
     if (g.down && (url.endsWith('/graphql') || /\/(pulls\/\d+|commits\/)/.test(path))) return json({ message: 'Bad credentials' }, 401);
+    if (url === 'https://api.github.test/graphql' && String(JSON.parse(String(init!.body)).query).startsWith('mutation')) { assert.deepEqual(JSON.parse(String(init!.body)).variables, { id: 'PR_node42' }); state.readied += 1; return json({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }); }
+    if (path === '/pulls/42/merge' && method === 'PUT') { state.merges.push(JSON.parse(String(init!.body))); if (g.refuseMerge) return json({ message: 'Pull Request is not mergeable' }, 405); state.github = { ...g, merged: true }; return json({ merged: true, sha: 'e'.repeat(40) }); }
     if (url === 'https://api.github.test/graphql') { assert.deepEqual(JSON.parse(String(init!.body)).variables, { owner: 'example-org', name: 'website', number: 42 }); return json({ data: { repository: { pullRequest: { reviewThreads: { nodes: g.threads ?? [] } } } } }); }
-    if (/^\/pulls\/42$/.test(path)) return json({ number: 42, state: g.closed || g.merged ? 'closed' : 'open', merged: g.merged === true, draft: true, mergeable: g.mergeable === 'dirty' ? false : true, mergeable_state: g.mergeable ?? 'clean', head: { sha: g.head?.() ?? 'f'.repeat(40) }, base: { ref: 'main' } });
+    if (/^\/pulls\/42$/.test(path)) return json({ node_id: 'PR_node42', number: 42, state: g.closed || g.merged ? 'closed' : 'open', merged: g.merged === true, draft: true, mergeable: g.mergeable === 'dirty' ? false : true, mergeable_state: g.mergeable ?? 'clean', head: { sha: g.head?.() ?? 'f'.repeat(40) }, base: { ref: 'main' } });
     if (path === '/check-runs/7/annotations?per_page=20') return json([{ path: 'tests/signup.test.ts', start_line: 48, message: 'expected 200 to be 400' }]);
     if (/^\/commits\/[0-9a-f]{40}\/check-runs/.test(path)) return json({ check_runs: g.runs ?? [] });
     if (/^\/commits\/[0-9a-f]{40}\/status/.test(path)) return json({ statuses: g.statuses ?? [] });
@@ -84,10 +86,10 @@ async function setup(options: { connected?: boolean } = {}) {
 test('a click pushes the task branch once and opens one draft pull request into the default branch', async () => {
   const s = await setup();
   try {
-    assert.deepEqual(s.pulls.project('fixture'), { connected: true, repository: 'example-org/website', settings: { publish: 'off', fixChecks: 'off', fixComments: 'off', maxFixRounds: 3 } });
+    assert.deepEqual(s.pulls.project('fixture'), { connected: true, repository: 'example-org/website', settings: { publish: 'off', fixChecks: 'off', fixComments: 'off', maxFixRounds: 3, merge: 'off', mergeMethod: 'squash' } });
     const before = await s.finished();
     assert.equal(s.pulls.view(before.id).canPublish, false, 'a project that does not publish offers nothing');
-    assert.deepEqual(s.pulls.save('fixture', { publish: 'ask' }).settings, { publish: 'ask', fixChecks: 'off', fixComments: 'off', maxFixRounds: 3 });
+    assert.deepEqual(s.pulls.save('fixture', { publish: 'ask' }).settings, { publish: 'ask', fixChecks: 'off', fixComments: 'off', maxFixRounds: 3, merge: 'off', mergeMethod: 'squash' });
     assert.equal(s.pulls.view(before.id).canPublish, true, 'a click is offered for a task finished before the setting was turned on');
     const t = await s.finished();
     assert.deepEqual(s.pulls.view(t.id), { mode: 'ask', canPublish: true, publishing: false });
@@ -97,7 +99,7 @@ test('a click pushes the task branch once and opens one draft pull request into 
     assert.equal(s.remoteRef(t.branch), t.commit);
     assert.deepEqual(s.state.pulls[0], { number: 42, head: t.branch, base: 'main', draft: true, title: 'Add input validation to the signup form', body: `Validates the form.\n\nOpened by DevAgents from task ${t.id}.` });
     assert.deepEqual(s.kinds(t.id), ['pull-request-settings', 'pull-request-pushed', 'pull-request-opened']);
-    const { github, rounds: _rounds, canFix: _canFix, ...shown } = s.pulls.view(t.id);
+    const { github, rounds: _rounds, canFix: _canFix, canMerge: _canMerge, ...shown } = s.pulls.view(t.id);
     assert.deepEqual(shown, { mode: 'ask', canPublish: false, publishing: false, pullRequest: first }); assert.equal(github!.state, 'open');
     assert.equal(await s.pulls.publish(t.id, 'user').then(p => p.number), 42);
     assert.equal(s.state.posts, 1);
@@ -169,11 +171,11 @@ test('settings need a connection, and the routes return the same views', async (
     return { status: response.status, data: await response.json() as Record<string, any> };
   };
   try {
-    assert.deepEqual((await call('/projects/fixture/pull-requests')).data, { connected: false, settings: { publish: 'off', fixChecks: 'off', fixComments: 'off', maxFixRounds: 3 } });
+    assert.deepEqual((await call('/projects/fixture/pull-requests')).data, { connected: false, settings: { publish: 'off', fixChecks: 'off', fixComments: 'off', maxFixRounds: 3, merge: 'off', mergeMethod: 'squash' } });
     assert.equal((await call('/projects/fixture/pull-requests', 'PUT', { publish: 'auto' })).data.error, 'not_connected');
     assert.equal((await call('/projects/fixture/pull-requests', 'PUT', { publish: 'auto', targetBranch: '../main' })).status, 400);
     s.f.store.setProjectIntegrations('fixture', () => ({ github: { savedToken: 'github-fixture-user', repository: 'example-org/website', login: 'fixture-user', tokenKind: 'fine-grained', canPush: true, connectedAt: '2026-11-18T10:00:00.000Z', checkedAt: '2026-11-18T10:00:00.000Z' } }));
-    assert.deepEqual((await call('/projects/fixture/pull-requests', 'PUT', { publish: 'ask', targetBranch: 'develop' })).data.settings, { publish: 'ask', targetBranch: 'develop', fixChecks: 'off', fixComments: 'off', maxFixRounds: 3 });
+    assert.deepEqual((await call('/projects/fixture/pull-requests', 'PUT', { publish: 'ask', targetBranch: 'develop' })).data.settings, { publish: 'ask', targetBranch: 'develop', fixChecks: 'off', fixComments: 'off', maxFixRounds: 3, merge: 'off', mergeMethod: 'squash' });
     assert.deepEqual((await call('/projects/fixture/pull-requests/branches')).data, { branches: ['main', 'develop'], defaultBranch: 'main' });
     const t = await s.finished();
     assert.equal((await call(`/tasks/${t.id}/pull-request`)).data.canPublish, true);
@@ -311,5 +313,71 @@ test('with fixing set to automatic, rounds start on their own: one per commit, u
     await read(); await read();
     assert.equal(s.pulls.view(t.id).rounds!.length, 2);
     assert.deepEqual(s.pulls.view(t.id).canFix, { checks: true, comments: false }, 'a click can still start one');
+  } finally { await s.f.cleanup(); }
+});
+
+test('a click merges a ready pull request with the chosen method, and nothing merges while something is in the way', async () => {
+  const s = await setup(); let now = new Date('2026-11-18T12:00:00Z'); const read = async () => { now = new Date(now.getTime() + 61000); await s.pulls.syncDue(); };
+  try {
+    (s.pulls as unknown as { now: () => Date }).now = () => now;
+    assert.throws(() => s.pulls.save('fixture', { publish: 'off', merge: 'ask' }), { code: 'invalid_settings' });
+    s.pulls.save('fixture', { publish: 'ask', merge: 'ask', mergeMethod: 'rebase' });
+    const t = await s.finished(); await s.pulls.publish(t.id, 'user');
+    const attention = () => s.f.store.summaries({ openPullRequest: true }).tasks[0]?.pullRequest?.attention;
+    s.state.github = { ...FAILING, head: () => s.remoteRef(t.branch) };
+    await read();
+    assert.equal(s.pulls.view(t.id).canMerge, false); assert.equal(attention(), undefined);
+    await assert.rejects(s.pulls.merge(t.id, 'user'), { code: 'not_mergeable', message: /1 check failed/ });
+    s.state.github = { ...s.state.github, runs: [{ id: 7, name: 'test', status: 'completed', conclusion: 'success' }] };
+    await read();
+    assert.equal(s.pulls.view(t.id).github!.status.text, '1 comment open'); assert.equal(s.pulls.view(t.id).canMerge, false);
+    s.state.github = { ...s.state.github, threads: [], mergeable: 'blocked' };
+    await read();
+    assert.equal(s.pulls.view(t.id).canMerge, false, 'GitHub blocks it, for example a required approval');
+    s.state.github = { ...s.state.github, mergeable: 'clean' };
+    await read();
+    assert.equal(s.pulls.view(t.id).canMerge, true); assert.equal(attention(), 'ready to merge'); assert.deepEqual(s.state.merges, [], 'Ask me never merges on its own');
+    await s.pulls.merge(t.id, 'user');
+    assert.deepEqual(s.state.merges, [{ merge_method: 'rebase', sha: t.commit }]); assert.equal(s.state.readied, 1, 'the draft was marked ready first');
+    const merged = s.pulls.view(t.id);
+    assert.equal(merged.github!.state, 'merged'); assert.equal(merged.canMerge, false); assert.equal(merged.localBehind, true, 'the local branch does not hold the merge');
+    assert.deepEqual(s.f.store.summaries({ openPullRequest: true }).tasks, []);
+    assert.equal(execFileSync('git', ['-C', s.f.project, 'rev-parse', 'main'], { encoding: 'utf8' }).trim(), execFileSync('git', ['-C', s.f.project, 'rev-parse', `${t.commit}^`], { encoding: 'utf8' }).trim(), 'the local checkout is untouched');
+    await assert.rejects(s.pulls.merge(t.id, 'user'), { code: 'not_mergeable' });
+  } finally { await s.f.cleanup(); }
+});
+
+test('set to automatic, a pull request is merged as soon as GitHub allows it, also without checks; a refusal waits for a click', async () => {
+  const s = await setup(); let now = new Date('2026-11-18T12:00:00Z'); const read = async () => { now = new Date(now.getTime() + 61000); await s.pulls.syncDue(); };
+  try {
+    (s.pulls as unknown as { now: () => Date }).now = () => now;
+    s.pulls.save('fixture', { publish: 'auto', merge: 'auto' });
+    const t = await s.finished(); await s.pulls.publishDue();
+    s.state.github = { refuseMerge: true, head: () => s.remoteRef(t.branch) };
+    await read();
+    assert.deepEqual(s.state.merges, [{ merge_method: 'squash', sha: t.commit }], 'no checks and nothing in the way: merged on the first read');
+    await read(); await read();
+    assert.equal(s.state.merges.length, 1, 'one attempt per commit');
+    const refused = s.pulls.view(t.id);
+    assert.match(refused.mergeFailure!, /does not allow this pull request to be merged yet/); assert.equal(refused.canMerge, true);
+    assert.equal(s.f.store.summaries({ openPullRequest: true }).tasks[0]!.pullRequest!.attention, 'GitHub refused the merge');
+    s.state.github = { ...s.state.github, refuseMerge: false };
+    await s.pulls.merge(t.id, 'user');
+    assert.equal(s.pulls.view(t.id).github!.state, 'merged');
+
+  } finally { await s.f.cleanup(); }
+});
+
+test('set to automatic and with nothing in the way, a pull request is merged without anyone asking', async () => {
+  const s = await setup(); let now = new Date('2026-11-18T12:00:00Z');
+  try {
+    (s.pulls as unknown as { now: () => Date }).now = () => now;
+    s.pulls.save('fixture', { publish: 'auto', merge: 'auto' });
+    const t = await s.finished(); await s.pulls.publishDue();
+    s.state.github = { head: () => s.remoteRef(t.branch) };
+    now = new Date(now.getTime() + 61000); await s.pulls.syncDue();
+    assert.equal(s.pulls.view(t.id).github!.state, 'merged');
+    assert.deepEqual(s.kinds(t.id), ['pull-request-settings', 'pull-request-pushed', 'pull-request-opened', 'pull-request-merged']);
+    assert.equal((s.f.store.lastEvidence(t.id, 'pull-request-merged')!.data as { trigger: string }).trigger, 'setting');
   } finally { await s.f.cleanup(); }
 });

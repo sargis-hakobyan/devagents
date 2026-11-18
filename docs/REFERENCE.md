@@ -306,7 +306,7 @@ The GitHub and Jira calls are covered by deterministic fixtures only. They have 
 
 ## Pull requests
 
-A project that is connected to GitHub shows **After a task finishes** on its page, with three steps that are each `Off` (the default), `Ask me` or `Automatic`: **Publish**, **Fix failed checks** and **Fix review comments**. The two fix steps need Publish. **Target branch** is the branch pull requests open into; without one, the repository's default branch is used. **Automatic fix rounds, at most** (1 to 5, default 3) limits what DevAgents starts on its own for one pull request. Merging is not implemented.
+A project that is connected to GitHub shows **After a task finishes** on its page, with four steps that are each `Off` (the default), `Ask me` or `Automatic`: **Publish**, **Fix failed checks**, **Fix review comments** and **Merge**. The last three need Publish. **Target branch** is the branch pull requests open into; without one, the repository's default branch is used. **Automatic fix rounds, at most** (1 to 5, default 3) limits what DevAgents starts on its own for one pull request. **Merge method** is squash (the default), merge commit or rebase.
 
 - **Ask me:** a completed task gets a **Pull request** tab with **Open pull request**.
 - **Automatic:** a completed task is published within about 15 seconds. A publish that fails is recorded on the tab and waits for a click; it is not retried on its own.
@@ -317,8 +317,8 @@ Publishing pushes the task's commit to a branch of the same name in the connecte
 - Only the task's own `devagents/…` branch is pushed, never with force. A branch of that name that already holds other commits is left alone and the publish fails.
 - Before each step GitHub is asked what exists, so a repeated or interrupted publish neither pushes twice nor opens a second pull request.
 - The token is sent to Git as an HTTP header through the environment. It is never in a command line, a URL or a Git config file, and your checkout gets no remote and no changed branch.
-- The token needs read and write access to **Contents** and **Pull requests** of the repository.
-- The task records `pull-request-settings`, `pull-request-pushed`, `pull-request-opened`, `pull-request-failed` and, for fix rounds, `pull-request-round`, `-round-pushed`, `-round-held` and `-round-failed` as evidence, visible under Activity.
+- The token needs read and write access to **Contents** and **Pull requests** of the repository. Merging and marking a draft ready use the same access.
+- The task records `pull-request-settings`, `pull-request-pushed`, `pull-request-opened`, `pull-request-failed` and, for fix rounds, `pull-request-round`, `-round-pushed`, `-round-held` and `-round-failed`, and for merging `pull-request-merged` and `pull-request-merge-failed`, as evidence, visible under Activity.
 
 **Reading GitHub.** While a pull request is open, the service reads it about once a minute: its state, the checks on its latest commit (check runs and commit statuses), whether it can be merged, and its unresolved review threads. A merged or closed pull request is not read again.
 
@@ -341,15 +341,26 @@ Publishing pushes the task's commit to a branch of the same name in the connecte
 - A round whose task fails or is cancelled is shown as stopped and is not repeated for the same commit.
 - Not built: replying on review threads after a fix, running a check again, and a round that only updates from the target branch.
 
+**Merging.** A pull request can be merged when its status is "ready to merge": no check failed or is running, no comment that counts is open, GitHub reports no conflict and does not block it, and no fix round is open.
+
+- **Ask me:** the Pull request tab shows **Merge pull request**, and the task is lifted into **Needs you** on the Tasks board.
+- **Automatic:** DevAgents merges on the next pass after a read finds the pull request ready, without asking. A repository without any checks is merged on the first read.
+- The merge goes through GitHub's pull request API with the chosen method and names the commit that was read, so a pull request that changed in the meantime is refused by GitHub. A draft is marked ready first. Branch protection applies as usual and is never bypassed.
+- A refused merge is shown on the tab with the reason. An automatic merge is attempted once per commit; after a refusal it waits for a click and the task appears in Needs you.
+- After a merge the tab says so. Your checkout is not changed: when the local target branch does not hold the merge, the tab shows `git pull`.
+- **Needs you** on the Tasks board also lists pull requests where a fix changes a workflow file, a fix round waits for a decision, the automatic round limit is reached, or the last automatic round stopped.
+- Not built: bringing a moved target branch into the pull request, running an unrelated failed check again, and deleting the merged branch (left to the repository's own setting).
+
 | Route | Purpose |
 | --- | --- |
 | `GET /projects/<id>/pull-requests` | Whether GitHub is connected, and the saved choices |
-| `PUT /projects/<id>/pull-requests` | Save `{ "publish", "fixChecks", "fixComments": "off" \| "ask" \| "auto", "maxFixRounds"?: 1–5, "targetBranch"?: "<branch>" }` |
+| `PUT /projects/<id>/pull-requests` | Save `{ "publish", "fixChecks", "fixComments": "off" \| "ask" \| "auto", "maxFixRounds"?: 1–5, "merge"?: "off" \| "ask" \| "auto", "mergeMethod"?: "squash" \| "merge" \| "rebase", "targetBranch"?: "<branch>" }` |
 | `GET /projects/<id>/pull-requests/branches` | Branch names read from GitHub, and the default branch |
 | `GET /tasks/<id>/pull-request` | The task's choice, whether a click can publish it, the pull request or the last failure, and under `github` what was last read |
 | `GET /tasks?pullRequest=open` | Only tasks whose pull request is open; every task summary carries `pullRequest` when it has one |
 | `POST /tasks/<id>/pull-request` | Publish now |
 | `POST /tasks/<id>/pull-request/rounds` | Start a fix round for `{ "checks": ["<name>"], "comments": ["<thread id>"] }` |
+| `POST /tasks/<id>/pull-request/merge` | Merge now |
 | `POST /tasks/<id>/pull-request/push-round` | Push the round that waits because it changes a workflow file |
 
 There are no terminal commands for this yet. Not verified against the real GitHub: the push and the API calls are tested with a local bare repository and recorded answers.

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import { AppError } from '../domain/errors.js';
-import { NO_PULL_REQUESTS, PR_FAILED, PR_OPENED, PR_PUSHED, PR_ROUND, PR_ROUND_FAILED, PR_ROUND_HELD, PR_ROUND_PUSHED, PR_SETTINGS, PullRequestSettings, pullRequestStatus, type PullRequestRound, type TaskFollowUp, type CheckStatus, type PublishFailure, type PullRequestCheck, type PullRequestComment, type PullRequestSnapshot, type StepMode, type TaskPullRequest } from '../domain/pull-requests.js';
+import { NO_PULL_REQUESTS, PR_FAILED, PR_MERGED, PR_MERGE_FAILED, PR_OPENED, PR_PUSHED, PR_ROUND, PR_ROUND_FAILED, PR_ROUND_HELD, PR_ROUND_PUSHED, PR_SETTINGS, PullRequestSettings, pullRequestStatus, type PullRequestRound, type TaskFollowUp, type CheckStatus, type PublishFailure, type PullRequestCheck, type PullRequestComment, type PullRequestSnapshot, type StepMode, type TaskPullRequest } from '../domain/pull-requests.js';
 import type { Task } from '../domain/schemas.js';
 import type { Store } from '../persistence/store.js';
 import type { SecretStore } from '../security/secret-store.js';
@@ -34,6 +34,12 @@ export type TaskPullRequestView = {
   rounds?: PullRequestRound[];
   /** A click can start a fix round for failed checks, for comments, or both. */
   canFix?: { checks: boolean; comments: boolean };
+  /** A click can merge it now. */
+  canMerge?: boolean;
+  /** Why the last merge attempt was refused. */
+  mergeFailure?: string;
+  /** After a merge: the project's local target branch does not have it yet. */
+  localBehind?: boolean;
   /** Set on a fix round: the task and pull request it belongs to. */
   roundOf?: { taskId: string; number: number; round: number };
 };
@@ -77,7 +83,7 @@ export class PullRequestService {
   save(projectId: string, input: unknown): ProjectPullRequests {
     const settings = PullRequestSettings.parse(input); const project = this.store.project(projectId);
     if (project.archivedAt) throw new AppError('project_archived', 'This project is archived. Restore it before changing it.', 409);
-    if (settings.publish === 'off' && (settings.fixChecks !== 'off' || settings.fixComments !== 'off')) throw new AppError('invalid_settings', 'Fixing checks or comments needs Publish to be turned on.', 422);
+    if (settings.publish === 'off' && (settings.fixChecks !== 'off' || settings.fixComments !== 'off' || settings.merge !== 'off')) throw new AppError('invalid_settings', 'Fixing and merging need Publish to be turned on.', 422);
     if (settings.publish !== 'off' && !project.integrations?.github) throw new AppError('not_connected', 'Connect GitHub for this project before turning on pull requests.', 422);
     this.store.setProjectIntegrations(projectId, current => ({ ...current, pullRequests: settings }));
     return this.project(projectId);
@@ -118,6 +124,7 @@ export class PullRequestService {
       ...(opened ? { pullRequest: opened.data as TaskPullRequest } : {}),
       ...(opened ? { github: this.snapshot(taskId, opened.data as TaskPullRequest) } : {}),
       ...(opened ? { rounds: this.rounds(taskId), canFix: this.canFix(taskId) } : {}),
+      ...(opened ? this.mergeView(taskId) : {}),
       ...(failed && (!opened || failed.sequence > opened.sequence) ? { failure: failed.data as PublishFailure } : {}),
     };
   }
@@ -191,7 +198,8 @@ export class PullRequestService {
         checks = this.checks(record(runs.json).check_runs, record(statuses.json).statuses);
         comments = this.comments(record(record(record(record(record(threads.json).data).repository).pullRequest).reviewThreads).nodes);
       }
-      const read = { number: opened.number, base: text(record(pr.base).ref, 200) || previous.base, state, draft: pr.draft === true, headSha, mergeable, checks, comments, syncedAt: at, attemptedAt: at };
+      const nodeId = text(pr.node_id, 200);
+      const read = { number: opened.number, base: text(record(pr.base).ref, 200) || previous.base, state, draft: pr.draft === true, headSha, mergeable, checks, comments, syncedAt: at, attemptedAt: at, ...(nodeId ? { nodeId } : {}), ...(previous.attention && state === 'open' ? { attention: previous.attention } : {}) };
       const snapshot = { ...read, status: pullRequestStatus(read) };
       this.store.savePullRequest(taskId, snapshot);
       return snapshot;
@@ -226,6 +234,54 @@ export class PullRequestService {
       open.push({ id, author: text(record(first.author).login, 100) || 'unknown', counts: WRITERS.has(text(first.authorAssociation, 40)), body: text(first.body, 2000), ...(path ? { path } : {}), ...(Number.isInteger(line) && line > 0 ? { line } : {}), ...(/^https:\/\//.test(url) ? { url } : {}) });
     }
     return open;
+  }
+
+  // ---- Merge ----
+  private mergeView(taskId: string): Pick<TaskPullRequestView, 'canMerge' | 'mergeFailure' | 'localBehind'> {
+    const github = this.store.pullRequest(taskId); const frozen = this.frozen(taskId); const { connected, settings } = this.project(this.store.task(taskId).projectId);
+    const offered = connected && ((frozen?.merge ?? 'off') !== 'off' || settings.merge !== 'off');
+    const busy = this.rounds(taskId).some(r => r.state === 'working' || r.state === 'needs-you' || r.state === 'held');
+    const failed = this.store.lastEvidence(taskId, PR_MERGE_FAILED)?.data as { commit?: string; message?: string } | undefined;
+    const merged = this.store.lastEvidence(taskId, PR_MERGED)?.data as { localBehind?: boolean } | undefined;
+    return {
+      canMerge: offered && !busy && github?.state === 'open' && github.status.code === 'ready',
+      ...(failed?.message && github?.state === 'open' && failed.commit === github.headSha ? { mergeFailure: failed.message } : {}),
+      ...(merged?.localBehind ? { localBehind: true } : {}),
+    };
+  }
+  /**
+   * Merges the pull request through GitHub, with the method the project chose. GitHub is told which
+   * commit is meant, so a pull request that changed since it was read is refused there, and branch
+   * protection decides as usual. A draft is marked ready first.
+   */
+  async merge(taskId: string, trigger: Trigger): Promise<void> {
+    const task = this.store.task(taskId); const opened = this.store.lastEvidence(taskId, PR_OPENED)?.data as TaskPullRequest | undefined; const github = this.store.pullRequest(taskId);
+    if (!opened || !github || github.state !== 'open') throw new AppError('not_mergeable', 'Only an open pull request can be merged.', 409);
+    if (trigger === 'user' && !this.mergeView(taskId).canMerge) throw new AppError('not_mergeable', `This pull request cannot be merged now: ${github.status.text}.`, 409);
+    if (github.status.code !== 'ready') throw new AppError('not_mergeable', `This pull request cannot be merged now: ${github.status.text}.`, 409);
+    const settings = this.frozen(taskId) ?? this.project(task.projectId).settings; const method = settings.mergeMethod;
+    try {
+      const { token } = await this.access(task.projectId);
+      if (github.draft) {
+        const ready = github.nodeId ? await this.github(token, 'POST', '/graphql', { query: 'mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{isDraft}}}', variables: { id: github.nodeId } }) : undefined;
+        if (!ready || ready.status !== 200 || record(ready.json).errors) throw new AppError('not_mergeable', 'GitHub did not mark the draft pull request as ready. Mark it ready on GitHub, or give the token write access to pull requests.', 422);
+      }
+      const merged = await this.github(token, 'PUT', `/repos/${opened.repository}/pulls/${opened.number}/merge`, { merge_method: method, sha: github.headSha });
+      if (merged.status !== 200 || record(merged.json).merged !== true) {
+        if (merged.status === 405) throw new AppError('not_mergeable', 'GitHub does not allow this pull request to be merged yet. A required review or check may be missing, or this merge method is turned off for the repository.', 409);
+        if (merged.status === 409) throw new AppError('not_mergeable', 'The pull request changed on GitHub since it was last read. It is read again within a minute.', 409);
+        throw this.refused(merged.status, `merge pull request #${opened.number}`);
+      }
+      const sha = text(record(merged.json).sha, 64); const project = this.store.project(task.projectId);
+      // The user's checkout is never changed; say so when its target branch does not hold the merge.
+      const local = /^[a-f0-9]{40}$/.test(sha) && await git(project.path, ['merge-base', '--is-ancestor', sha, `refs/heads/${github.base}`]).then(() => true, () => false);
+      this.store.record(taskId, PR_MERGED, { number: opened.number, base: github.base, method, commit: sha, trigger, at: this.now().toISOString(), localBehind: !local });
+      await this.sync(taskId).catch(() => {});
+    } catch (error) {
+      const message = error instanceof AppError ? error.message : 'The pull request could not be merged.';
+      this.store.record(taskId, PR_MERGE_FAILED, { commit: github.headSha, message, trigger, at: this.now().toISOString() });
+      throw error instanceof AppError ? error : new AppError('merge_failed', message, 502);
+    }
   }
 
   // ---- Fix rounds ----
@@ -340,6 +396,28 @@ export class PullRequestService {
   }
   /** After each read: push a finished round, or start one where the project fixes failures on its own. */
   private async advance(taskId: string): Promise<void> {
+    await this.act(taskId);
+    // Record whether the pull request now waits for the user, so the board can lift it into its band.
+    const github = this.store.pullRequest(taskId);
+    if (!github) return;
+    const attention = github.state === 'open' ? this.attention(taskId, github) : undefined;
+    if (attention !== github.attention) { const { attention: _, ...rest } = github; this.store.savePullRequest(taskId, { ...rest, ...(attention ? { attention } : {}) }); }
+  }
+  private attention(taskId: string, github: PullRequestSnapshot): string | undefined {
+    // A task from before the project published has no choices of its own; what it waits for is then judged by the project's current ones.
+    const rounds = this.rounds(taskId); const settings = this.frozen(taskId) ?? this.project(this.store.task(taskId).projectId).settings;
+    if (rounds.some(r => r.state === 'held')) return 'a fix changes a workflow file';
+    if (rounds.some(r => r.state === 'needs-you')) return 'a fix round waits for you';
+    if (rounds.some(r => r.state === 'working') || !github.syncedAt) return;
+    const failed = this.store.lastEvidence(taskId, PR_MERGE_FAILED)?.data as { commit?: string } | undefined;
+    if (github.status.code === 'ready') return settings.merge === 'ask' ? 'ready to merge' : settings.merge === 'auto' && failed?.commit === github.headSha ? 'GitHub refused the merge' : undefined;
+    const fixing = (github.status.code === 'checks-failed' && settings.fixChecks === 'auto') || (github.status.code === 'comments-open' && settings.fixComments === 'auto');
+    const records = this.roundRecords(taskId);
+    if (fixing && records.filter(r => r.trigger === 'setting').length >= settings.maxFixRounds) return 'round limit reached';
+    if (fixing && records.some(r => r.baseSha === github.headSha)) return 'the last fix round stopped';
+    return;
+  }
+  private async act(taskId: string): Promise<void> {
     const rounds = this.rounds(taskId); const open = rounds.find(r => r.state === 'working');
     if (open) { if (this.store.task(open.taskId).state === 'completed') await this.pushRound(taskId, open, false); return; }
     const github = this.store.pullRequest(taskId); const settings = this.frozen(taskId);
@@ -350,7 +428,9 @@ export class PullRequestService {
     if (github.checks.some(c => c.status === 'running')) return;
     const checks = settings.fixChecks === 'auto' ? github.checks.filter(c => c.status === 'failed').map(c => c.name) : [];
     const comments = settings.fixComments === 'auto' ? github.comments.filter(c => c.counts).map(c => c.id) : [];
-    if (checks.length + comments.length > 0) await this.startRound(taskId, { checks: checks.slice(0, 20), comments: comments.slice(0, 20) }, 'setting');
+    if (checks.length + comments.length > 0) { await this.startRound(taskId, { checks: checks.slice(0, 20), comments: comments.slice(0, 20) }, 'setting'); return; }
+    // Nothing left to fix: merge where the project merges on its own. One attempt per commit; a refusal waits for a click.
+    if (settings.merge === 'auto' && github.status.code === 'ready' && (this.store.lastEvidence(taskId, PR_MERGE_FAILED)?.data as { commit?: string } | undefined)?.commit !== github.headSha) await this.merge(taskId, 'setting').catch(() => {});
   }
 
   private async access(projectId: string): Promise<{ repository: string; token: string; canPush: boolean | null }> {

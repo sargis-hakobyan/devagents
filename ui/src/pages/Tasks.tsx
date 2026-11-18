@@ -53,7 +53,7 @@ function NeedsYou({ tasks, now }: { tasks: TaskSummary[]; now: number }) {
   if (!tasks.length) return null;
   return <section class="kb-you" aria-label={`Needs you, ${tasks.length} task${tasks.length === 1 ? '' : 's'}`}>
     <div class="kb-you-head"><b>Needs you</b><span class="kb-count">{tasks.length}</span></div>
-    <div class="kb-you-cards">{tasks.map(task => { const { why, action } = waitingAction(task.state); return <div key={task.id} class="kb-ycard">
+    <div class="kb-you-cards">{tasks.map(task => { const { why, action } = task.pullRequest?.attention ? { why: `PR #${task.pullRequest.number} · ${task.pullRequest.attention}`, action: 'Open the pull request' } : waitingAction(task.state); return <div key={task.id} class="kb-ycard">
       <span class="kb-ytitle">{truncate(task.request, 110)}</span>
       <a class="btn primary small" href={`/ui/tasks/${task.id}`}>{action}</a>
       <span class="kb-why"><span aria-hidden="true">● </span>{why}</span>
@@ -137,7 +137,7 @@ function Board({ project, search, now, onOlder }: { project: string; search: str
   // A finished task whose pull request is still open sits in its own column until the pull request is merged or closed.
   const published = pulls.data?.tasks ?? []; const inReview = new Set(published.map(t => t.id));
   const folded: Record<string, TaskSummary[]> = { done: done.data.tasks.filter(t => !inReview.has(t.id)), stopped: stopped.data.tasks };
-  const waiting = shown([...open.data.tasks, ...added].filter(t => WAITING.includes(t.state)));
+  const waiting = shown([...[...open.data.tasks, ...added].filter(t => WAITING.includes(t.state)), ...(pulls.data?.tasks ?? []).filter(t => t.pullRequest?.attention)]);
   return <>
     {start.error && <div class="note bad" role="alert">{start.error}</div>}
     {start.notice && <div class="note info" role="status">{start.notice}</div>}

@@ -57,7 +57,7 @@ The starter team includes a **Tech Lead**, **Frontend Developer**, **Backend Dev
 | **Visible execution** | A browser timeline of agent runs, parallel work, automated checks, reviewer findings, and repair attempts. |
 | **Quality gates** | Developer validation and independent, read-only code review. Optional QA verifies acceptance criteria. |
 | **Usage tracking** | Reported tokens by step and attempt. Available cost estimates are labelled; missing data stays unavailable. |
-| **Project connections** | Connect GitHub, Jira and ticket tools. Drag an available ticket into Planning to start it with its full content and project defaults, or edit it first. A project connected to GitHub can publish a finished task as a pull request, on a click or on its own, shows its checks and review comments, and can fix failed checks and comments in reviewed rounds that are pushed onto the pull request. Automatic ticket pickup and merging are not implemented yet. |
+| **Project connections** | Connect GitHub, Jira and ticket tools. Drag an available ticket into Planning to start it with its full content and project defaults, or edit it first. A project connected to GitHub can publish a finished task as a pull request, on a click or on its own, shows its checks and review comments, can fix failed checks and comments in reviewed rounds that are pushed onto the pull request, and can merge it, each on a click or on its own. Automatic ticket pickup is not implemented yet. |
 | **Project archive** | Take a project out of use and register its repository again under a new name; its task history stays and it can be restored. |
 | **Local results** | Read-only diffs, local branches and commits, persistent task history, and automatic cleanup with recovery snapshots for unfinished work. |
 
@@ -73,7 +73,7 @@ Model choices do not guarantee account access or quota. DevAgents stores task st
 
 ## Execution boundaries
 
-- **Work starts from local `main`.** Each task gets a clean worktree and its own branch. Uncommitted changes and other branches are not copied. DevAgents never merges into your checkout. It pushes nothing unless a project is connected to GitHub and its Publish setting is turned on; then only the task's own `devagents/` branch is pushed.
+- **Work starts from local `main`.** Each task gets a clean worktree and its own branch. Uncommitted changes and other branches are not copied. DevAgents never merges into or changes your checkout; a pull request is merged on GitHub only, and only when the project's Merge setting allows it. It pushes nothing unless a project is connected to GitHub and its Publish setting is turned on; then only the task's own `devagents/` branch is pushed.
 - **The engine sandbox stays active.** Optional extra DevAgents rules are off by default. Docker credentials are encrypted using your OS keychain; project access is explicitly mounted.
 - **QA is opt-in.** `qaEnabled: false` keeps separate agent QA disabled. Developer validation and independent review still run. Read the [QA contract](docs/REFERENCE.md#optional-qa-gate) before enabling it.
 - **Verification has evidence.** Unavailable optional checks are reported as limitations. A required acceptance criterion blocked at the QA gate prevents a final task commit.

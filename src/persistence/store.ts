@@ -449,7 +449,7 @@ export class Store {
       ...(t.outcome?.commit ? { commit: t.outcome.commit } : {}), ...(t.outcome?.error ? { error: t.outcome.error } : {}),
       ...(t.team ? { team: { id: t.team.id, revision: t.team.revision, name: t.team.name } } : {}), ...(t.ticket ? { ticket: t.ticket } : {}),
       ...(limitationCount(t.outcome) ? { limitations: limitationCount(t.outcome), ...(t.outcome?.limitationOverflow ? { limitationOverflow: t.outcome.limitationOverflow } : {}) } : {}),
-      ...(pr ? { pullRequest: { number: pr.number, state: pr.state, status: pr.status.text, code: pr.status.code } } : {}),
+      ...(pr ? { pullRequest: { number: pr.number, state: pr.state, status: pr.status.text, code: pr.status.code, ...(pr.attention && pr.state === 'open' ? { attention: pr.attention } : {}) } } : {}),
     };
   }
   /** The list view: no agent snapshots, plans or instructions, which grow to hundreds of kilobytes per task. Newest first, cursor by row id. */
