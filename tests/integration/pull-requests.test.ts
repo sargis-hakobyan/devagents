@@ -14,7 +14,7 @@ import { fixture } from '../helpers.js';
 
 const TOKEN = `github_pat_${'Fixture1'.repeat(6)}`;
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
-type Remote = { merges: unknown[]; readied: number; github?: { refuseMerge?: boolean; head?: () => string; merged?: boolean; closed?: boolean; mergeable?: string; runs?: unknown[]; statuses?: unknown[]; threads?: unknown[]; down?: boolean }; drafts?: boolean; pulls: { number: number; head: string; base: string; draft: boolean; title: string; body: string }[]; posts: number; calls: string[] };
+type Remote = { merges: unknown[]; readied: number; github?: { refuseMerge?: boolean; head?: () => string; merged?: boolean; closed?: boolean; mergeable?: string; runs?: unknown[]; statuses?: unknown[]; threads?: unknown[]; down?: boolean }; pulls: { number: number; head: string; base: string; draft: boolean; title: string; body: string }[]; posts: number; calls: string[] };
 
 /** A project connected to a GitHub that is a local bare repository plus a recorded fake API. */
 async function setup(options: { connected?: boolean } = {}) {
@@ -36,7 +36,7 @@ async function setup(options: { connected?: boolean } = {}) {
     if (url === 'https://api.github.test/graphql' && String(JSON.parse(String(init!.body)).query).startsWith('mutation')) { assert.deepEqual(JSON.parse(String(init!.body)).variables, { id: 'PR_node42' }); state.readied += 1; return json({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }); }
     if (path === '/pulls/42/merge' && method === 'PUT') { state.merges.push(JSON.parse(String(init!.body))); if (g.refuseMerge) return json({ message: 'Pull Request is not mergeable' }, 405); state.github = { ...g, merged: true }; return json({ merged: true, sha: 'e'.repeat(40) }); }
     if (url === 'https://api.github.test/graphql') { assert.deepEqual(JSON.parse(String(init!.body)).variables, { owner: 'example-org', name: 'website', number: 42 }); return json({ data: { repository: { pullRequest: { reviewThreads: { nodes: g.threads ?? [] } } } } }); }
-    if (/^\/pulls\/42$/.test(path)) return json({ node_id: 'PR_node42', number: 42, state: g.closed || g.merged ? 'closed' : 'open', merged: g.merged === true, draft: true, mergeable: g.mergeable === 'dirty' ? false : true, mergeable_state: g.mergeable ?? 'clean', head: { sha: g.head?.() ?? 'f'.repeat(40) }, base: { ref: 'main' } });
+    if (/^\/pulls\/42$/.test(path)) return json({ node_id: 'PR_node42', number: 42, state: g.closed || g.merged ? 'closed' : 'open', merged: g.merged === true, draft: state.pulls[0]?.draft === true, mergeable: g.mergeable === 'dirty' ? false : true, mergeable_state: g.mergeable ?? 'clean', head: { sha: g.head?.() ?? 'f'.repeat(40) }, base: { ref: 'main' } });
     if (path === '/check-runs/7/annotations?per_page=20') return json([{ path: 'tests/signup.test.ts', start_line: 48, message: 'expected 200 to be 400' }]);
     if (/^\/commits\/[0-9a-f]{40}\/check-runs/.test(path)) return json({ check_runs: g.runs ?? [] });
     if (/^\/commits\/[0-9a-f]{40}\/status/.test(path)) return json({ statuses: g.statuses ?? [] });
@@ -45,7 +45,6 @@ async function setup(options: { connected?: boolean } = {}) {
     if (path.startsWith('/pulls?')) { const head = new URL(url).searchParams.get('head'); return json(state.pulls.filter(p => `example-org:${p.head}` === head).map(p => ({ number: p.number, html_url: `https://github.test/example-org/website/pull/${p.number}`, draft: p.draft, base: { ref: p.base } }))); }
     if (path === '/pulls' && method === 'POST') {
       state.posts += 1; const body = JSON.parse(String(init!.body));
-      if (body.draft && state.drafts === false) return json({ message: 'Draft pull requests are not supported in this repository.' }, 422);
       if (body.base === 'missing') return json({ message: 'Validation Failed' }, 422);
       const pull = { number: 41 + state.pulls.length + 1, head: body.head, base: body.base, draft: body.draft, title: body.title, body: body.body }; state.pulls.push(pull);
       return json({ number: pull.number, html_url: `https://github.test/example-org/website/pull/${pull.number}`, draft: pull.draft, base: { ref: pull.base } }, 201);
@@ -93,7 +92,7 @@ async function setup(options: { connected?: boolean } = {}) {
   return { f, pulls, state, bare, finished, finishRound, remoteCommit, remoteRef, kinds: (id: string) => f.store.evidence(id).map(e => e.kind).filter(k => k.startsWith('pull-request')) };
 }
 
-test('a click pushes the task branch once and opens one draft pull request into the default branch', async () => {
+test('a click pushes the task branch once and opens one pull request, ready for review, into the default branch', async () => {
   const s = await setup();
   try {
     assert.deepEqual(s.pulls.project('fixture'), { connected: true, repository: 'example-org/website', settings: { publish: 'off', fixChecks: 'off', fixComments: 'off', maxFixRounds: 3, merge: 'off', mergeMethod: 'squash' } });
@@ -105,9 +104,9 @@ test('a click pushes the task branch once and opens one draft pull request into 
     assert.deepEqual(s.pulls.view(t.id), { mode: 'ask', canPublish: true, publishing: false });
     const [first, second] = await Promise.all([s.pulls.publish(t.id, 'user'), s.pulls.publish(t.id, 'user')]);
     assert.equal(first, second, 'a second request joins the first');
-    assert.deepEqual(first, { number: 42, url: 'https://github.test/example-org/website/pull/42', repository: 'example-org/website', branch: t.branch, base: 'main', commit: t.commit, draft: true, openedAt: '2026-11-18T12:00:00.000Z', trigger: 'user' });
+    assert.deepEqual(first, { number: 42, url: 'https://github.test/example-org/website/pull/42', repository: 'example-org/website', branch: t.branch, base: 'main', commit: t.commit, draft: false, openedAt: '2026-11-18T12:00:00.000Z', trigger: 'user' });
     assert.equal(s.remoteRef(t.branch), t.commit);
-    assert.deepEqual(s.state.pulls[0], { number: 42, head: t.branch, base: 'main', draft: true, title: 'Add input validation to the signup form', body: `Validates the form.\n\nOpened by DevAgents from task ${t.id}.` });
+    assert.deepEqual(s.state.pulls[0], { number: 42, head: t.branch, base: 'main', draft: false, title: 'Add input validation to the signup form', body: `Validates the form.\n\nOpened by DevAgents from task ${t.id}.` });
     assert.deepEqual(s.kinds(t.id), ['pull-request-settings', 'pull-request-pushed', 'pull-request-opened']);
     const { github, rounds: _rounds, canFix: _canFix, canMerge: _canMerge, ...shown } = s.pulls.view(t.id);
     assert.deepEqual(shown, { mode: 'ask', canPublish: false, publishing: false, pullRequest: first }); assert.equal(github!.state, 'open');
@@ -154,19 +153,18 @@ test('a project set to automatic publishes finished tasks on its own, once', asy
     const waiting = s.f.service.submit({ projectId: 'fixture', request: 'Still planning', mode: 'autonomous' }, 'waiting');
     const t = await s.finished();
     await s.pulls.publishDue();
-    assert.equal(s.state.posts, 2, 'draft and ready were both refused for a missing target');
+    assert.equal(s.state.posts, 1);
     assert.match(s.pulls.view(t.id).failure!.message, /Check that missing exists/); assert.equal(s.pulls.view(t.id).failure!.trigger, 'setting');
     await s.pulls.publishDue();
-    assert.equal(s.state.posts, 2, 'a failed publish waits for a click');
+    assert.equal(s.state.posts, 1, 'a failed publish waits for a click');
     assert.deepEqual(s.kinds(waiting.id), ['pull-request-settings']);
     // The task keeps the choice it started with; the project's later change applies to later tasks.
     s.pulls.save('fixture', { publish: 'auto' });
     const later = await s.finished('Second change');
     s.pulls.save('fixture', { publish: 'off' });
-    s.state.drafts = false;
     await s.pulls.publishDue();
     const view = s.pulls.view(later.id);
-    assert.equal(view.pullRequest!.trigger, 'setting'); assert.equal(view.pullRequest!.draft, false, 'opened as ready where drafts are unavailable'); assert.equal(view.pullRequest!.base, 'main');
+    assert.equal(view.pullRequest!.trigger, 'setting'); assert.equal(view.pullRequest!.draft, false, 'never a draft'); assert.equal(view.pullRequest!.base, 'main');
     assert.equal(s.pulls.view(t.id).pullRequest, undefined);
   } finally { await s.f.cleanup(); }
 });
@@ -216,7 +214,7 @@ test('GitHub is read once a minute: checks, unresolved comments from writers, an
     assert.deepEqual(read.checks, [{ name: 'build', status: 'passed', url: 'https://github.test/runs/1' }, { name: 'test', status: 'failed', summary: '1 failed, 23 passed' }, { name: 'deploy', status: 'skipped' }, { name: 'lint', status: 'running', summary: 'Queued' }]);
     assert.deepEqual(read.comments.map(c => [c.id, c.author, c.counts, c.path, c.line]), [['a', 'user-a', true, 'src/form.ts', 71], ['b', 'user-b', false, 'src/form.ts', 71]]);
     assert.doesNotMatch(JSON.stringify(read), /fixture-secret-value/, 'remote text is redacted before it is stored');
-    assert.deepEqual(read.status, { code: 'checks-failed', text: '1 check failed' }); assert.equal(read.headSha, 'f'.repeat(40)); assert.equal(read.draft, true);
+    assert.deepEqual(read.status, { code: 'checks-failed', text: '1 check failed' }); assert.equal(read.headSha, 'f'.repeat(40)); assert.equal(read.draft, false);
     const calls = s.state.calls.length;
     await s.pulls.syncDue();
     assert.equal(s.state.calls.length, calls, 'nothing is read again within a minute');
@@ -347,6 +345,8 @@ test('a click merges a ready pull request with the chosen method, and nothing me
     s.state.github = { ...s.state.github, mergeable: 'clean' };
     await read();
     assert.equal(s.pulls.view(t.id).canMerge, true); assert.equal(attention(), 'ready to merge'); assert.deepEqual(s.state.merges, [], 'Ask me never merges on its own');
+    // Someone turned it into a draft on GitHub in the meantime: it is marked ready before the merge.
+    s.state.pulls[0]!.draft = true; await read();
     await s.pulls.merge(t.id, 'user');
     assert.deepEqual(s.state.merges, [{ merge_method: 'rebase', sha: t.commit }]); assert.equal(s.state.readied, 1, 'the draft was marked ready first');
     const merged = s.pulls.view(t.id);

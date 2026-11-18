@@ -649,3 +649,7 @@ The first real pull request (in a project whose local `main` was two days behind
 - **A result with a conflict marker left in a conflicted file is never pushed.**
 - **The "View on GitHub" link now opens in the same tab** and the board's band says "Open the task": the owner reported that the link reopened the task. The cause was not reproduced; a new-tab link is the likeliest difference between browsers.
 - **Not verified against the real GitHub,** apart from the owner's first publish, which pushed, opened the pull request and read "conflict with main" correctly.
+
+## Pull requests are never opened as drafts — 2026-11-18
+
+The owner's repository runs an automated multi-agent reviewer on pull requests, and it skips drafts. Pull requests are therefore always opened as ready for review. This replaces "Pull requests open as drafts and are marked ready when checks pass" from the design decision of the same day, and the draft-then-ready fallback of step 1. Marking a draft ready before a merge stays, for a pull request that someone turned into a draft by hand. There is no setting for this.

@@ -65,7 +65,7 @@ async function remoteGit(cwd: string, args: string[], url: string, token: string
 
 /**
  * Publishes a finished task: pushes its branch to the project's GitHub repository and opens a pull
- * request. Only the task's own `devagents/` branch is ever pushed, never with force, and never to
+ * request that is ready for review. Only the task's own `devagents/` branch is ever pushed, never with force, and never to
  * the branch the pull request targets. Before each step GitHub is asked what already exists, so a
  * repeated or interrupted publish neither pushes twice nor opens a second pull request.
  */
@@ -280,7 +280,7 @@ export class PullRequestService {
   /**
    * Merges the pull request through GitHub, with the method the project chose. GitHub is told which
    * commit is meant, so a pull request that changed since it was read is refused there, and branch
-   * protection decides as usual. A draft is marked ready first.
+   * protection decides as usual. DevAgents opens no drafts; one that someone turned into a draft is marked ready first.
    */
   async merge(taskId: string, trigger: Trigger): Promise<void> {
     const task = this.store.task(taskId); const opened = this.store.lastEvidence(taskId, PR_OPENED)?.data as TaskPullRequest | undefined; const github = this.store.pullRequest(taskId);
@@ -540,10 +540,10 @@ export class PullRequestService {
   }
   private async open(task: Task, repository: string, token: string, branch: string, base: string, commit: string, trigger: Trigger): Promise<TaskPullRequest> {
     const owner = repository.split('/')[0]!;
-    const found = (value: unknown, draft?: boolean): TaskPullRequest | undefined => {
+    const found = (value: unknown): TaskPullRequest | undefined => {
       const pr = record(value); const number = Number(pr.number); const url = text(pr.html_url, 500);
       if (!Number.isInteger(number) || number < 1 || !/^https:\/\//.test(url)) return;
-      return { number, url, repository, branch, base: text(record(pr.base).ref, 200) || base, commit, draft: draft ?? pr.draft === true, openedAt: this.now().toISOString(), trigger };
+      return { number, url, repository, branch, base: text(record(pr.base).ref, 200) || base, commit, draft: pr.draft === true, openedAt: this.now().toISOString(), trigger };
     };
     const existing = await this.github(token, 'GET', `/repos/${repository}/pulls?head=${encodeURIComponent(`${owner}:${branch}`)}&state=all&per_page=1`);
     if (existing.status !== 200) throw this.refused(existing.status, `read the pull requests of ${repository}`);
@@ -551,16 +551,12 @@ export class PullRequestService {
     if (first) return first;
     const title = firstLine(task.request).slice(0, 200) || `DevAgents task ${task.id.slice(0, 8)}`;
     const body = [task.outcome?.summary?.trim(), `Opened by DevAgents from task ${task.id}.`].filter(Boolean).join('\n\n').slice(0, 60000);
-    // Drafts are not available on every plan; the pull request is then opened as ready.
-    for (const draft of [true, false]) {
-      const created = await this.github(token, 'POST', `/repos/${repository}/pulls`, { title, head: branch, base, body, draft });
-      const opened = created.status === 201 ? found(created.json, draft) : undefined;
-      if (opened) return opened;
-      if (created.status !== 422 || !draft) {
-        if (created.status === 422) throw new AppError('publish_failed', `GitHub did not open a pull request from ${branch} into ${base}. Check that ${base} exists and differs from the task's branch.`, 422);
-        throw this.refused(created.status, `open a pull request in ${repository}`);
-      }
-    }
+    // Always opened as ready for review, never as a draft: review tools that watch the repository skip drafts.
+    const created = await this.github(token, 'POST', `/repos/${repository}/pulls`, { title, head: branch, base, body, draft: false });
+    const opened = created.status === 201 ? found(created.json) : undefined;
+    if (opened) return opened;
+    if (created.status === 422) throw new AppError('publish_failed', `GitHub did not open a pull request from ${branch} into ${base}. Check that ${base} exists and differs from the task's branch.`, 422);
+    if (created.status !== 201) throw this.refused(created.status, `open a pull request in ${repository}`);
     throw new AppError('publish_failed', 'GitHub did not open the pull request.', 502);
   }
 }

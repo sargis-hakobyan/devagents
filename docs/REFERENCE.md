@@ -316,12 +316,12 @@ A project that is connected to GitHub shows **After a task finishes** on its pag
 - **Automatic:** a completed task is published within about 15 seconds. A publish that fails is recorded on the tab and waits for a click; it is not retried on its own.
 - A task keeps the choices its project had when the task was submitted. A click is also offered for a task that was finished before Publish was turned on.
 
-Publishing pushes the task's commit to a branch of the same name in the connected repository and opens a draft pull request (a ready one where the repository has no drafts). Its title is the first line of the request; its body is the task's result summary and the task ID.
+Publishing pushes the task's commit to a branch of the same name in the connected repository and opens a pull request that is ready for review. DevAgents never opens a draft, because review tools that watch a repository skip drafts. Its title is the first line of the request; its body is the task's result summary and the task ID.
 
 - Only the task's own `devagents/…` branch is pushed, never with force. A branch of that name that already holds other commits is left alone and the publish fails.
 - Before each step GitHub is asked what exists, so a repeated or interrupted publish neither pushes twice nor opens a second pull request.
 - The token is sent to Git as an HTTP header through the environment. It is never in a command line, a URL or a Git config file, and your checkout gets no remote and no changed branch.
-- The token needs read and write access to **Contents** and **Pull requests** of the repository. Merging and marking a draft ready use the same access.
+- The token needs read and write access to **Contents** and **Pull requests** of the repository. Merging uses the same access.
 - The task records `pull-request-settings`, `pull-request-pushed`, `pull-request-opened`, `pull-request-failed` and, for fix rounds, `pull-request-round`, `-round-pushed`, `-round-held` and `-round-failed`, and for merging `pull-request-merged` and `pull-request-merge-failed`, as evidence, visible under Activity.
 
 **Reading GitHub.** While a pull request is open, the service reads it about once a minute: its state, the checks on its latest commit (check runs and commit statuses), whether it can be merged, and its unresolved review threads. A merged or closed pull request is not read again.
@@ -350,7 +350,7 @@ Publishing pushes the task's commit to a branch of the same name in the connecte
 
 - **Ask me:** the Pull request tab shows **Merge pull request**, and the task is lifted into **Needs you** on the Tasks board.
 - **Automatic:** DevAgents merges on the next pass after a read finds the pull request ready, without asking. A repository without any checks is merged on the first read.
-- The merge goes through GitHub's pull request API with the chosen method and names the commit that was read, so a pull request that changed in the meantime is refused by GitHub. A draft is marked ready first. Branch protection applies as usual and is never bypassed.
+- The merge goes through GitHub's pull request API with the chosen method and names the commit that was read, so a pull request that changed in the meantime is refused by GitHub. A pull request that someone turned into a draft is marked ready first. Branch protection applies as usual and is never bypassed.
 - A refused merge is shown on the tab with the reason. An automatic merge is attempted once per commit; after a refusal it waits for a click and the task appears in Needs you.
 - After a merge the tab says so. Your checkout is not changed: when the local target branch does not hold the merge, the tab shows `git pull`.
 - **Needs you** on the Tasks board also lists pull requests where a fix changes a workflow file, a fix round waits for a decision, the automatic round limit is reached, or the last automatic round stopped.
