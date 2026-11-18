@@ -43,7 +43,8 @@ export async function availableTickets(store: Store, sources: { integrations?: P
     const tasks = store.summaries({ projectId: project.id, limit: RECENT_TASKS }).tasks;
     const started = (ticket: AvailableTicket) => {
       const pattern = new RegExp(`(^|[^A-Za-z0-9])${escape(ticket.key)}([^A-Za-z0-9]|$)`, 'i');
-      return tasks.some(task => !abandoned(task) && (task.ticket ? task.ticket.source === ticket.source.id && task.ticket.key.toLowerCase() === ticket.key.toLowerCase() : pattern.test(task.request)));
+      // A fix round names its pull request's ticket in its title but is not a task of that ticket; the task that owns the pull request decides.
+      return tasks.some(task => !task.roundOf && !abandoned(task) && (task.ticket ? task.ticket.source === ticket.source.id && task.ticket.key.toLowerCase() === ticket.key.toLowerCase() : pattern.test(task.request)));
     };
     tickets.push(...found.filter(ticket => !started(ticket)));
   }

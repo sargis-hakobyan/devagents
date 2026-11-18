@@ -449,6 +449,7 @@ export class Store {
       ...(t.outcome?.commit ? { commit: t.outcome.commit } : {}), ...(t.outcome?.error ? { error: t.outcome.error } : {}),
       ...(t.team ? { team: { id: t.team.id, revision: t.team.revision, name: t.team.name } } : {}), ...(t.ticket ? { ticket: t.ticket } : {}),
       ...(limitationCount(t.outcome) ? { limitations: limitationCount(t.outcome), ...(t.outcome?.limitationOverflow ? { limitationOverflow: t.outcome.limitationOverflow } : {}) } : {}),
+      ...(t.followUp ? { roundOf: t.followUp.taskId } : {}),
       ...(pr ? { pullRequest: { number: pr.number, state: pr.state, status: pr.status.text, code: pr.status.code, ...(pr.attention && pr.state === 'open' ? { attention: pr.attention } : {}) } } : {}),
     };
   }

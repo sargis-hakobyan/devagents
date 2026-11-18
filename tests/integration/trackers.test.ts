@@ -252,6 +252,9 @@ test('a project uses several tools, each with its own rule, and a tool added onc
     const pull = { number: 7, base: 'main', draft: false, headSha: 'a'.repeat(40), mergeable: 'unknown' as const, checks: [], comments: [] };
     s.f.store.savePullRequest(started.id, { ...pull, state: 'open', status: { code: 'ready', text: 'ready to merge' } }); assert.deepEqual(await keys(), ['FX-1', 'FX-3', 'FX-5']);
     s.f.store.savePullRequest(started.id, { ...pull, state: 'closed', status: { code: 'closed', text: 'closed without merging' } }); assert.deepEqual(await keys(), ['FX-1', 'FX-2', 'FX-3', 'FX-5']);
+    // A fix round of that pull request names the ticket in its title; it does not hold the ticket.
+    s.f.service.submit({ projectId: 'fixture', request: 'Resolve the conflict of pull request #7 with main (FX-2: Fix the footer links)', mode: 'autonomous' }, 'round', { taskId: started.id, number: 7, round: 2, baseSha: 'a'.repeat(40), checks: [], comments: [], trigger: 'setting' });
+    assert.deepEqual(await keys(), ['FX-1', 'FX-2', 'FX-3', 'FX-5']);
     s.f.store.savePullRequest(started.id, { ...pull, state: 'merged', status: { code: 'merged', text: 'merged into main' } }); assert.deepEqual(await keys(), ['FX-1', 'FX-3', 'FX-5']);
     raw.close();
     // A source that cannot be read is reported and does not hide the others.
