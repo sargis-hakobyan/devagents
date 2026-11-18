@@ -18,6 +18,7 @@ import { runProcess } from '../dist/engines/process.js';
 import { git } from '../dist/workspace/git.js';
 import { ProjectIntegrationService } from '../dist/integrations/service.js';
 import { TrackerService } from '../dist/integrations/trackers.js';
+import { downloadTicketFiles } from '../dist/integrations/ticket-files.js';
 import { fakeTracker } from './fake-tracker.mjs';
 
 const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : fallback; };
@@ -124,6 +125,7 @@ const fixtureRemote = async (input, init = {}) => {
 const integrations = new ProjectIntegrationService(store, fixtureSecrets, { fetch: fixtureRemote, githubApiUrl: 'https://github.fixture.invalid' });
 // A made-up ticket tool with an MCP server; its token is the one exported by fake-tracker.mjs.
 const trackers = new TrackerService(store, fixtureSecrets, { fetch: fakeTracker().fetcher });
+service.attachTicketFiles((task, directory) => downloadTicketFiles({ integrations, trackers }, task.projectId, task.ticket, directory));
 const token = await accessToken(data); const sessions = new BrowserSessions();
 // Synthetic availability only: browser tests never inspect a host credential store or runtime login.
 const status = { service: { version: '0.1.0-fixture', host: '127.0.0.1', port, platform: process.platform, node: process.version, dataDir: data, executionEnabled: true, startedAt: new Date().toISOString(), checkedAt: new Date().toISOString() }, codex: { installed: true, version: 'fixture', signedIn: false, credentialStore: 'file', vaultLocked: false, modelAccessVerified: false }, claude: { installed: false, enabled: false, note: 'Adapter planned for M4' }, defaults: { devagentsRules: config.devagentsRules, engine: 'codex', provider: 'openai', model: null, providers: [{ id: 'openai', kind: 'openai', auth: 'login', apiKeyConfigured: null, executable: true }] }, limits: statusLimits(config), fixture: { label } };

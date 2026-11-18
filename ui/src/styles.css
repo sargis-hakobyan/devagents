@@ -372,6 +372,15 @@ pre.diff-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:650px;overf
 .tool-fields .eg.missing{color:#7A4A00;white-space:normal}
 .tool-tag{display:inline-block;padding:1px 8px;border-radius:999px;background:var(--row);font-size:12.5px;font-weight:600;margin-right:4px}
 .tool-line{display:flex;gap:4px 10px;align-items:baseline;min-width:0;flex-wrap:wrap;font-size:13px}
+.tf-strip{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:10px}
+.tf-file{display:flex;align-items:center;gap:8px;max-width:260px;font-size:13px;color:var(--text)}
+.tf-thumb,.tf-icon{flex:none;width:48px;height:48px;border-radius:8px;border:1px solid var(--border);background:var(--bg);display:grid;place-items:center;overflow:hidden;color:var(--muted)}
+.tf-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.tf-thumb:hover,.tf-thumb:focus-visible{border-color:var(--accent,#4f46e5)}
+.tf-name{display:flex;flex-direction:column;min-width:0}
+.tf-note{font-size:12px;color:var(--muted)}
+.request-full>summary{font-size:13px;color:var(--muted)}
+.request-full>pre{margin:8px 0 0;white-space:pre-wrap;font-family:inherit;font-size:13.5px;line-height:1.5;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;max-height:420px;overflow:auto}
 .tool-fold{border-top:1px solid var(--row);padding-top:12px}
 .tool-fold>summary{cursor:pointer;font-size:13.5px;font-weight:700;color:var(--muted)}
 .tool-fold[open]>summary{margin-bottom:14px}

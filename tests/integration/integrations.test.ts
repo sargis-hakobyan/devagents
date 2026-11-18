@@ -6,6 +6,7 @@ import { createApi } from '../../src/api/server.js';
 import { ProjectIntegrationService } from '../../src/integrations/service.js';
 import { EnvironmentSecretStore, type SecretStore } from '../../src/security/secret-store.js';
 import { fixture } from '../helpers.js';
+import { downloadTicketFiles } from '../../src/integrations/ticket-files.js';
 
 const GITHUB_TOKEN = `github_pat_${'Fixture1'.repeat(6)}`;
 const NEWER_GITHUB_TOKEN = `github_pat_${'Fixture2'.repeat(6)}`;
@@ -19,6 +20,7 @@ function memorySecrets(): SecretStore & { values: Map<string, string> } {
 }
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', ...headers } });
 /** A deterministic GitHub and Jira. Every request is recorded so tests can assert what was sent where. */
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 function remotes(state: { githubRevoked?: boolean } = {}) {
   const calls: { url: string; authorization: string | undefined; body: unknown }[] = [];
   const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -31,6 +33,8 @@ function remotes(state: { githubRevoked?: boolean } = {}) {
       if (url.endsWith('/repos/example-org/website')) return json({ full_name: 'example-org/website', permissions: { push: true } });
       return json({ message: 'Not Found' }, 404);
     }
+    // Jira Cloud's storage host: it takes the signed link alone and must never see the sign-in.
+    if (url === 'https://media.fixture.invalid/file/10001?token=signed') { assert.equal(authorization, undefined, 'the sign-in stays with Jira'); return new Response(PNG, { status: 200, headers: { 'content-type': 'image/png' } }); }
     const cloud = `Basic ${Buffer.from(`agents@example.com:${JIRA_TOKEN}`).toString('base64')}`;
     const scoped = `Basic ${Buffer.from(`agents@example.com:${SCOPED_TOKEN}`).toString('base64')}`;
     let api: string | undefined;
@@ -58,8 +62,22 @@ function remotes(state: { githubRevoked?: boolean } = {}) {
     }
     if (path.startsWith('/api/label')) return api.startsWith('/rest/api/2') ? json({}, 404) : json({ values: ['devagents', 'bug'] });
     if (path === '/api/search/approximate-count') return json({ count: 3 });
-    if (path === '/api/search/jql') return String((body as { jql: string }).jql).includes('"broken"') ? json({ errorMessages: ['The value \'broken\' does not exist for the field \'labels\'.'] }, 400) : json({ issues: [{ key: 'WEB-12' }, { key: 'WEB-15' }, { key: 'WEB-21' }] });
+    if (path === '/api/search/jql') return String((body as { jql: string }).jql).includes('"broken"') ? json({ errorMessages: ['The value \'broken\' does not exist for the field \'labels\'.'] }, 400) : json({ issues: [{ key: 'WEB-12', fields: { summary: 'Add a contact form' } }, { key: 'WEB-15', fields: { summary: 'Fix the footer links' } }, { key: 'WEB-21', fields: { summary: 'Rework the landing page' } }] });
     if (path === '/api/search') return json({ total: 1, issues: [{ key: 'OPS-4' }] });
+    if (path === '/api/attachment/content/10001') return new Response(null, { status: 303, headers: { location: 'https://media.fixture.invalid/file/10001?token=signed' } });
+    if (path === '/api/attachment/content/10002') return new Response('Three fields.\n', { status: 200, headers: { 'content-type': 'text/plain' } });
+    if (path.startsWith('/api/issue/WEB-12?')) return json({ key: 'WEB-12', fields: {
+      summary: 'Add a contact form',
+      description: { type: 'doc', content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'Visitors cannot reach us. Ask ' }, { type: 'mention', attrs: { text: '@Sam Example' } }, { type: 'text', text: ' for the copy.' }] },
+        { type: 'bulletList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'name' }] }] }, { type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'email' }, { type: 'hardBreak' }, { type: 'text', text: 'required' }] }] }] },
+        { type: 'mediaSingle', content: [{ type: 'media', attrs: { id: 'm-1' } }] },
+      ] },
+      comment: { comments: [{ author: { displayName: 'Sam Example' }, created: '2026-11-02T09:15:00.000+0000', body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Send it to the support inbox.' }] }] } }] },
+      attachment: [{ filename: 'footer.png', mimeType: 'image/png', size: 68, content: 'https://example.atlassian.net/rest/api/3/attachment/content/10001' }, { filename: 'notes.txt', mimeType: 'text/plain', size: 14, content: 'https://example.atlassian.net/rest/api/3/attachment/content/10002' }, { filename: 'design.fig', mimeType: 'application/octet-stream', size: 900, content: 'https://example.atlassian.net/rest/api/3/attachment/content/10003' }],
+    } });
+    if (path.startsWith('/api/issue/OPS-4?')) return json({ key: 'OPS-4', fields: { summary: 'Rotate the logs', description: 'Plain text\r\nfrom a hosted Jira.', comment: { comments: [] }, attachment: [] } });
+    if (path.startsWith('/api/issue/')) return json({ errorMessages: ['Issue does not exist or you do not have permission to see it.'] }, 404);
     return json({}, 404);
   }) as typeof fetch;
   return { fetcher, calls };
@@ -83,7 +101,7 @@ async function serve(options: { secrets?: SecretStore; state?: { githubRevoked?:
     execFileSync('git', ['clone', '-q', f.project, path]); execFileSync('git', ['-C', path, 'remote', 'set-url', 'origin', 'https://github.com/example-org/website.git']);
     await f.service.registerProject({ id: 'second', path });
   };
-  return { f, secrets, calls, call, base, second, setNow: (value: string) => { now = new Date(value); }, close: async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await f.cleanup(); } };
+  return { f, secrets, calls, call, base, second, integrations, setNow: (value: string) => { now = new Date(value); }, close: async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await f.cleanup(); } };
 }
 
 test('GitHub: a token is verified against the folder\'s repository, kept out of every response, rechecked and removed', async () => {
@@ -291,4 +309,61 @@ test('a service without integrations answers 503 instead of pretending', async (
     const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/fixture/integrations`, { headers: { authorization: 'Bearer test-token' } });
     assert.equal(response.status, 503);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await f.cleanup(); }
+});
+
+test('Jira: one ticket is read with its text, comments and file names, and a task started from it records the ticket', async () => {
+  const s = await serve();
+  try {
+    const content = async (key: string) => {
+      const response = await fetch(`${s.base.replace('/projects/fixture/integrations', '')}/tickets/content?${new URLSearchParams({ projectId: 'fixture', source: 'jira', key })}`, { headers: { authorization: 'Bearer test-token' } });
+      return { status: response.status, data: await response.json() as Record<string, any> };
+    };
+    assert.equal((await content('WEB-12')).data.error, 'not_connected');
+    await s.call('/jira', 'PUT', { kind: 'cloud', site: 'example.atlassian.net', email: 'agents@example.com', token: JIRA_TOKEN });
+    const read = await content('web-12');
+    assert.equal(read.status, 200, JSON.stringify(read.data));
+    assert.equal(read.data.request, [
+      'WEB-12: Add a contact form', 'Visitors cannot reach us. Ask @Sam Example for the copy.\n- name\n- email\nrequired\n[file]',
+      'Comments on the ticket:', 'Sam Example, 2026-11-02:\nSend it to the support inbox.', 'Files on the ticket: footer.png, notes.txt, design.fig', 'Ticket: https://example.atlassian.net/browse/WEB-12',
+    ].join('\n\n'));
+    assert.deepEqual(read.data.ticket.files, [{ name: 'footer.png', type: 'image/png', size: 68, kind: 'image' }, { name: 'notes.txt', type: 'text/plain', size: 14, kind: 'text' }, { name: 'design.fig', type: 'application/octet-stream', size: 900 }]);
+    assert.equal(read.data.ticket.name, 'Jira'); assert.equal(read.data.ticket.source, 'jira');
+    const missing = await content('WEB-99'); assert.equal(missing.status, 404); assert.equal(missing.data.error, 'ticket_unreadable');
+    assert.equal((await content('not a key')).status, 400);
+    const task = s.f.service.submit({ projectId: 'fixture', request: read.data.request, ticket: { source: 'jira', key: 'web-12', url: 'https://elsewhere.example.com/x' } }, 'from-jira');
+    assert.deepEqual(task.ticket, { source: 'jira', name: 'Jira', key: 'WEB-12', url: 'https://example.atlassian.net/browse/WEB-12' }, 'the link is the connected Jira, whatever was sent');
+  } finally { await s.close(); }
+});
+
+test('Jira: matching tickets are available, a started one leaves, and its files are fetched for the task and shown as pictures', async () => {
+  const s = await serve(); const root = s.base.replace('/projects/fixture/integrations', '');
+  const get = async (path: string) => { const response = await fetch(`${root}${path}`, { headers: { authorization: 'Bearer test-token' } }); return { status: response.status, type: response.headers.get('content-type'), bytes: Buffer.from(await response.arrayBuffer()) }; };
+  try {
+    await s.call('/jira', 'PUT', { kind: 'cloud', site: 'example.atlassian.net', email: 'agents@example.com', token: JIRA_TOKEN });
+    assert.equal((await s.call('/jira/rule', 'PUT', { project: 'WEB', label: 'devagents' })).status, 200);
+    const available = JSON.parse((await get('/tickets/available')).bytes.toString()) as { problems: unknown[]; tickets: { source: { kind: string; name: string; id: string }; key: string; title: string; url: string; why: string; projectId: string }[] };
+    assert.deepEqual(available.problems, []);
+    assert.deepEqual(available.tickets.map(t => `${t.source.id}/${t.key}/${t.title}`), ['jira/WEB-12/Add a contact form', 'jira/WEB-15/Fix the footer links', 'jira/WEB-21/Rework the landing page']);
+    assert.deepEqual({ ...available.tickets[0]!.source, url: available.tickets[0]!.url, why: available.tickets[0]!.why }, { kind: 'jira', name: 'Jira', id: 'jira', url: 'https://example.atlassian.net/browse/WEB-12', why: 'label devagents' });
+
+    // The preview in the submit form: through Jira's redirect, with the sign-in sent to Jira only.
+    const picture = (index: number) => get(`/tickets/picture?${new URLSearchParams({ projectId: 'fixture', source: 'jira', key: 'WEB-12', index: String(index) })}`);
+    const shown = await picture(0);
+    assert.deepEqual([shown.status, shown.type, shown.bytes.equals(PNG)], [200, 'image/png', true]);
+    assert.equal((await picture(1)).status, 404); assert.equal((await picture(2)).status, 404);
+
+    // A task started from the ticket takes the picture and the text file; the other file stays on the ticket.
+    const files: { saved: { name: string; file: string; kind: string; bytes: number }[]; skipped: { name: string; reason: string }[] }[] = [];
+    s.f.service.attachTicketFiles(async (task, directory) => { const result = await downloadTicketFiles({ integrations: s.integrations }, task.projectId, task.ticket!, directory); files.push(result); return result; });
+    const task = s.f.service.submit({ projectId: 'fixture', request: 'WEB-12: Add a contact form', mode: 'autonomous', ticket: { source: 'jira', key: 'WEB-12' } }, 'jira-files');
+    await s.f.service.loadTicketFiles(task.id);
+    assert.deepEqual(files[0], {
+      saved: [{ name: 'footer.png', file: '01.png', kind: 'image', type: 'image/png', bytes: PNG.byteLength }, { name: 'notes.txt', file: '02.txt', kind: 'text', type: 'text/plain', bytes: 14 }],
+      skipped: [{ name: 'design.fig', reason: 'only pictures and short text files are passed to the team' }],
+    });
+    const kept = await get(`/tasks/${task.id}/ticket-files/01.png`); assert.deepEqual([kept.status, kept.bytes.equals(PNG)], [200, true]);
+    assert.match((await s.f.service.ticketMaterial(task.id)).text, /--- notes\.txt ---\nThree fields\.\n--- end of notes\.txt ---/);
+    assert.deepEqual((JSON.parse((await get('/tickets/available')).bytes.toString()) as typeof available).tickets.map(t => t.key), ['WEB-15', 'WEB-21'], 'the started ticket is no longer available');
+    assert.ok(s.calls.filter(c => c.url.includes('media.fixture.invalid')).every(c => c.authorization === undefined));
+  } finally { await s.close(); }
 });

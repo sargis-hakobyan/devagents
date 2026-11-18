@@ -5,7 +5,8 @@ import type { Store } from '../persistence/store.js';
 import type { SecretStore } from '../security/secret-store.js';
 import { GITHUB_API, folderRepository, tokenKind, verifyGitHub } from './github.js';
 import type { Fetch } from './http.js';
-import { jiraAssignee, jiraColumns, jiraMatches, jiraTickets, jiraOptions, jiraProject, jiraProjects, jiraSuggest, normalizeSite, ruleJql, verifyJira, type JiraAccess, type JiraMatches, type JiraOptions, type JiraSuggestion } from './jira.js';
+import { TicketKey, type TicketContent } from '../domain/tickets.js';
+import { jiraAuthorization, jiraFileOrigins, jiraTicket, jiraAssignee, jiraColumns, jiraMatches, jiraTickets, jiraOptions, jiraProject, jiraProjects, jiraSuggest, normalizeSite, ruleJql, verifyJira, type JiraAccess, type JiraMatches, type JiraOptions, type JiraSuggestion } from './jira.js';
 
 type Kind = 'github' | 'jira';
 type Shown<T> = T & { state: ConnectionState; expiresInDays?: number };
@@ -274,11 +275,21 @@ export class ProjectIntegrationService {
     return this.view(projectId);
   }
   /** The tickets the saved Jira rule matches now, for the board's Available column. */
-  async jiraTickets(projectId: string): Promise<{ source: { kind: 'jira'; name: string }; key: string; title: string; url: string; why: string; start: 'manual' | 'auto' }[]> {
+  async jiraTickets(projectId: string): Promise<{ source: { kind: 'jira'; name: string; id: 'jira' }; key: string; title: string; url: string; why: string; start: 'manual' | 'auto' }[]> {
     const { saved, access } = await this.jiraAccess(projectId); const rule = saved.rule;
     if (!rule) return [];
     const why = [rule.column?.name, rule.label ? `label ${rule.label}` : undefined, rule.assignee ? `assigned to ${rule.assignee.name}` : undefined].filter(Boolean).join(' · ');
-    return (await jiraTickets(this.fetcher, access, rule.jql)).map(ticket => ({ source: { kind: 'jira' as const, name: 'Jira' }, ...ticket, url: `${saved.site}/browse/${encodeURIComponent(ticket.key)}`, why, start: rule.start }));
+    return (await jiraTickets(this.fetcher, access, rule.jql)).map(ticket => ({ source: { kind: 'jira' as const, name: 'Jira', id: 'jira' as const }, ...ticket, url: `${saved.site}/browse/${encodeURIComponent(ticket.key)}`, why, start: rule.start }));
+  }
+  /** One Jira ticket with its text, comments and files, read now. */
+  async jiraTicket(projectId: string, key: string): Promise<{ name: string; content: TicketContent }> {
+    const wanted = TicketKey.regex(/^[A-Za-z][A-Za-z0-9_]*-\d+$/, 'Use a Jira ticket number such as WEB-12').parse(key).toUpperCase();
+    return { name: 'Jira', content: await jiraTicket(this.fetcher, (await this.jiraAccess(projectId)).access, wanted) };
+  }
+  /** The hosts and sign-in a file of a Jira ticket is fetched with. */
+  async jiraFileAccess(projectId: string): Promise<{ name: string; origins: string[]; authorization: string; fetch: Fetch; redirects: boolean }> {
+    const { access } = await this.jiraAccess(projectId);
+    return { name: 'Jira', origins: jiraFileOrigins(access), authorization: jiraAuthorization(access), fetch: this.fetcher, redirects: access.kind === 'cloud' };
   }
   /** Removes this project's connection. The token itself stays while another project still uses it. */
   async disconnect(projectId: string, kind: Kind): Promise<IntegrationsView> {

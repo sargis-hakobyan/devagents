@@ -1,6 +1,6 @@
 import { query, createSdkMcpServer, tool, type SDKMessage, type SDKUserMessage, type Options } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { CodingEngine, EngineRequest, EngineProgress, EngineResult } from '../../domain/engine.js';
 import type { Provider } from '../../domain/schemas.js';
@@ -71,7 +71,8 @@ export class ClaudeAdapter implements CodingEngine {
       const transportEnv: NodeJS.ProcessEnv = Object.fromEntries(Object.keys(process.env).map(k => [k, undefined]));
       Object.assign(transportEnv, safeEnvironment(directory, temp), { CLAUDE_CONFIG_DIR: directory, DISABLE_AUTOUPDATER: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', [credential.method === 'api-key' ? 'ANTHROPIC_API_KEY' : 'CLAUDE_CODE_OAUTH_TOKEN']: credential.value });
       progress({ kind: 'started', data: { billing: credential.method === 'api-key' ? 'api' : 'subscription' } });
-      async function* input(): AsyncIterable<SDKUserMessage> { yield { type: 'user', message: { role: 'user', content: clean(request.prompt) }, parent_tool_use_id: null, session_id: '' }; }
+      const pictures = await Promise.all((request.images ?? []).map(async image => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: image.mediaType as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp', data: (await readFile(image.path)).toString('base64') } })));
+      async function* input(): AsyncIterable<SDKUserMessage> { yield { type: 'user', message: { role: 'user', content: pictures.length ? [{ type: 'text', text: clean(request.prompt) }, ...pictures] : clean(request.prompt) }, parent_tool_use_id: null, session_id: '' }; }
       const stream = (this.options.query ?? query)({ prompt: input(), options: {
         cwd: directory, env: transportEnv, abortController: controller, settingSources: [], settings: { disableAllHooks: true },
         tools: [], allowedTools: names, permissionMode: 'dontAsk', strictMcpConfig: true, mcpServers: { devagents: server },

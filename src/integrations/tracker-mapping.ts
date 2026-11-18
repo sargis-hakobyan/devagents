@@ -1,3 +1,4 @@
+import { TICKET_LIMITS, type TicketComment, type TicketContent, type TicketFile } from '../domain/tickets.js';
 import type { TrackerChoice, TrackerMapping, TrackerTicket } from '../domain/trackers.js';
 import { list, record, text } from './http.js';
 import type { McpTool } from './mcp.js';
@@ -125,6 +126,50 @@ export function suggestList(tools: McpTool[]): TrackerMapping['list'] | undefine
   const fixed = Object.fromEntries(names.filter(n => best.properties[n]!.choices.includes('all')).map(n => [n, 'all']));
   return { tool: best.name, fixed, filters: { ...(project ? { project } : {}), ...(column ? { column } : {}), ...(label ? { label } : {}), ...(assignee ? { assignee } : {}) } };
 }
+/** The tool that most looks like "return one ticket", with the argument that takes the ticket number. */
+export function suggestRead(tools: McpTool[]): NonNullable<TrackerMapping['read']> | undefined {
+  const score = (tool: McpTool) => (/(^|[_.\-/])(get|read|show|fetch|view)/i.test(tool.name) ? 2 : 0) + (TICKET_WORD.test(tool.name) ? 2 : 0) - (/list|search|find|query|create|update|delete|add|remove|comment|check/i.test(tool.name) ? 3 : 0);
+  for (const tool of [...tools].filter(t => score(t) >= 3).sort((a, b) => score(b) - score(a))) {
+    const single = Object.keys(tool.properties).filter(n => !tool.properties[n]!.many);
+    const key = first(single, [/^(task|ticket|issue|item|card|work_?item)?_?(id|key|number)$/i, /(id|key|number)$/i]) ?? (single.length === 1 ? single[0] : undefined);
+    if (key) return { tool: tool.name, key };
+  }
+  return;
+}
+
+/** Text of a ticket keeps its lines; control characters are dropped. */
+const prose = (value: unknown, limit: number): string => typeof value === 'string' ? value.replace(/\r\n?/g, '\n').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').replace(/[^\S\n]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, limit) : '';
+const firstOf = <T>(item: Record<string, unknown>, fields: readonly string[], read: (value: unknown) => T | undefined): T | undefined => { for (const field of fields) { const value = read(item[field]); if (value !== undefined && value !== '') return value; } return; };
+/**
+ * One ticket from the answer of the read tool. The number, title and link are where the mapping says
+ * they are on a listed ticket; the text, comments and files are found by their usual names, because a
+ * tool that returns one ticket rarely needs more than that.
+ */
+export function ticketContent(mapping: TrackerMapping, answer: unknown): TicketContent | undefined {
+  const whole = record(answer);
+  const root = [whole, ...['task', 'ticket', 'issue', 'item', 'card', 'data', 'result'].map(name => record(whole[name]))].find(item => scalar(at(item, mapping.ticket.key)) && scalar(at(item, mapping.ticket.title), 300));
+  if (!root) return;
+  const url = mapping.ticket.url ? link(at(root, mapping.ticket.url)) : undefined;
+  const comments: TicketComment[] = [];
+  for (const entry of list(firstOf(root, ['comments', 'notes'], value => Array.isArray(value) ? value : undefined)).map(record)) {
+    const body = firstOf(entry, ['body', 'text', 'content', 'comment', 'message'], value => prose(value, TICKET_LIMITS.comment)); if (!body) continue;
+    const by = firstOf(entry, ['by', 'author', 'createdBy', 'user', 'authorName'], value => choice(value)?.name); const when = firstOf(entry, ['createdAt', 'created', 'at', 'date', 'timestamp'], value => scalar(value, 40));
+    comments.push({ body, ...(by ? { by } : {}), ...(when ? { at: when } : {}) });
+  }
+  const files: TicketFile[] = [];
+  for (const entry of list(firstOf(root, ['attachments', 'files'], value => Array.isArray(value) ? value : undefined)).map(record).slice(0, TICKET_LIMITS.files)) {
+    const name = firstOf(entry, ['name', 'filename', 'fileName', 'title'], value => scalar(value, 200)); if (!name) continue;
+    const source = firstOf(entry, ['url', 'downloadUrl', 'download_url', 'href', 'link'], link); const type = firstOf(entry, ['type', 'mimeType', 'contentType', 'mime'], value => scalar(value, 100));
+    const size = firstOf(entry, ['size', 'bytes'], value => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined);
+    files.push({ name, ...(type ? { type } : {}), ...(size !== undefined ? { size } : {}), ...(source ? { url: source } : {}) });
+  }
+  return {
+    key: scalar(at(root, mapping.ticket.key)), title: scalar(at(root, mapping.ticket.title), 300), ...(url ? { url } : {}),
+    description: firstOf(root, ['description', 'body', 'content', 'text', 'details'], value => prose(value, TICKET_LIMITS.description)) ?? '',
+    comments: comments.slice(-TICKET_LIMITS.comments), files,
+  };
+}
+
 /** Columns a server declares as the allowed values of a status-like argument on any of its tools. */
 export function suggestColumns(tools: McpTool[]): string[] {
   const found = tools.flatMap(tool => Object.entries(tool.properties).filter(([name, p]) => /^(status|state|column|stage)(es|s)?$/i.test(name) && p.choices.length > 1).map(([, p]) => p.choices));

@@ -38,6 +38,7 @@ import { configuredSecretStore } from '../security/secret-store.js';
 import { hostFolders } from './project-mount.js';
 import { ProjectIntegrationService } from '../integrations/service.js';
 import { TrackerService } from '../integrations/trackers.js';
+import { downloadTicketFiles } from '../integrations/ticket-files.js';
 
 const print = (data: unknown) => console.log(JSON.stringify(redactValues(data, environmentSecrets()), null, 2));
 const port = () => z.coerce.number().int().min(1).max(65535).parse(process.env.DEVAGENTS_PORT ?? 4310);
@@ -81,9 +82,12 @@ cli.command('serve').description('Start the local API').action(async () => {
   const setupAuth = new SetupAuth(codexSetupDriver(dataDir), () => assertSignInIdle(store, runner));
   const claudeAuth = new SetupAuth(claudeSetupDriver(dataDir), () => assertSignInIdle(store, runner));
   const secretStore = await configuredSecretStore(dataDir);
+  const integrations = new ProjectIntegrationService(store, secretStore); const trackers = new TrackerService(store, secretStore);
+  // A task started from a ticket takes the ticket's pictures and short text files with it while it works.
+  service.attachTicketFiles((task, directory) => downloadTicketFiles({ integrations, trackers }, task.projectId, task.ticket!, directory));
   const server = createApi(service, await accessToken(dataDir), {
     sessions: new BrowserSessions(undefined, sessionLimits(), sessionFile(dataDir)), uiRoot, publicPort, setupAuth, claudeAuth, assertSetupIdle,
-    integrations: new ProjectIntegrationService(store, secretStore), trackers: new TrackerService(store, secretStore),
+    integrations, trackers,
     status: statusReporter({ dataDir, config, version: '0.1.0', host, port: () => publicPort, executionEnabled: true, revision: () => setupAuth.revision + claudeAuth.revision }),
   });
   await service.agents();
@@ -271,6 +275,8 @@ const toolRef = async (ref: string): Promise<string> => {
   return found[0]!.id;
 };
 cli.command('tickets').description('Tickets that match a project\'s pick-up rule and have no task yet; nothing is started').action(async () => print(await request('/tickets/available')));
+cli.command('ticket <project> <source> <number>').description('Read one ticket with its text and comments, as a task started from it would receive them. <source> is jira or the name of a ticket tool; nothing is started')
+  .action(async (project: string, source: string, number: string) => print(await request(`/tickets/content?${new URLSearchParams({ projectId: await pid(project), source: source.toLowerCase() === 'jira' ? 'jira' : await toolRef(source), key: number })}`)));
 const tools = cli.command('tools').description('Ticket tools with an MCP server (any Jira-like tool). Add one once, then connect projects to it. Stores and checks configuration; no task is created');
 tools.command('list').description('Added tools, their state and the projects that use them').action(async () => print(await request('/trackers')));
 tools.command('add <name> <url>').description('Sign in to a tool\'s MCP server and show its tools with a proposed mapping')

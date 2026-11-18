@@ -32,6 +32,8 @@ export const TrackerMapping = z.strictObject({
   ticket: z.strictObject({ key: FieldPath, title: FieldPath, column: FieldPath.optional(), project: FieldPath.optional(), assignee: FieldPath.optional(), labels: FieldPath.optional(), url: FieldPath.optional() }),
   /** Columns a rule can name, in board order. Left empty, the columns seen on tickets are offered. */
   columns: z.array(z.string().min(1).max(100)).max(100).default([]),
+  /** The tool that returns one ticket with its text, comments and files, and the argument that takes the ticket number. Left out, DevAgents looks for it on the server. */
+  read: z.strictObject({ tool: Identifier, key: Identifier }).optional(),
 });
 export type TrackerMapping = z.infer<typeof TrackerMapping>;
 

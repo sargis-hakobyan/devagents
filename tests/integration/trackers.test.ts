@@ -21,6 +21,7 @@ const MAPPING = {
   result: { tickets: 'tasks', projects: 'projects', labels: 'labels', people: 'users', account: 'viewer' },
   ticket: { key: 'key', title: 'title', column: 'status', project: 'projectId', assignee: 'assignee', labels: 'labels', url: 'url' },
   columns: ['backlog', 'todo', 'ready-for-development', 'in-progress', 'done'],
+  read: { tool: 'tracker_get_task', key: 'taskId' },
 };
 async function serve(options: { secrets?: SecretStore; state?: { revoked?: boolean; events?: boolean; limited?: boolean } } = {}) {
   const f = await fixture(); const secrets = options.secrets ?? memorySecrets(); const state = options.state ?? {}; const { fetcher, calls } = fake.fakeTracker(state);
@@ -250,3 +251,46 @@ test('a project uses several tools, each with its own rule, and a tool added onc
   } finally { await s.close(); }
 });
 
+
+test('a ticket is read with its text, comments and file names, and a task started from it records the ticket', async () => {
+  const s = await serve();
+  try {
+    const board = await s.added('Team board');
+    const content = (key: string, source = board) => s.call(`/tickets/content?${new URLSearchParams({ projectId: 'fixture', source, key })}`);
+    assert.equal((await content('FX-1')).data.error, 'not_connected', 'only a tool the project uses is read');
+    await s.call(`${s.project}/${board}`, 'PUT', {}); await s.call(`${s.project}/${board}/rule`, 'PUT', { labels: ['devagents'] });
+    const read = await content('FX-1');
+    assert.equal(read.status, 200, read.text);
+    assert.equal(read.data.request, [
+      'FX-1: Add a contact form', 'Visitors cannot reach us from the site.', 'Add a contact form to the footer with name, email and message.',
+      'Comments on the ticket:', 'sam@example.com, 2026-11-02:\nThe form should send to the support inbox.', 'agents@example.com, 2026-11-03:\nPlease keep it to three fields.\nSee the screenshot.',
+      'Files on the ticket: footer.png, notes.txt, elsewhere.png', 'Ticket: https://tracker.fixture.invalid/board?task=FX-1',
+    ].join('\n\n'));
+    assert.deepEqual({ ...read.data.ticket, readAt: 0, comments: read.data.ticket.comments.length }, {
+      source: board, name: 'Team board', key: 'FX-1', title: 'Add a contact form', url: 'https://tracker.fixture.invalid/board?task=FX-1', readAt: 0, comments: 2,
+      description: 'Visitors cannot reach us from the site.\n\nAdd a contact form to the footer with name, email and message.',
+      files: [{ name: 'footer.png', type: 'image/png', size: 68, kind: 'image' }, { name: 'notes.txt', type: 'text/plain', size: 27, kind: 'text' }, { name: 'elsewhere.png', type: 'image/png', size: 10, kind: 'image' }],
+    });
+    assert.ok(!read.text.includes('signature=fixture') && !read.text.includes(TOKEN), 'where the tool serves a file stays on the service');
+    assert.deepEqual(s.calls.at(-1)!.params, { name: 'tracker_get_task', arguments: { taskId: 'FX-1' } });
+    // A ticket with no comments or files is its title, text and link.
+    assert.equal((await content('FX-3')).data.request, 'FX-3: Rate-limit the search API\n\nFixture ticket.\n\nTicket: https://tracker.fixture.invalid/board?task=FX-3');
+    const missing = await content('FX-99'); assert.equal(missing.data.error, 'tracker_failed'); assert.match(missing.data.message, /FX-99 was not found/);
+    assert.equal((await content('FX 1')).status, 400);
+    // A mapping saved before reading existed names no read tool: it is found on the server.
+    const { read: _, ...older } = MAPPING;
+    assert.equal((await s.call(`/trackers/${board}/mapping`, 'PUT', older)).status, 200);
+    assert.equal((await s.call(`/trackers/${board}`)).data.mapping.read, undefined);
+    assert.equal((await content('FX-2')).data.ticket.title, 'Fix the footer links');
+    assert.equal((await s.call(`/trackers/${board}/mapping`, 'PUT', { ...MAPPING, read: { tool: 'tracker_get_task', key: 'ticket' } })).data.error, 'invalid_mapping');
+
+    // The task records where it came from; the ticket is then no longer available, whatever the request says.
+    const task = s.f.service.submit({ projectId: 'fixture', request: 'Build the form as described.', ticket: { source: board, key: 'FX-1', url: read.data.ticket.url, readAt: read.data.ticket.readAt } }, 'from-ticket');
+    assert.deepEqual(task.ticket, { source: board, name: 'Team board', key: 'FX-1', url: 'https://tracker.fixture.invalid/board?task=FX-1', readAt: read.data.ticket.readAt });
+    assert.deepEqual(s.f.store.summaries({ projectId: 'fixture' }).tasks[0]!.ticket, task.ticket);
+    assert.match(s.f.store.events(task.id)[0]!.reason, /started from Team board ticket FX-1/);
+    assert.deepEqual((await s.call('/tickets/available')).data.tickets.map((t: { key: string; source: { id: string } }) => `${t.source.id === board}/${t.key}`), ['true/FX-2', 'true/FX-3']);
+    assert.throws(() => s.f.service.submit({ projectId: 'fixture', request: 'x', ticket: { source: 'jira', key: 'WEB-1' } }, 'no-jira'), /Jira is not connected/);
+    assert.throws(() => s.f.service.submit({ projectId: 'fixture', request: 'x', ticket: { source: '11111111-1111-4111-8111-111111111111', key: 'FX-1' } }, 'no-tool'), /not connected for this project/);
+  } finally { await s.close(); }
+});

@@ -12,6 +12,7 @@ import { STARTER_TEAM_ID } from '../domain/starter-team.js';
 import type { DispatchClaim, DispatchRecord } from '../domain/dispatch.js';
 import type { ProjectIntegrations } from '../domain/integrations.js';
 import type { Tracker } from '../domain/trackers.js';
+import type { TaskTicket, TicketRef } from '../domain/tickets.js';
 
 export class Store {
   private readonly db: DatabaseSync;
@@ -417,7 +418,7 @@ export class Store {
       request: t.request.length > 200 ? `${t.request.slice(0, 200)}…` : t.request,
       ...(t.mode ? { mode: t.mode } : {}), ...(t.workspace ? { branch: t.workspace.branch } : {}), ...(t.plan ? { items: t.plan.items.length } : {}),
       ...(t.outcome?.commit ? { commit: t.outcome.commit } : {}), ...(t.outcome?.error ? { error: t.outcome.error } : {}),
-      ...(t.team ? { team: { id: t.team.id, revision: t.team.revision, name: t.team.name } } : {}),
+      ...(t.team ? { team: { id: t.team.id, revision: t.team.revision, name: t.team.name } } : {}), ...(t.ticket ? { ticket: t.ticket } : {}),
       ...(limitationCount(t.outcome) ? { limitations: limitationCount(t.outcome), ...(t.outcome?.limitationOverflow ? { limitationOverflow: t.outcome.limitationOverflow } : {}) } : {}),
     };
   }
@@ -473,6 +474,17 @@ export class Store {
    * included the resolved mode, so omitted-mode retries may match either historical mode. Those
    * rows cannot distinguish explicit from defaulted modes; never infer that from mutable task data.
    */
+  /** A task may only name a ticket of a source its project is connected to. */
+  private taskTicket(projectId: string, ref: TicketRef): TaskTicket {
+    const integrations = this.project(projectId).integrations; const read = ref.readAt ? { readAt: ref.readAt } : {};
+    if (ref.source === 'jira') {
+      if (!integrations?.jira) throw new AppError('not_connected', 'Jira is not connected for this project', 422);
+      const key = ref.key.toUpperCase();
+      return { source: 'jira', name: 'Jira', key, url: `${integrations.jira.site}/browse/${encodeURIComponent(key)}`, ...read };
+    }
+    if (!integrations?.trackers?.some(c => c.trackerId === ref.source)) throw new AppError('not_connected', 'This ticket tool is not connected for this project', 422);
+    return { source: ref.source, name: this.tracker(ref.source).name, key: ref.key, ...(ref.url ? { url: ref.url } : {}), ...read };
+  }
   createTask(input: unknown, key: string, freeze?: (task: Task) => TaskTeam | undefined, defaultMode?: () => Task['mode'], devagentsRules = true): Task {
     const parsed = TaskInput.parse(input);
     if (this.project(parsed.projectId).archivedAt) throw new AppError('project_archived', 'This project is archived. Restore it before submitting work.', 409);
@@ -489,13 +501,14 @@ export class Store {
       }
       const now = new Date().toISOString();
       const mode = clean.mode ?? defaultMode?.();
-      let task: Task = { ...clean, ...(mode ? { mode } : {}), devagentsRules, id: randomUUID(), runId: randomUUID(), state: mode ? 'planning' : 'awaiting_mode', version: 0, createdAt: now, updatedAt: now };
+      const { ticket: ref, ...rest } = clean; const ticket = ref ? this.taskTicket(rest.projectId, ref) : undefined;
+      let task: Task = { ...rest, ...(ticket ? { ticket } : {}), ...(mode ? { mode } : {}), devagentsRules, id: randomUUID(), runId: randomUUID(), state: mode ? 'planning' : 'awaiting_mode', version: 0, createdAt: now, updatedAt: now };
       const team = freeze?.(task);
       if (team) task = { ...task, team, agents: team.members.map(m => ({ ...m, schemaVersion: 1 as const, instructionsFile: 'team', source: `team:${team.id}@${team.revision}` })) };
       this.db.prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)').run(task.id, task.projectId, task.state, task.version, this.taskJson(task));
       this.db.prepare('INSERT INTO requests VALUES (?, ?, ?)').run(key, fingerprint, task.id);
       this.requestDispatchRow(task);
-      this.append(task, 'user', `${mode ? 'Task submitted with autonomy mode' : 'Choose autonomous or plan-approval to continue'}${team ? ` · team "${team.name}" revision ${team.revision} frozen` : ''}`);
+      this.append(task, 'user', `${mode ? 'Task submitted with autonomy mode' : 'Choose autonomous or plan-approval to continue'}${team ? ` · team "${team.name}" revision ${team.revision} frozen` : ''}${ticket ? ` · started from ${ticket.name} ticket ${ticket.key}` : ''}`);
       return task;
     });
   }

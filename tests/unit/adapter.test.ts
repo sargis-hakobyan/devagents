@@ -156,3 +156,28 @@ process.stdin.resume();process.stdin.on('end',()=>{
     }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('pictures are handed to the CLI as image options before its other options, and a call without pictures has none', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'adapter-images-'));
+  const binary = join(root, 'codex'); const cwd = join(root, 'project'); const capture = join(root, 'argv.json'); await mkdir(cwd);
+  const agent = (await loadRegistry([builtinDirectory], Config.parse({ schemaVersion: 1 }))).find(a => a.id === 'general-developer')!;
+  await writeFile(binary, `#!${process.execPath}
+if (process.argv.includes('--version')) { console.log('codex-cli 0.160.1'); process.exit(0); }
+if (process.argv.includes('login')) process.exit(0);
+process.stdin.resume(); process.stdin.on('end', () => {
+  require('node:fs').writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2)));
+  console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify({ summary: 'done' }) } }));
+  console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }));
+});
+`, { mode: 0o700 });
+  const run = async (runId: string, images?: { path: string; mediaType: string }[]) => {
+    await new CodexAdapter(join(root, 'data'), binary).execute({ runId, phase: 'planning', cwd, prompt: 'Plan', agent, provider: { id: 'openai', kind: 'openai', auth: 'login' }, schema: {}, signal: new AbortController().signal, timeoutMs: 5000, ...(images ? { images } : {}) }, () => {});
+    return JSON.parse(await readFile(capture, 'utf8')) as string[];
+  };
+  try {
+    const args = await run('with-images', [{ path: '/data/ticket-files/t/01.png', mediaType: 'image/png' }, { path: '/data/ticket-files/t/02.jpg', mediaType: 'image/jpeg' }]);
+    assert.deepEqual(args.slice(0, 6), ['exec', '--image', '/data/ticket-files/t/01.png', '--image', '/data/ticket-files/t/02.jpg', '-c']);
+    assert.equal(args.at(-1), '-', 'the prompt still comes from standard input');
+    assert.ok(!(await run('without-images')).includes('--image'));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

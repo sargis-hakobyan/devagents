@@ -5,7 +5,7 @@ import type { TrackerService } from './trackers.js';
 
 /** A ticket that matches a project's pick-up rule and has no task yet. It is a ticket, not a task. */
 export type AvailableTicket = {
-  source: { kind: 'jira' | 'tool'; name: string }; key: string; title: string; url?: string;
+  source: { kind: 'jira' | 'tool'; name: string; /** `jira`, or the ID of the ticket tool. */ id: string }; key: string; title: string; url?: string;
   projectId: string; projectName: string; /** The rule values it matched, for example "todo · label devagents". */ why: string; start: 'manual' | 'auto';
 };
 export type AvailableTickets = { tickets: AvailableTicket[]; /** Sources that could not be read; the others are still listed. */ problems: { projectName: string; source: string; message: string }[]; checkedAt: string };
@@ -17,8 +17,8 @@ const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  * The tickets that every active project's rules match right now, for the Available column of the
  * task board. Reading only: nothing is started and nothing is written to a ticket tool.
  *
- * A ticket counts as started when a task of the same project names its key in the request, which is
- * what "Start task" puts there. Tasks carry no ticket reference of their own yet.
+ * A ticket counts as started when a task of the same project was started from it. Tasks from before
+ * tasks recorded their ticket are recognised by the ticket number in their request.
  */
 export async function availableTickets(store: Store, sources: { integrations?: ProjectIntegrationService | undefined; trackers?: TrackerService | undefined }, now: () => Date = () => new Date()): Promise<AvailableTickets> {
   const tickets: AvailableTicket[] = []; const problems: AvailableTickets['problems'] = [];
@@ -35,9 +35,12 @@ export async function availableTickets(store: Store, sources: { integrations?: P
       await read(name, () => sources.trackers!.ruleTickets(project.id, connection.trackerId));
     }
     if (!found.length) continue;
-    const requests = store.summaries({ projectId: project.id, limit: RECENT_TASKS }).tasks.map(task => task.request);
-    const started = (key: string) => { const pattern = new RegExp(`(^|[^A-Za-z0-9])${escape(key)}([^A-Za-z0-9]|$)`, 'i'); return requests.some(request => pattern.test(request)); };
-    tickets.push(...found.filter(ticket => !started(ticket.key)));
+    const tasks = store.summaries({ projectId: project.id, limit: RECENT_TASKS }).tasks;
+    const started = (ticket: AvailableTicket) => {
+      const pattern = new RegExp(`(^|[^A-Za-z0-9])${escape(ticket.key)}([^A-Za-z0-9]|$)`, 'i');
+      return tasks.some(task => task.ticket ? task.ticket.source === ticket.source.id && task.ticket.key.toLowerCase() === ticket.key.toLowerCase() : pattern.test(task.request));
+    };
+    tickets.push(...found.filter(ticket => !started(ticket)));
   }
   return { tickets, problems, checkedAt: now().toISOString() };
 }

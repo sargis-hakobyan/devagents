@@ -6,6 +6,7 @@ import { TaskDiff } from '../components/TaskDiff';
 import { useTaskActions } from '../components/TaskActions';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
+import { TicketFileList } from '../components/TicketFiles';
 import { api, evidenceFacts, type Evidence, type ItemProgress, type Task, type TaskEvent } from '../api';
 import { Card, Chip, ErrorNote, Later, Pre, Skeleton, Stage, StateChip, pretty } from '../components/ui';
 import { MemberList, Pipeline } from '../components/TeamBoard';
@@ -44,6 +45,19 @@ export function TaskDetailPage({ id }: { id: string }) {
   if (!task) return <><Skeleton rows={2} label="Loading task" /><Skeleton rows={4} /></>;
   const state = taskState(task); const terminal = ['completed', 'failed', 'cancelled'].includes(task.state);
   const finishedAt = terminal ? task.updatedAt : undefined;
+  // A request started from a ticket is long: its first line is the heading and the whole text is one click away.
+  const firstLine = task.request.split('\n', 1)[0]!.trim(); const requestTitle = firstLine.length > 200 ? `${firstLine.slice(0, 200)}…` : firstLine;
+  const requestRest = task.request.trim() !== requestTitle;
+  // What was fetched from the ticket for this task, from the task's own record.
+  const fetched = evidence.rows.filter(e => e.kind === 'ticket-files').at(-1);
+  const ticketFiles = fetched ? (() => {
+    const d = evidenceFacts(fetched); const entries = (value: unknown) => Array.isArray(value) ? value.flatMap(v => v && typeof v === 'object' && typeof (v as { name?: unknown }).name === 'string' ? [v as { name: string; reason?: unknown; file?: unknown; kind?: unknown }] : []) : [];
+    const removed = evidence.rows.some(e => e.kind === 'ticket-files-removed');
+    // While the task works its pictures can be shown; once it has ended the copies are gone and the names remain.
+    const saved = entries(d.saved).map(f => { const kind = f.kind === 'image' ? 'image' as const : f.kind === 'text' ? 'text' as const : undefined; return { name: f.name, kind, ...(kind === 'image' && !removed && typeof f.file === 'string' && /^\d{2}\.[a-z]{2,4}$/.test(f.file) ? { src: `/tasks/${task.id}/ticket-files/${f.file}` } : {}) }; });
+    const result = { saved, skipped: entries(d.skipped).map(f => ({ name: f.name, reason: typeof f.reason === 'string' ? f.reason : '' })), error: typeof d.error === 'string' ? d.error : '', removed };
+    return result.saved.length || result.skipped.length || result.error ? result : undefined;
+  })() : undefined;
   const summary = task.scheduling?.status === 'queued' ? { title: 'Queued for execution', tone: 'info', detail: task.scheduling.reason }
     : task.scheduling?.status === 'held' ? { title: 'Recovery needs inspection', tone: 'warn', detail: task.scheduling.reason }
     : board?.stages.some(s => s.key === 'qa' && s.status === 'busy')
@@ -58,7 +72,14 @@ export function TaskDetailPage({ id }: { id: string }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 }}>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}><StateChip task={task} /><span class="muted" style={{ fontSize: '13px' }}>{task.mode ?? 'mode not chosen'} · v{task.version} · started {formatTime(task.createdAt)} · {terminal ? 'took' : 'elapsed'} {elapsed(task.createdAt, finishedAt, now)}</span></div>
             <div class="muted" style={{ fontSize: '13px' }}>Extra DevAgents rules: {(task.devagentsRules ?? true) ? 'on' : 'off · engine sandbox'} · frozen at submission</div>
-            <h1 style={{ margin: 0, fontSize: '22px', letterSpacing: '-0.02em', lineHeight: 1.3 }} class="wrap-anywhere">{task.request}</h1>
+            <h1 style={{ margin: 0, fontSize: '22px', letterSpacing: '-0.02em', lineHeight: 1.3 }} class="wrap-anywhere">{requestTitle}</h1>
+            {task.ticket && <div class="muted" style={{ fontSize: '13.5px' }}>From {task.ticket.name} ticket {task.ticket.url ? <a href={task.ticket.url} target="_blank" rel="noopener noreferrer"><b>{task.ticket.key}</b></a> : <b>{task.ticket.key}</b>}{task.ticket.readAt ? ` · read ${formatTime(task.ticket.readAt)}` : ''} · the ticket itself is the current version</div>}
+            {ticketFiles && <div class="muted wrap-anywhere" style={{ fontSize: '13.5px' }}>
+              {ticketFiles.error ? `The ticket's files could not be fetched: ${ticketFiles.error}` : <>{ticketFiles.saved.length ? 'Files given to the team' : 'No file of the ticket was given to the team'}{ticketFiles.removed ? ' · the copies were removed when the task ended' : ''}</>}
+              {ticketFiles.saved.length > 0 && <div style={{ margin: '8px 0 2px' }}><TicketFileList files={ticketFiles.saved} label="Files given to the team" /></div>}
+              {ticketFiles.skipped.length > 0 && <details class="request-full"><summary>{ticketFiles.skipped.length} left on the ticket</summary><ul style={{ margin: '6px 0 0', paddingLeft: '18px' }}>{ticketFiles.skipped.map(f => <li key={f.name}>{f.name}: {f.reason}</li>)}</ul></details>}
+            </div>}
+            {requestRest && <details class="request-full"><summary>Full request</summary><pre class="wrap-anywhere">{task.request}</pre></details>}
             <div class="muted" style={{ fontSize: '13.5px' }}>Project <ProjectRef id={task.projectId} name={task.projectName ?? task.projectId} archived={task.projectArchived === true} /> · Team: {task.team ? <><a href={`/ui/teams/${task.team.id}`}><b>{task.team.name}</b></a> revision {task.team.revision} · {task.team.members.filter(m => m.enabled).length} enabled members frozen at submission{task.team.modelPinned ? '' : ' · model: runtime default (not pinned)'}</> : <><b>Legacy agent configuration</b>{task.agents ? ` (${task.agents.length} agents snapshotted at worktree creation)` : ' (snapshotted when the worktree is created)'}</>}{task.workspace && tab !== 'plan' && <> · Branch <span class="mono">{task.workspace.branch}</span></>}</div>
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>

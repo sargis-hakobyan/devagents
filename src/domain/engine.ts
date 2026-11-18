@@ -7,6 +7,8 @@ export type EngineRequest = {
   runId: string; workItemId?: string; phase: EnginePhase; cwd: string; prompt: string;
   agent: AgentDefinition; provider: AppConfig['providers'][number];
   schema: Record<string, unknown>; signal: AbortSignal; timeoutMs: number;
+  /** Pictures shown to the model with the prompt, for example screenshots of the task's ticket. Read by the adapter, not by the sandboxed tools. */
+  images?: { path: string; mediaType: string }[];
 };
 export type EngineResult = { output: unknown; usage?: unknown };
 export interface CodingEngine {

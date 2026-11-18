@@ -50,6 +50,8 @@ export class CodexAdapter implements CodingEngine {
       const permissions = ['setup', 'implementation'].includes(request.phase) ? agent.permissions : { ...agent.permissions, writePaths: [] };
       const args = [
         'exec',
+        // Each picture is its own option, and the options that follow end the list before the prompt marker.
+        ...(request.images ?? []).flatMap(image => ['--image', image.path]),
         '-c', `cli_auth_credentials_store="${credentialStore()}"`,
         ...await sandboxFlags(request.cwd, permissions, temp, this.options.scanLimit, rules, false, runtime, request.signal),
         '-c', 'agents.enabled=false', '-c', 'agents.max_depth=0',

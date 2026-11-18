@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { AppError } from '../domain/errors.js';
 import { connectionState, type ConnectionState, type IntegrationProblem } from '../domain/integrations.js';
+import { TicketKey, type TicketContent } from '../domain/tickets.js';
 import { TrackerAddInput, TrackerId, TrackerMapping, TrackerRuleInput, TrackerUpdateInput, type Tracker, type TrackerConnection, type TrackerRule, type TrackerTicket } from '../domain/trackers.js';
 import type { Store } from '../persistence/store.js';
 import type { SecretStore } from '../security/secret-store.js';
 import type { Fetch } from './http.js';
 import { McpSession, normalizeMcpUrl, type McpTool } from './mcp.js';
-import { at, choice, listArguments, matches, options, sampleOf, shapeOf, suggestColumns, suggestFields, suggestList, tickets, unfilterable, type AnswerShape, type Choice, type RuleParts, type TicketSample, type TrackerOptions } from './tracker-mapping.js';
+import { at, choice, listArguments, matches, options, sampleOf, shapeOf, suggestColumns, suggestFields, suggestList, suggestRead, ticketContent, tickets, unfilterable, type AnswerShape, type Choice, type RuleParts, type TicketSample, type TrackerOptions } from './tracker-mapping.js';
 
 export type TrackerView = Omit<Tracker, 'savedToken'> & {
   state: ConnectionState; /** False until a mapping is saved; a project can only use a mapped tool. */ mapped: boolean;
@@ -99,7 +100,8 @@ export class TrackerService {
     const shape = shapeOf(answer); const fields = suggestFields(shape);
     if (!fields) return { tracker: shown, tools, shape, note: `The answer of ${list.tool} has no list that looks like tickets. Choose the fields yourself.` };
     const sample = sampleOf(answer, tracker.mapping?.result ?? fields.result);
-    return { tracker: shown, tools, shape, ...(sample ? { sample } : {}), suggestion: TrackerMapping.parse({ list, ...fields, columns: tracker.mapping?.columns.length ? tracker.mapping.columns : suggestColumns(tools) }) };
+    const read = tracker.mapping?.read ?? suggestRead(tools);
+    return { tracker: shown, tools, shape, ...(sample ? { sample } : {}), suggestion: TrackerMapping.parse({ list, ...fields, columns: tracker.mapping?.columns.length ? tracker.mapping.columns : suggestColumns(tools), ...(read ? { read } : {}) }) };
   }
   /** Saves a mapping only after the server answered through it, so a saved mapping is one that works. */
   async setMapping(id: string, input: unknown): Promise<{ tracker: TrackerView; tickets: number }> {
@@ -108,6 +110,9 @@ export class TrackerService {
     if (!tool) throw new AppError('invalid_mapping', `${tracker.name} has no tool named ${mapping.list.tool}.`, 422);
     const unknown = [...Object.keys(mapping.list.fixed), ...Object.values(mapping.list.filters).flatMap(f => f ? [f.name] : [])].filter(name => !tool.properties[name]);
     if (unknown.length) throw new AppError('invalid_mapping', `${mapping.list.tool} takes no argument named ${unknown.join(', ')}. It takes: ${Object.keys(tool.properties).join(', ') || 'none'}.`, 422);
+    const reader = mapping.read && (await session.tools()).find(t => t.name === mapping.read!.tool);
+    if (mapping.read && !reader) throw new AppError('invalid_mapping', `${tracker.name} has no tool named ${mapping.read.tool}.`, 422);
+    if (mapping.read && reader && !reader.properties[mapping.read.key]) throw new AppError('invalid_mapping', `${mapping.read.tool} takes no argument named ${mapping.read.key}. It takes: ${Object.keys(reader.properties).join(', ') || 'none'}.`, 422);
     const answer = await session.call(mapping.list.tool, listArguments(mapping));
     const rows = at(answer, mapping.result.tickets);
     if (!Array.isArray(rows)) throw new AppError('invalid_mapping', `The answer of ${mapping.list.tool} has no list at "${mapping.result.tickets}". It has: ${shapeOf(answer).lists.map(l => l.path).join(', ') || 'no lists'}.`, 422);
@@ -238,7 +243,7 @@ export class TrackerService {
     return this.projectView(projectId);
   }
   /** The tickets a project's saved rule for one tool matches now, for the board's Available column. */
-  async ruleTickets(projectId: string, trackerId: string): Promise<{ source: { kind: 'tool'; name: string }; key: string; title: string; url?: string; why: string; start: 'manual' | 'auto' }[]> {
+  async ruleTickets(projectId: string, trackerId: string): Promise<{ source: { kind: 'tool'; name: string; id: string }; key: string; title: string; url?: string; why: string; start: 'manual' | 'auto' }[]> {
     const rule = this.store.project(projectId).integrations?.trackers?.find(c => c.trackerId === trackerId)?.rule;
     if (!rule) return [];
     const { tracker, mapping, session } = await this.load(projectId, trackerId);
@@ -246,7 +251,25 @@ export class TrackerService {
     const parts: RuleParts = { projects: entries(rule.projects), columns: rule.columns ?? [], assignees: entries(rule.assignees), labels: rule.labels ?? [] };
     const why = [rule.columns?.join(', '), rule.labels?.length ? `label ${rule.labels.join(', ')}` : undefined, rule.assignees?.length ? `assigned to ${rule.assignees.map(a => a.name).join(', ')}` : undefined].filter(Boolean).join(' · ');
     return tickets(mapping, await session.call(mapping.list.tool, listArguments(mapping, parts))).filter(ticket => matches(mapping, ticket, parts))
-      .map(({ key, title, url }) => ({ source: { kind: 'tool' as const, name: tracker.name }, key, title, ...(url ? { url } : {}), why, start: rule.start }));
+      .map(({ key, title, url }) => ({ source: { kind: 'tool' as const, name: tracker.name, id: tracker.id }, key, title, ...(url ? { url } : {}), why, start: rule.start }));
+  }
+  /**
+   * One ticket with its text, comments and files, read from the tool now. A mapping saved before
+   * reading existed names no read tool, so one is looked for on the server.
+   */
+  async ticket(projectId: string, trackerId: string, key: string): Promise<{ name: string; content: TicketContent }> {
+    const wanted = TicketKey.parse(key); const { tracker, mapping, session } = await this.load(projectId, trackerId);
+    const read = mapping.read ?? suggestRead(await session.tools());
+    if (!read) throw new AppError('ticket_unreadable', `${tracker.name} offers no tool that returns one ticket, so its text cannot be loaded.`, 422);
+    const content = ticketContent(mapping, await session.call(read.tool, { [read.key]: wanted }));
+    if (!content) throw new AppError('ticket_unreadable', `${read.tool} of ${tracker.name} did not answer with a ticket for ${wanted}.`, 422);
+    return { name: tracker.name, content };
+  }
+  /** The address and token a file of a ticket is fetched with. Files are only fetched from the tool's own host. */
+  async fileAccess(trackerId: string): Promise<{ name: string; origins: string[]; authorization: string; fetch: Fetch }> {
+    const tracker = this.store.tracker(TrackerId.parse(trackerId)); const token = await this.secrets.get(tracker.savedToken);
+    if (!token) throw this.required(tracker.savedToken);
+    return { name: tracker.name, origins: [new URL(tracker.url).origin], authorization: `Bearer ${token}`, fetch: this.fetcher };
   }
   /** What a rule would match right now, without saving it. */
   async preview(projectId: string, trackerId: string, input: unknown): Promise<{ rule: TrackerRule; matches: TrackerMatches }> { return this.resolve(projectId, trackerId, input); }

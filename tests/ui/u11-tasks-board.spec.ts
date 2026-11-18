@@ -19,6 +19,7 @@ test('tasks are a board by stage, with what needs you above it and available tic
   const shots = join(process.cwd(), 'test-results', 'ui-screenshots'); await mkdir(shots, { recursive: true });
   await page.setViewportSize({ width: 1640, height: 1000 });
   await page.goto(link.url);
+  let started: string | undefined;
   try {
     await page.goto(`${base}/ui/tasks`);
     await expect(page.getByRole('heading', { level: 1, name: 'All tasks' })).toBeVisible();
@@ -79,7 +80,20 @@ test('tasks are a board by stage, with what needs you above it and available tic
     await expect(form.getByRole('link', { name: 'FX-1' })).toHaveAttribute('href', 'https://tracker.fixture.invalid/board?task=FX-1');
     // The project comes from the ticket's rule, so it is shown and not offered as a choice.
     await expect(form).toContainText("set by the ticket's rule"); await expect(form.getByRole('combobox', { name: 'Project', exact: true })).toHaveCount(0);
-    await expect(form.locator('textarea')).toHaveValue('FX-1: Add a contact form\n\nTicket: https://tracker.fixture.invalid/board?task=FX-1');
+    // The ticket itself is read from the tool: its description and comments are the request, and its files are named.
+    await expect(form).toContainText('Its description and 2 comments are in the request below. Pictures and short text files among its 3 files go to the team when the task starts.');
+    await expect(form.locator('textarea')).toHaveValue([
+      'FX-1: Add a contact form', 'Visitors cannot reach us from the site.', 'Add a contact form to the footer with name, email and message.',
+      'Comments on the ticket:', 'sam@example.com, 2026-11-02:\nThe form should send to the support inbox.', 'agents@example.com, 2026-11-03:\nPlease keep it to three fields.\nSee the screenshot.',
+      'Files on the ticket: footer.png, notes.txt, elsewhere.png', 'Ticket: https://tracker.fixture.invalid/board?task=FX-1',
+    ].join('\n\n'));
+    // Its files are shown: a picture as a thumbnail that opens full size, a text file as an icon, and a picture that cannot be fetched falls back to its icon.
+    const files = form.getByRole('list', { name: 'Files on the ticket' });
+    const thumb = files.getByRole('img', { name: 'footer.png, picture from the ticket' });
+    await expect(thumb).toBeVisible(); await expect.poll(() => thumb.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+    await expect(files.getByRole('link', { name: 'Open footer.png full size' })).toHaveAttribute('href', /^\/tickets\/picture\?projectId=website&source=[0-9a-f-]{36}&key=FX-1&index=0$/);
+    await expect(files.getByRole('listitem').filter({ hasText: 'notes.txt' }).getByRole('img', { name: 'Text file' })).toBeVisible();
+    await expect(files.getByRole('listitem').filter({ hasText: 'elsewhere.png' }).getByRole('img', { name: 'Picture', exact: true })).toBeVisible();
     // Team and autonomy mode start on what the project would use, as explicit choices that can be changed.
     await expect(form.getByRole('combobox', { name: 'Team', exact: true })).toHaveValue(website.defaultTeamId ?? '');
     await expect(form.locator(`input[name="mode"][value="${usual.mode ?? ''}"]`)).toBeChecked();
@@ -92,6 +106,21 @@ test('tasks are a board by stage, with what needs you above it and available tic
     await page.goto(`${base}/ui/tasks`);
     await board.getByRole('region', { name: 'Available, 3 tickets' }).getByRole('button', { name: 'Start task' }).first().click();
     await expect(page.locator('form')).toContainText('From Team board ticket FX-1.');
+    // Submitted, the task records its ticket and what it was given from it, and the ticket leaves Available.
+    await expect(page.locator('form')).toContainText('Its description and 2 comments');
+    await page.locator('form input[name="mode"][value="plan-approval"]').check();
+    await page.getByRole('button', { name: 'Submit task' }).click();
+    await page.getByRole('link', { name: 'Open task' }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'FX-1: Add a contact form' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'FX-1', exact: true })).toHaveAttribute('href', 'https://tracker.fixture.invalid/board?task=FX-1');
+    await expect(page.locator('body')).toContainText('From Team board ticket FX-1');
+    // The files are fetched when the task's turn comes; that is covered by tests/integration/ticket-files.test.ts.
+    started = /\/ui\/tasks\/([a-f0-9-]{36})/.exec(page.url())?.[1];
+    await page.getByText('Full request').click();
+    await expect(page.locator('.request-full pre')).toContainText('Please keep it to three fields.');
+    await page.screenshot({ path: join(shots, 'u11-task-from-ticket.png'), fullPage: true });
+    await page.goto(`${base}/ui/tasks`);
+    await expect(board.getByRole('region', { name: 'Available, 2 tickets' })).toBeVisible();
 
     // The list is one switch away and is remembered; a link to a state group opens the list.
     await page.goto(`${base}/ui/tasks`);
@@ -104,6 +133,8 @@ test('tasks are a board by stage, with what needs you above it and available tic
     await page.goto(`${base}/ui/tasks?group=finished`);
     await expect(page.getByRole('button', { name: /^Finished/ })).toHaveAttribute('aria-pressed', 'true');
   } finally {
+    // Leave the shared fixture without a waiting task of this workflow.
+    if (started) await fetch(`${base}/tasks/${started}/cancel`, { method: 'POST', headers, body: '{}' }).catch(() => undefined);
     await call(`/projects/website/integrations/trackers/${tool}`, 'DELETE');
     await call(`/trackers/${tool}`, 'DELETE');
   }

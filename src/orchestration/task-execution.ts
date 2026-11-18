@@ -98,7 +98,9 @@ export class TaskExecution {
       const handoff = ['qa', 'review'].includes(phase) ? this.implementationEvidence.get(cwd) : undefined;
       const quality = phase === 'review' ? this.qualityEvidence.get(cwd) : undefined;
       const observed = phase === 'implementation' ? new ImplementationEvidence(this.service.store.secrets) : undefined;
-      const result = await this.resources.run(id, signal, () => this.engines.get(this.engineOf(task, agent)).execute({ devagentsRules: taskRules(task), runId, phase, cwd, ...(context ? { workItemId: context.workItemId } : {}), prompt: `${agent.instructions}\n\n${reportDataInstructions}\n\n${setup ? `Environment preparation notes (including any baseline failures to address):\n${setup}\n\n` : ''}${handoff ? `${handoff}\n\n` : ''}${quality ? `QA report for this diff:\n${quality}\n\n` : ''}${prompt}`, agent, provider, schema: outputJsonSchema(schema), signal, timeoutMs: this.service.config.executionTimeoutMs }, event => {
+      // Setup prepares tools and needs no ticket; every other phase sees the ticket's pictures and text.
+      const material = task.ticket && phase !== 'setup' ? await this.service.ticketMaterial(id) : undefined;
+      const result = await this.resources.run(id, signal, () => this.engines.get(this.engineOf(task, agent)).execute({ devagentsRules: taskRules(task), runId, phase, cwd, ...(context ? { workItemId: context.workItemId } : {}), ...(material?.images.length ? { images: material.images } : {}), prompt: `${agent.instructions}\n\n${reportDataInstructions}\n\n${setup ? `Environment preparation notes (including any baseline failures to address):\n${setup}\n\n` : ''}${handoff ? `${handoff}\n\n` : ''}${quality ? `QA report for this diff:\n${quality}\n\n` : ''}${prompt}${material?.text ?? ''}`, agent, provider, schema: outputJsonSchema(schema), signal, timeoutMs: this.service.config.executionTimeoutMs }, event => {
         observed?.observe(event);
         this.service.store.record(id, 'progress', { runId, ...context, ...event });
       }));
@@ -155,6 +157,7 @@ export class TaskExecution {
       task = this.ensureActive(id, signal);
       task = this.service.store.checkpoint(id, task.version, { workspace, agents: roster }, 'Worktree created and agent definitions snapshotted');
     }
+    if (task.ticket) { await this.service.loadTicketFiles(id); task = this.ensureActive(id, signal); }
     this.prepared = { task, rules, agents, lead };
     return this.prepared;
   }

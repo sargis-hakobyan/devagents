@@ -16,6 +16,8 @@ import { evidenceMetadata } from './evidence.js';
 import type { ProjectIntegrationService } from '../integrations/service.js';
 import type { TrackerService } from '../integrations/trackers.js';
 import { availableTickets } from '../integrations/available.js';
+import { readTicket } from '../integrations/tickets.js';
+import { ticketPicture } from '../integrations/ticket-files.js';
 
 export async function accessToken(dataDir: string): Promise<string> {
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
@@ -37,6 +39,11 @@ async function body(req: IncomingMessage, limit = 256 * 1024): Promise<unknown> 
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
   catch { throw new AppError('invalid_json', 'Invalid JSON request'); }
+}
+/** A picture from a ticket is remote content: it is sent as the checked image type only, never sniffed, cached or allowed to run anything. */
+function picture(res: ServerResponse, file: { type: string; bytes: Buffer }): void {
+  res.writeHead(200, { ...securityHeaders, 'content-type': file.type, 'content-length': String(file.bytes.byteLength), 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox", 'content-disposition': 'inline' });
+  res.end(file.bytes);
 }
 function respond(res: ServerResponse, code: number, data: unknown, extra: Record<string, string>, secrets: readonly string[]): void {
   res.writeHead(code, { ...securityHeaders, 'content-type': 'application/json', 'cache-control': 'no-store', ...extra });
@@ -285,6 +292,18 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       if (req.method === 'GET' && path === '/storage') return send(res, 200, await service.storageStatus());
       // Tickets that match a project's rule and have no task yet. Read only; starting one is a normal task submission.
       if (req.method === 'GET' && path === '/tickets/available') return send(res, 200, await availableTickets(service.store, { integrations: options.integrations, trackers: options.trackers }));
+      // One ticket with its text and comments, for the submit form. Read only.
+      if (req.method === 'GET' && path === '/tickets/content') {
+        const query = z.strictObject({ projectId: ProjectId, source: z.string().min(1).max(60), key: z.string().min(1).max(60) }).parse(Object.fromEntries(url.searchParams));
+        return send(res, 200, await readTicket({ integrations: options.integrations, trackers: options.trackers }, service.store.project(query.projectId).id, query.source, query.key));
+      }
+      // A ticket's picture for the submit form, read from the tool now and not kept.
+      if (req.method === 'GET' && path === '/tickets/picture') {
+        const query = z.strictObject({ projectId: ProjectId, source: z.string().min(1).max(60), key: z.string().min(1).max(60), index: z.coerce.number().int().min(0).max(99) }).parse(Object.fromEntries(url.searchParams));
+        return picture(res, await ticketPicture({ integrations: options.integrations, trackers: options.trackers }, service.store.project(query.projectId).id, query.source, query.key, query.index));
+      }
+      const taskPicture = /^\/tasks\/([a-f0-9-]{36})\/ticket-files\/(\d{2}\.[a-z]{2,4})$/.exec(path);
+      if (req.method === 'GET' && taskPicture) return picture(res, await service.ticketPicture(taskPicture[1]!, taskPicture[2]!));
       if (req.method === 'GET' && path === '/tasks') {
         const states = z.array(State).max(State.options.length).parse(url.searchParams.getAll('state'));
         const project = url.searchParams.get('projectId'); const projectId = project ? ProjectId.parse(project) : undefined;

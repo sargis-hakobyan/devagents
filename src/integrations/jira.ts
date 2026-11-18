@@ -1,5 +1,6 @@
 import { AppError } from '../domain/errors.js';
 import type { JiraIntegration, JiraRule } from '../domain/integrations.js';
+import { TICKET_LIMITS, type TicketContent } from '../domain/tickets.js';
 import { list, record, remote, text, type Fetch, type RemoteResponse } from './http.js';
 
 export type JiraAccess = Pick<JiraIntegration, 'kind' | 'site' | 'email' | 'gateway'> & { token: string };
@@ -215,3 +216,43 @@ export async function jiraMatches(fetcher: Fetch, access: JiraAccess, jql: strin
   const count = counted?.status === 200 ? record(counted.json).count : undefined;
   return { count: typeof count === 'number' ? count : null, keys: keys(ok(found, access, 'search tickets')) };
 }
+
+/** Jira Cloud sends rich text as a document tree; this keeps its words and line structure and drops the formatting. */
+function plain(node: unknown): string {
+  if (typeof node === 'string') return node;
+  const item = record(node); const type = typeof item.type === 'string' ? item.type : ''; const attrs = record(item.attrs);
+  if (type === 'text') return typeof item.text === 'string' ? item.text : '';
+  if (type === 'hardBreak') return '\n';
+  if (type === 'mention' || type === 'emoji' || type === 'status') return typeof attrs.text === 'string' ? attrs.text : '';
+  if (type === 'inlineCard' || type === 'blockCard') return typeof attrs.url === 'string' ? attrs.url : '';
+  if (type === 'media' || type === 'mediaInline') return '[file]';
+  const inner = list(item.content).map(plain).join('');
+  if (type === 'listItem') return `- ${inner.trim()}\n`;
+  if (['paragraph', 'heading', 'codeBlock', 'blockquote', 'rule', 'tableRow', 'mediaSingle', 'mediaGroup', 'panel'].includes(type)) return `${inner}\n`;
+  if (type === 'tableCell' || type === 'tableHeader') return `${inner.trim()} | `;
+  return inner;
+}
+const prose = (value: unknown, limit: number) => plain(value).replace(/\r\n?/g, '\n').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').replace(/[^\S\n]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, limit);
+/** One ticket with its text, comments and files. Its files are served by Jira itself and need the same sign-in. */
+export async function jiraTicket(fetcher: Fetch, access: JiraAccess, key: string): Promise<TicketContent> {
+  const { api } = roots(access);
+  const response = await call(fetcher, access, `${api}/issue/${encodeURIComponent(key)}?fields=summary,description,comment,attachment`);
+  if (response.status === 404) throw new AppError('ticket_unreadable', `Jira has no ticket ${key} that this account can see.`, 404);
+  const issue = record(ok(response, access, 'read the ticket')); const fields = record(issue.fields);
+  const comments = list(record(fields.comment).comments).map(record).map(comment => {
+    const body = prose(comment.body, TICKET_LIMITS.comment); const by = text(record(comment.author).displayName, 120); const at = text(comment.created, 40);
+    return { body, ...(by ? { by } : {}), ...(at ? { at } : {}) };
+  }).filter(comment => comment.body).slice(-TICKET_LIMITS.comments);
+  const files = list(fields.attachment).map(record).slice(0, TICKET_LIMITS.files).flatMap(file => {
+    const name = text(file.filename, 200); if (!name) return [];
+    const type = text(file.mimeType, 100); const url = text(file.content, 500);
+    return [{ name, ...(type ? { type } : {}), ...(typeof file.size === 'number' && file.size >= 0 ? { size: file.size } : {}), ...(/^https:\/\/\S+$/.test(url) ? { url } : {}) }];
+  });
+  const found = text(issue.key, 60) || key; const title = text(fields.summary, 300);
+  if (!title) throw new AppError('ticket_unreadable', `Jira did not return the ticket ${key}.`, 422);
+  return { key: found, title, url: `${access.site}/browse/${encodeURIComponent(found)}`, description: prose(fields.description, TICKET_LIMITS.description), comments, files };
+}
+/** The header Jira's own file addresses are requested with. */
+export const jiraAuthorization = (access: JiraAccess): string => authorization(access);
+/** The hosts Jira serves this connection's files from. */
+export const jiraFileOrigins = (access: JiraAccess): string[] => [new URL(access.site).origin, ...(access.gateway ? ['https://api.atlassian.com'] : [])];

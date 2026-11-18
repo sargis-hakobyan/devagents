@@ -33,7 +33,7 @@ export async function logout(): Promise<void> {
 }
 
 export type TaskState = 'draft' | 'awaiting_mode' | 'planning' | 'awaiting_plan_approval' | 'ready' | 'running' | 'validating' | 'reviewing' | 'committing' | 'repairing' | 'awaiting_external_approval' | 'completed' | 'failed' | 'cancelled';
-export type TaskSummary = { scheduling?: TaskScheduling; id: string; projectId: string; /** Current name of the task's project. */ projectName?: string; state: TaskState; version: number; createdAt: string; updatedAt: string; sequence: number; request: string; mode?: 'autonomous' | 'plan-approval'; branch?: string; items?: number; commit?: string; error?: string; team?: TeamRef; limitations?: number; limitationOverflow?: number };
+export type TaskSummary = { scheduling?: TaskScheduling; id: string; projectId: string; /** Current name of the task's project. */ projectName?: string; state: TaskState; version: number; createdAt: string; updatedAt: string; sequence: number; request: string; mode?: 'autonomous' | 'plan-approval'; branch?: string; items?: number; commit?: string; error?: string; team?: TeamRef; limitations?: number; limitationOverflow?: number; /** The ticket the task was started from. */ ticket?: { source: string; name: string; key: string; url?: string; readAt?: string } };
 export type TeamRef = { id: string; revision: number; name: string };
 export type Command = { executable: string; args: string[] };
 export type WorkItem = { id: string; title: string; description: string; acceptanceCriteria: string[]; dependsOn: string[]; requiredCapabilities: string[]; projectId: string; branch: string; validation: Command[]; assignedAgent?: string; ownedPaths?: string[] };
@@ -92,7 +92,9 @@ export type JiraRule = { project: { key: string; name: string }; column?: { name
 export type JiraConnection = Shown & { savedToken: string; kind: 'cloud' | 'data-center'; site: string; email?: string; account: string; gateway?: string; expiresOn?: string; rule?: JiraRule };
 export type Integrations = { projectId: string; folder: { path: string; hostPath?: string; repository: string | null }; secrets: { mode: 'vault' | 'environment'; locked: boolean; githubVariable?: string; jiraVariable?: string }; savedTokens: { github: SavedToken[]; jira: SavedToken[] }; github: GitHubConnection | null; jira: JiraConnection | null };
 /** Tickets that match a project's pick-up rule and have no task yet; the board's Available column. */
-export type AvailableTicket = { source: { kind: 'jira' | 'tool'; name: string }; key: string; title: string; url?: string; projectId: string; projectName: string; why: string; start: 'manual' | 'auto' };
+export type AvailableTicket = { source: { kind: 'jira' | 'tool'; name: string; id: string }; key: string; title: string; url?: string; projectId: string; projectName: string; why: string; start: 'manual' | 'auto' };
+/** One ticket read from its tool for the submit form, and the request text made from it. */
+export type TicketRead = { ticket: { source: string; name: string; key: string; title: string; url?: string; description: string; comments: { by?: string; at?: string; body: string }[]; files: { name: string; type?: string; size?: number; kind?: 'image' | 'text' }[]; readAt: string }; request: string };
 export type AvailableTickets = { tickets: AvailableTicket[]; problems: { projectName: string; source: string; message: string }[]; checkedAt: string };
 /** Ticket tools reached through their MCP server: added once, then used by projects. */
 export type ToolArgument = { name: string; many: boolean };
@@ -101,6 +103,8 @@ export type ToolMapping = {
   result: { tickets: string; projects?: string; labels?: string; people?: string; account?: string };
   ticket: { key: string; title: string; column?: string; project?: string; assignee?: string; labels?: string; url?: string };
   columns: string[];
+  /** The tool that returns one ticket, and the argument that takes the ticket number. */
+  read?: { tool: string; key: string };
 };
 export type Tool = { id: string; name: string; url: string; server: { name: string; version: string }; account?: string; mapping?: ToolMapping; connectedAt: string; checkedAt: string; problem?: IntegrationProblem; state: ConnectionState; mapped: boolean; usedBy: { id: string; name: string }[]; variable?: string };
 export type ToolList = { secrets: { mode: 'vault' | 'environment'; locked: boolean }; trackers: Tool[] };

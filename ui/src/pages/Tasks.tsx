@@ -64,7 +64,7 @@ function TicketCard({ ticket }: { ticket: AvailableTicket }) {
   const { route } = useLocation();
   const start = () => {
     const request = `${ticket.key}: ${ticket.title}${ticket.url ? `\n\nTicket: ${ticket.url}` : ''}`;
-    try { sessionStorage.setItem(TICKET_PREFILL, JSON.stringify({ projectId: ticket.projectId, request, key: ticket.key, source: ticket.source.name, ...(ticket.url ? { url: ticket.url } : {}) })); } catch { /* the form opens with the project only */ }
+    try { sessionStorage.setItem(TICKET_PREFILL, JSON.stringify({ projectId: ticket.projectId, request, key: ticket.key, source: ticket.source.name, sourceId: ticket.source.id, ...(ticket.url ? { url: ticket.url } : {}) })); } catch { /* the form opens with the project only */ }
     route(`/ui/tasks/new?project=${encodeURIComponent(ticket.projectId)}`);
   };
   // The whole card opens the form; the ticket link and the button inside keep their own behaviour.

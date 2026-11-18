@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import type { ProjectIntegrations } from './integrations.js';
+import { TicketRef, type TaskTicket } from './tickets.js';
 
 export const Id = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 export const Mode = z.enum(['autonomous', 'plan-approval']);
@@ -130,8 +131,10 @@ export type ProviderSnapshot = { id: string; kind: Provider['kind']; auth: Provi
 export type Provider = z.infer<typeof Provider>;
 /** Everything execution needs, resolved at submission so later team or default edits cannot change this task. */
 export type TaskTeam = { id: string; revision: number; name: string; snapshotAt: string; members: TeamMember[]; providers: ProviderSnapshot[]; defaultModel?: string; modelPinned: boolean };
-export const TaskInput = z.strictObject({ projectId: ProjectId, request: z.string().min(1).max(20000), mode: Mode.optional(), acceptanceCriteria: z.array(z.string().min(1)).default([]), teamId: TeamId.optional() });
-export type Task = z.infer<typeof TaskInput> & {
+export const TaskInput = z.strictObject({ projectId: ProjectId, request: z.string().min(1).max(20000), mode: Mode.optional(), acceptanceCriteria: z.array(z.string().min(1)).default([]), teamId: TeamId.optional(), /** Set when the task is started from a ticket. */ ticket: TicketRef.optional() });
+export type Task = Omit<z.infer<typeof TaskInput>, 'ticket'> & {
+  /** The ticket this task was started from. The ticket stays the source of truth; the task keeps the text it was given and the link. */
+  ticket?: TaskTicket;
   /** Frozen service policy; absent on legacy tasks, which retain strict rules. */
   devagentsRules?: boolean;
   id: string; runId: string; state: TaskState; version: number;
@@ -143,5 +146,5 @@ export type Task = z.infer<typeof TaskInput> & {
   /** `limitations`: checks that could not run in this environment, reported rather than retried. */
   outcome?: { commit?: string; files?: string[]; summary?: string; error?: string; repairCycles: number; limitations?: string[]; limitationCount?: number; limitationsOmitted?: number; limitationOverflow?: number };
 };
-export type TaskSummary = Pick<Task, 'id' | 'projectId' | 'state' | 'version' | 'createdAt' | 'updatedAt'> & { sequence: number; request: string; mode?: Task['mode']; branch?: string; items?: number; commit?: string; error?: string; team?: { id: string; revision: number; name: string }; limitations?: number; limitationOverflow?: number };
+export type TaskSummary = Pick<Task, 'id' | 'projectId' | 'state' | 'version' | 'createdAt' | 'updatedAt'> & { sequence: number; request: string; mode?: Task['mode']; branch?: string; items?: number; commit?: string; error?: string; team?: { id: string; revision: number; name: string }; limitations?: number; limitationOverflow?: number; ticket?: TaskTicket };
 export type TaskEvent = { sequence: number; taskId: string; runId: string; actor: string; reason: string; state: TaskState; timestamp: string };

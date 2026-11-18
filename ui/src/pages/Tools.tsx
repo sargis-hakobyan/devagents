@@ -104,6 +104,16 @@ function MappingForm({ tool, first, onSaved }: { tool: Tool; first?: ToolInspect
                 <option value="">no argument · DevAgents filters the answer</option>{properties.filter(([, p]) => p.choices.length === 0).map(([name]) => <option key={name} value={name}>{name}</option>)}</select></>)}
           </div>
           {chosen?.description && <span class="hint">{chosen.name}: {chosen.description}</span>}
+          <div class="h">Reading one ticket</div>
+          <div class="integ-rule tool-map">
+            <label for={`${id}-read`}>Read a ticket with</label>
+            <select id={`${id}-read`} value={draft.read?.tool ?? ''} disabled={action.busy} onChange={e => set(d => { const { read: _, ...rest } = d; const name = (e.target as HTMLSelectElement).value; const single = Object.entries(inspection.tools.find(t => t.name === name)?.properties ?? {}).filter(([, p]) => !p.many).map(([key]) => key); return name ? { ...rest, read: { tool: name, key: single.find(key => /(id|key|number)$/i.test(key)) ?? single[0] ?? '' } } : rest; })}>
+              <option value="">found by DevAgents when needed</option>{inspection.tools.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}</select>
+            {draft.read && <><label for={`${id}-read-key`}>Ticket number goes in</label>
+              <select id={`${id}-read-key`} required value={draft.read.key} disabled={action.busy} onChange={e => set(d => ({ ...d, read: { tool: d.read!.tool, key: (e.target as HTMLSelectElement).value } }))}>
+                {Object.keys(inspection.tools.find(t => t.name === draft.read!.tool)?.properties ?? {}).map(name => <option key={name} value={name}>{name}</option>)}</select></>}
+          </div>
+          <span class="hint">Used when a task is started from a ticket, to load its description, comments and files.</span>
         </div>
         <div class="integ-col">
           <div class="h">Where the lists are in the answer</div>
