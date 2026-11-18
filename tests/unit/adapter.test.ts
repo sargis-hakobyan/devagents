@@ -178,6 +178,7 @@ process.stdin.resume(); process.stdin.on('end', () => {
     const args = await run('with-images', [{ path: '/data/ticket-files/t/01.png', mediaType: 'image/png' }, { path: '/data/ticket-files/t/02.jpg', mediaType: 'image/jpeg' }]);
     assert.deepEqual(args.slice(0, 6), ['exec', '--image', '/data/ticket-files/t/01.png', '--image', '/data/ticket-files/t/02.jpg', '-c']);
     assert.equal(args.at(-1), '-', 'the prompt still comes from standard input');
+    assert.equal(args[args.indexOf('model_reasoning_effort="medium"') - 1], '-c', 'the member effort (medium unless changed) reaches the CLI as a config override');
     assert.ok(!(await run('without-images')).includes('--image'));
   } finally { await rm(root, { recursive: true, force: true }); }
 });

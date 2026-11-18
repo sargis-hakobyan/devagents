@@ -20,7 +20,7 @@ test('Claude tools are sandboxed, credentials stay out of tool environments, and
   const fakeQuery: ClaudeQuery = async function* ({ options, prompt }) {
     assert.deepEqual(options.tools, []); assert.deepEqual(options.settingSources, []); assert.equal(options.permissionMode, 'dontAsk');
     assert.equal(options.strictMcpConfig, true); assert.equal(options.env!.ANTHROPIC_API_KEY, 'fixture-anthropic-secret');
-    assert.notEqual(options.cwd, cwd); assert.equal(options.model, 'fixture-claude-model');
+    assert.notEqual(options.cwd, cwd); assert.equal(options.model, 'fixture-claude-model'); assert.equal(options.effort, 'medium');
     for await (const message of prompt) assert.equal(message.type, 'user');
     const server = options.mcpServers!.devagents!; assert.equal(server.type, 'sdk'); if (server.type !== 'sdk') throw Error();
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

@@ -6,6 +6,7 @@ enabled: true
 engine: default
 provider: default
 model: default
+effort: medium
 capabilities: [planning, filesystem-read]
 instructionsFile: ./tech-lead.md
 delegation:

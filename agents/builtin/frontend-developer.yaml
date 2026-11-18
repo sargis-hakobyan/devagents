@@ -6,6 +6,7 @@ enabled: true
 engine: default
 provider: default
 model: default
+effort: medium
 capabilities: [implementation, frontend, filesystem-read, filesystem-write]
 instructionsFile: ./frontend-developer.md
 delegation:

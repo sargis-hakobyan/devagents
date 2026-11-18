@@ -109,6 +109,8 @@ Every save creates a new revision; a save or archive against an older revision i
 
 Submission freezes the team: `tasks submit --team <id>` (or `teamId` on `POST /tasks`), otherwise the project default, otherwise the legacy registry. The chosen revision, every member's instructions and permissions, and the concrete engine, provider and provider configuration (never credential values) are copied into the task inside the creation transaction, after the idempotency check, so a retried submission returns the original task even after the team changed. The runner reads only that snapshot: editing, archiving or reconfiguring afterwards cannot change queued, awaiting, running or recovering work. An archived default team fails submission with an actionable error rather than falling back silently. Plan validation remains a separate gate: a plan that assigns an agent outside the team fails before any worker starts. Old tasks and tasks without a team show "Legacy agent configuration"; their agents are snapshotted when the worktree is created, as before.
 
+`effort` is `low`, `medium` or `high` and defaults to `medium`. It is passed to Codex as `model_reasoning_effort` and to Claude as the Agent SDK `effort` option; whether a given model honours it is not checked. Team snapshots frozen before the setting existed carry no effort and run at the engine's own default.
+
 `model: default` is not a pinned model: the Codex runtime chooses at execution. Set `defaultModel` in `devagents.yaml` (or a member's model override) to pin team snapshots; without it the task records `modelPinned: false` and the UI says so. DevAgents never guesses a model ID or makes a discovery call.
 
 CLI: `teams list [--archived|--all]`, `teams templates`, `teams show <id>`, `teams check <file>`, `teams create <file>`, `teams edit <id> <file> --revision N`, `teams archive|restore <id> --revision N`, `teams duplicate <id> <name>`, `projects default-team <project> <team-id|none> --version N`. Team files are YAML or JSON with `name`, `description` and `members` (bounded: 12 members, 64,000 characters of instructions per member and 192,000 bytes in total; template copies are complete, and a roster over the budget is refused with the total stated, never trimmed).
@@ -205,6 +207,7 @@ description: Writes and reviews project documentation
 engine: codex
 provider: openai
 model: default
+effort: medium
 capabilities: [documentation, filesystem-read, filesystem-write]
 instructionsFile: ./technical-writer.md
 delegation:

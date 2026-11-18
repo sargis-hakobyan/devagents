@@ -311,7 +311,7 @@ export class TaskService {
   async templates(projectId?: string): Promise<TeamMember[]> {
     return (await this.agents(projectId)).map(a => this.memberTemplate(a));
   }
-  private memberTemplate(a: AgentDefinition): TeamMember { return { id: a.id, name: a.name, description: a.description, enabled: a.enabled, engine: a.engine, provider: a.provider, model: a.model, capabilities: [...a.capabilities], instructions: a.instructions, delegation: { ...a.delegation }, permissions: { readPaths: [...a.permissions.readPaths], writePaths: [...a.permissions.writePaths], allowCommands: a.permissions.allowCommands, allowPush: false }, concurrency: a.concurrency, origin: 'template', templateId: a.id }; }
+  private memberTemplate(a: AgentDefinition): TeamMember { return { id: a.id, name: a.name, description: a.description, enabled: a.enabled, engine: a.engine, provider: a.provider, model: a.model, effort: a.effort, capabilities: [...a.capabilities], instructions: a.instructions, delegation: { ...a.delegation }, permissions: { readPaths: [...a.permissions.readPaths], writePaths: [...a.permissions.writePaths], allowCommands: a.permissions.allowCommands, allowPush: false }, concurrency: a.concurrency, origin: 'template', templateId: a.id }; }
   /**
    * Resolves the team for a new task: explicit team, then project default, then the legacy registry
    * (no snapshot here; the runner snapshots legacy agents at worktree creation). Runs inside the

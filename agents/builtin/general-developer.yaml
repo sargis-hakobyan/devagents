@@ -6,6 +6,7 @@ enabled: true
 engine: default
 provider: default
 model: default
+effort: medium
 capabilities: [implementation, filesystem-read, filesystem-write]
 instructionsFile: ./general-developer.md
 delegation:

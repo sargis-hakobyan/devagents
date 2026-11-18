@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — Member editor with responsibilities, model and effort</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:14px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+button{font:inherit;color:inherit}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px}
+.head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px;border-bottom:1px solid #EAECF5}
+.who{display:flex;align-items:center;gap:12px;min-width:0}
+.avatar{flex:0 0 36px;width:36px;height:36px;border-radius:50%;background:#EAECF5;color:#231F4A;display:grid;place-items:center}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;font-size:12.5px;font-weight:600;white-space:nowrap;background:#EAECF5;color:#3B3F5E}
+.chip.new{background:#E3ECFF;color:#1C3F99}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 14px;border-radius:10px;border:1px solid #D1D4E4;background:#FFFFFF;font-weight:700;font-size:13px;cursor:pointer}
+.body{padding:20px;display:flex;flex-direction:column;gap:22px}
+.sec{display:flex;flex-direction:column;gap:12px}
+.sec-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5A5F78}
+.hint{font-size:12.5px;color:#5A5F78;font-weight:400}
+.seg{display:inline-flex;align-self:flex-start;padding:3px;border-radius:12px;background:#EAECF5;gap:2px;flex-wrap:wrap}
+.seg button{min-height:44px;padding:0 15px;border-radius:9px;border:0;background:transparent;font-size:13.5px;font-weight:700;color:#5A5F78;cursor:pointer}
+.seg button.on{background:#FFFFFF;color:#1C1A33;box-shadow:0 1px 2px rgba(28,26,51,.14)}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.tile{display:flex;flex-direction:column;gap:6px;text-align:left;padding:12px;border:1px solid #D1D4E4;border-radius:12px;background:#FFFFFF;cursor:pointer;min-height:136px}
+.tile b{font-size:14.5px;line-height:1.25}
+.tile .what{font-size:12.5px;color:#5A5F78;line-height:1.4}
+.tile-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:2px}
+.ico{width:32px;height:32px;border-radius:9px;background:#EAECF5;color:#231F4A;display:grid;place-items:center}
+.box{width:20px;height:20px;border-radius:6px;border:2px solid #B9BCD0;display:grid;place-items:center;color:#FFFFFF;background:#FFFFFF}
+.box svg{visibility:hidden}
+.tile.on{border-color:#231F4A;background:#F6F6FC;box-shadow:inset 0 0 0 1px #231F4A}
+.tile.on .ico{background:#231F4A;color:#FFB703}
+.tile.on .box{background:#231F4A;border-color:#231F4A}
+.tile.on .box svg{visibility:visible}
+.tile.locked{border-style:dashed;background:#FBFBFE;cursor:not-allowed}
+.tile.locked b{color:#5A5F78}
+.tile.locked .box{border-style:dashed}
+.note{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:10px;font-size:13px}
+.note.info{background:#EAECF5;color:#3B3F5E}
+.note.bad{background:#FDE8E6;color:#8A1C14}
+.scope{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;border:1px solid #E0E2EE;border-radius:10px;font-size:13px;flex-wrap:wrap}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+.sum{display:flex;flex-direction:column;gap:4px;padding:12px 14px;border-radius:10px;background:#F6F6FC;border:1px solid #EAECF5}
+.grid3{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) auto;gap:14px;align-items:start}
+.field{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:#3B3F5E;min-width:0}
+.field select{min-height:44px;border:1px solid #D1D4E4;border-radius:10px;padding:0 38px 0 12px;font:inherit;font-size:13.5px;font-weight:500;color:#1C1A33;appearance:none;-webkit-appearance:none;background:#FFFFFF url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%235A5F78' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E") no-repeat right 12px center/16px 16px;width:100%}
+.linkbtn{border:0;background:none;padding:0;color:#0B7A75;font-weight:700;font-size:12.5px;cursor:pointer;text-decoration:underline;min-height:24px}
+.fold{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13.5px;color:#3B3F5E;border-top:1px solid #EAECF5;padding-top:16px}
+</style>
+</helmet>
+<div style="width: 880px; min-height: 800px; box-sizing: border-box; padding: 28px; background: #F2F3FA">
+<div class="card">
+  <div class="head">
+    <div class="who">
+      <span class="avatar"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"/></svg></span>
+      <b style="font-size: 16px">Backend Developer</b>
+      <span class="chip">copied from backend-developer</span>
+    </div>
+    <button type="button" class="btn">Remove from team</button>
+  </div>
+  <div class="body">
+
+    <div class="sec">
+      <div class="sec-h"><span class="h">What this member does</span><span class="hint">A member either plans or does the work.</span></div>
+      <div class="tiles">
+        <button type="button" class="tile {{planCls}}" aria-pressed="{{planOn}}" onClick="{{togglePlan}}">
+          <span class="tile-top"><span class="ico"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/></svg></span><span class="box"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg></span></span>
+          <b>Plans work</b>
+          <span class="what">Splits a task into items and hands them to the others.</span>
+        </button>
+        <button type="button" class="tile {{implCls}}" aria-pressed="{{implOn}}" onClick="{{toggleImpl}}">
+          <span class="tile-top"><span class="ico"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"/></svg></span><span class="box"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg></span></span>
+          <b>Implements</b>
+          <span class="what">Receives items and changes files inside its write scope.</span>
+        </button>
+        <button type="button" class="tile {{reviewCls}}" aria-pressed="{{reviewOn}}" onClick="{{toggleReview}}">
+          <span class="tile-top"><span class="ico"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 14l2 2 4-4"/></svg></span><span class="box"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg></span></span>
+          <b>Reviews</b>
+          <span class="what">Checks another member's work, read-only. Never its own.</span>
+        </button>
+        <button type="button" class="tile {{testCls}}" aria-pressed="{{testOn}}" onClick="{{toggleTest}}">
+          <span class="tile-top"><span class="ico"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3M7.5 15h9"/></svg></span><span class="box"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg></span></span>
+          <b>Tests</b>
+          <span class="what">Runs the quality checks after the work is built.</span>
+        </button>
+      </div>
+
+      <sc-if value="{{implOn}}" hint-placeholder-val="{{true}}">
+        <div class="scope"><span>Can change files in <span class="mono">project:/src/**</span></span><button type="button" class="linkbtn">Change write scope</button></div>
+      </sc-if>
+      <sc-if value="{{none}}" hint-placeholder-val="{{false}}">
+        <div class="note bad"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex: 0 0 auto; margin-top: 1px"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></svg><span>Tick at least one. A member with nothing ticked is never picked for any work.</span></div>
+      </sc-if>
+
+      <div class="sum">
+        <span>Shows on the team as <b>{{roleLine}}</b></span>
+        <span class="mono" style="color: #5A5F78">{{sets}}</span>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><span class="h">Engine, model and effort</span></div>
+      <div class="grid3">
+        <label class="field"><span>Engine</span>
+          <select><option>claude-code</option><option>codex</option><option>Inherit (codex)</option></select>
+        </label>
+        <label class="field"><span>Model</span>
+          <select><option>Claude Fable 5.2 · claude-fable-5-2</option><option>Default · inherit engine settings</option><option>Claude Opus 5.5 · claude-opus-5-5</option><option>Claude Sonnet 5.5 · claude-sonnet-5-5</option><option>Claude Haiku 5.5 · claude-haiku-5-5</option><option>Custom model ID…</option></select>
+        </label>
+      <div class="field"><span id="effort-label">Effort</span>
+        <div class="seg" role="group" aria-labelledby="effort-label">
+          <button type="button" class="{{eLow}}" onClick="{{setELow}}">Low</button>
+          <button type="button" class="{{eMedium}}" onClick="{{setEMedium}}">Medium</button>
+          <button type="button" class="{{eHigh}}" onClick="{{setEHigh}}">High</button>
+        </div>
+        <span class="hint" style="max-width: 200px">{{effortHint}}</span>
+      </div>
+      </div>
+      <span class="hint">List loaded from Claude Code today at 09:14. <button type="button" class="linkbtn">Refresh list</button></span>
+    </div>
+
+    <div class="fold"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 4 4 4-4 4"/></svg>Advanced · extra capabilities, read and write scope, commands, concurrency</div>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":880,"height":800}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { plan: false, impl: true, review: false, test: false, custom: false, effort: 'medium' };
+  }
+  renderVals() {
+    const s = this.state;
+    const set = (plan, impl, review, test) => () => this.setState({ plan, impl, review, test, custom: false });
+    const count = [s.plan, s.impl, s.review, s.test].filter(Boolean).length;
+    let preset = 'custom';
+    if (!s.custom && count === 1) preset = s.plan ? 'lead' : s.impl ? 'dev' : s.review ? 'reviewer' : 'qa';
+    const on = (v) => (v ? 'on' : '');
+    const tile = (v) => (v ? 'on' : '');
+    const words = [];
+    if (s.plan) words.push('plans');
+    if (s.impl) words.push('implements');
+    if (s.review) words.push('reviews');
+    if (s.test) words.push('tests');
+    const caps = [];
+    if (s.plan) caps.push('planning');
+    if (s.impl) caps.push('implementation', 'filesystem-write');
+    if (s.review) caps.push('review');
+    if (s.test) caps.push('testing');
+    const hints = {
+      low: 'Quickest and cheapest; for small, clear items.',
+      medium: 'The default: balances speed and care.',
+      high: 'Thinks longest; for planning, review and hard changes.',
+    };
+    const toggle = (key) => () => this.setState(s.plan ? { plan: false, [key]: true, custom: false } : { [key]: !s[key], custom: false });
+    return {
+      planOn: s.plan, implOn: s.impl, reviewOn: s.review, testOn: s.test,
+      locked: s.plan, none: count === 0,
+      planCls: on(s.plan), implCls: tile(s.impl), reviewCls: tile(s.review), testCls: tile(s.test),
+      pLead: on(preset === 'lead'), pDev: on(preset === 'dev'), pReviewer: on(preset === 'reviewer'), pQa: on(preset === 'qa'), pCustom: on(preset === 'custom'),
+      setLead: set(true, false, false, false), setDev: set(false, true, false, false),
+      setReviewer: set(false, false, true, false), setQa: set(false, false, false, true),
+      setCustom: () => this.setState({ custom: true }),
+      togglePlan: () => this.setState(s.plan ? { plan: false, custom: false } : { plan: true, impl: false, review: false, test: false, custom: false }),
+      toggleImpl: toggle('impl'), toggleReview: toggle('review'), toggleTest: toggle('test'),
+      roleLine: words.length ? words.join(' · ') : 'nothing yet',
+      sets: count === 0 ? 'Nothing is saved for this member until one is ticked.'
+        : (s.plan ? 'Saves: hands out tasks, never receives them' : 'Saves: receives tasks') + ' · capabilities ' + caps.join(', '),
+      eLow: on(s.effort === 'low'), eMedium: on(s.effort === 'medium'), eHigh: on(s.effort === 'high'),
+      setELow: () => this.setState({ effort: 'low' }),
+      setEMedium: () => this.setState({ effort: 'medium' }), setEHigh: () => this.setState({ effort: 'high' }),
+      effortHint: hints[s.effort],
+    };
+  }
+}
+</script>
+</body>
+</html>

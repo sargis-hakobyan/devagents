@@ -63,6 +63,8 @@ export class CodexAdapter implements CodingEngine {
         '-c', `features.shell_tool=${permissions.allowCommands}`,
         '--ignore-user-config', '--ephemeral', '--strict-config', '--json', '--color', 'never',
         '--skip-git-repo-check', '--cd', request.cwd, '--output-schema', schema,
+        // Frozen snapshots from before the effort setting carry none and keep the runtime's own default.
+        ...(request.agent.effort ? ['-c', `model_reasoning_effort="${request.agent.effort}"`] : []),
         ...(request.agent.model === 'default' ? [] : ['--model', request.agent.model]), '-'
       ];
       const env = safeEnvironment(home, temp);

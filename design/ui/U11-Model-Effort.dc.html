@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DevAgents — Model list loaded from the engine, and effort states</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+body{margin:0;background:#F2F3FA;color:#1C1A33;font-family:"Plus Jakarta Sans",system-ui,sans-serif;font-size:14px;line-height:1.5}
+a{color:#0B7A75}a:hover{color:#075B57}
+button{font:inherit;color:inherit}
+button:focus-visible,input:focus-visible{outline:3px solid #231F4A;outline-offset:2px}
+.card{background:#FFFFFF;border:1px solid #E0E2EE;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+.h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#5A5F78}
+.hint{font-size:12.5px;color:#5A5F78;font-weight:400}
+.label{font-size:13px;font-weight:700;color:#3B3F5E}
+.trigger{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;border:1px solid #231F4A;border-radius:10px;padding:0 12px;background:#FFFFFF;font-weight:500;font-size:13.5px;box-shadow:0 0 0 3px #E3ECFF;cursor:pointer;width:100%;text-align:left}
+.menu{border:1px solid #E0E2EE;border-radius:12px;background:#FFFFFF;box-shadow:0 10px 28px rgba(28,26,51,.14);display:flex;flex-direction:column;overflow:hidden}
+.menu-h{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;background:#F6F6FC;border-bottom:1px solid #EAECF5;font-size:12.5px;color:#5A5F78}
+.opt{display:flex;align-items:center;gap:10px;min-height:48px;padding:6px 12px;border:0;border-top:1px solid #EAECF5;background:#FFFFFF;text-align:left;cursor:pointer;width:100%}
+.opt:first-of-type{border-top:0}
+.opt .txt{flex:1 1 auto;min-width:0;display:flex;flex-direction:column}
+.opt .txt b{font-size:13.5px;font-weight:700}
+.opt .id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:#5A5F78}
+.opt.sel{background:#F6F6FC}
+.tick{flex:0 0 18px;width:18px;height:18px;color:#231F4A}
+.chip{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap}
+.chip.new{background:#E3ECFF;color:#1C3F99}
+.chip.n{background:#EAECF5;color:#3B3F5E}
+.linkbtn{border:0;background:none;padding:0;color:#0B7A75;font-weight:700;font-size:12.5px;cursor:pointer;text-decoration:underline;min-height:24px}
+.note{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:10px;font-size:13px}
+.note svg{flex:0 0 auto;margin-top:1px}
+.note.warn{background:#FFF1DB;color:#7A4A00}
+.note.info{background:#EAECF5;color:#3B3F5E}
+.seg{display:inline-flex;align-self:flex-start;padding:3px;border-radius:12px;background:#EAECF5;gap:2px}
+.seg button{min-height:44px;padding:0 15px;border-radius:9px;border:0;background:transparent;font-size:13.5px;font-weight:700;color:#5A5F78;cursor:pointer}
+.seg button.on{background:#FFFFFF;color:#1C1A33;box-shadow:0 1px 2px rgba(28,26,51,.14)}
+.seg.off{background:#F6F6FC;border:1px dashed #D1D4E4}
+.seg.off button{cursor:not-allowed}
+.custom{min-height:44px;border:1px solid #D1D4E4;border-radius:10px;padding:0 12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:#1C1A33;width:100%;box-sizing:border-box}
+.resolved{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border-radius:10px;background:#F6F6FC;border:1px solid #EAECF5;font-size:13px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+</style>
+</helmet>
+<div style="width: 880px; min-height: 800px; box-sizing: border-box; padding: 28px; background: #F2F3FA; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start">
+
+  <div style="display: flex; flex-direction: column; gap: 14px">
+    <div class="card">
+      <span class="h">Model list, open</span>
+      <span class="label">Model</span>
+      <button type="button" class="trigger" aria-expanded="true"><span>Claude Fable 5.2 · <span class="mono">claude-fable-5-2</span></span><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#5A5F78" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 10 4-4 4 4"/></svg></button>
+      <div class="menu">
+        <div class="menu-h"><span>From Claude Code · loaded today 09:14</span><button type="button" class="linkbtn">Refresh</button></div>
+        <button type="button" class="opt"><span class="txt"><b>Default</b><span class="hint">Inherit the engine's own setting</span></span></button>
+        <button type="button" class="opt sel"><span class="txt"><b>Claude Fable 5.2</b><span class="id">claude-fable-5-2</span></span><span class="chip new">New</span><svg class="tick" role="img" aria-label="Selected" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg></button>
+        <button type="button" class="opt"><span class="txt"><b>Claude Opus 5.5</b><span class="id">claude-opus-5-5</span></span></button>
+        <button type="button" class="opt"><span class="txt"><b>Claude Sonnet 5.5</b><span class="id">claude-sonnet-5-5</span></span></button>
+        <button type="button" class="opt"><span class="txt"><b>Claude Haiku 5.5</b><span class="id">claude-haiku-5-5</span></span></button>
+        <button type="button" class="opt"><span class="txt"><b>Custom model ID…</b><span class="hint">Type any ID your account supports</span></span></button>
+      </div>
+      <span class="hint">"New" marks a model that appeared since the last time the list was loaded. The list shows what the engine offers; access is only proven by a run.</span>
+    </div>
+
+    <div class="card">
+      <span class="h">Custom model ID</span>
+      <label class="label" for="custom-id">Custom model ID</label>
+      <input id="custom-id" class="custom" value="claude-fable-5-3-preview">
+      <span class="hint">Not in the loaded list. It is saved exactly as typed and tried on the next run.</span>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 14px">
+    <div class="card">
+      <span class="h">List could not be loaded</span>
+      <div class="note warn"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 3 20h18zM12 10v5M12 17.5v.5"/></svg><span>Could not load models from Claude Code. Showing the built-in list from 3 Nov 2026, which may miss newer models. <button type="button" class="linkbtn">Try again</button></span></div>
+      <span class="hint">The saved model is never changed by a failed load. Custom model ID still works.</span>
+    </div>
+
+    <div class="card">
+      <span class="h">Effort</span>
+      <span class="label" id="eff-a">Effort <span class="hint">how deeply the model thinks before it answers</span></span>
+      <div class="seg" role="group" aria-labelledby="eff-a"><button type="button">Low</button><button type="button">Medium</button><button type="button" class="on">High</button></div>
+      <span class="hint">High thinks longest. Good for planning, review and hard changes. New members start at Medium.</span>
+    </div>
+
+    <div class="card">
+      <span class="h">Effort, when the model has no such setting</span>
+      <span class="label" id="eff-b">Effort</span>
+      <div class="seg off" role="group" aria-labelledby="eff-b"><button type="button" disabled>Low</button><button type="button" disabled>Medium</button><button type="button" disabled>High</button></div>
+      <div class="note info"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5v.5"/></svg><span>This model does not take an effort setting, so the engine decides.</span></div>
+    </div>
+
+    <div class="card">
+      <span class="h">What a run will use</span>
+      <div class="resolved"><span><b>Claude Fable 5.2</b> at <b>high</b> effort</span><span class="mono" style="color: #5A5F78">claude-code · claude-fable-5-2 · effort high</span></div>
+      <span class="hint">Tasks already started keep the team as it was when they began.</span>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":880,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

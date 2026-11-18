@@ -62,10 +62,12 @@ export const Permissions = z.strictObject({
   allowCommands: z.boolean().default(false),
   allowPush: z.literal(false).default(false),
 });
+/** How deeply a member's model reasons. Snapshots saved before this field existed carry none and run at the engine's own default. */
+export const Effort = z.enum(['low', 'medium', 'high']);
 export const Agent = z.strictObject({
   schemaVersion: z.literal(1), id: Id, name: z.string().min(1).max(100),
   description: z.string().min(1).max(4000), enabled: z.boolean().default(true),
-  engine: Id.default('default'), provider: Id.default('default'), model: z.string().min(1).default('default'),
+  engine: Id.default('default'), provider: Id.default('default'), model: z.string().min(1).default('default'), effort: Effort.default('medium'),
   capabilities: z.array(Id).min(1), instructionsFile: z.string().min(1),
   delegation: z.strictObject({ canReceiveTasks: z.boolean(), canDelegate: z.boolean() }),
   permissions: Permissions, concurrency: z.number().int().min(1).max(8).default(1),
@@ -109,7 +111,7 @@ export type Project = Omit<z.infer<typeof ProjectInput>, 'id' | 'name'> & { id: 
 export const TeamId = z.string().uuid();
 export const MemberInput = z.strictObject({
   id: Id, name: z.string().min(1).max(100), description: z.string().min(1).max(4000), enabled: z.boolean().default(true),
-  engine: Id.default('default'), provider: Id.default('default'), model: z.string().min(1).max(200).default('default'),
+  engine: Id.default('default'), provider: Id.default('default'), model: z.string().min(1).max(200).default('default'), effort: Effort.default('medium'),
   capabilities: z.array(Id).min(1).max(20), instructions: z.string().min(1).max(64000),
   delegation: z.strictObject({ canReceiveTasks: z.boolean(), canDelegate: z.boolean() }),
   permissions: Permissions, concurrency: z.number().int().min(1).max(8).default(1),

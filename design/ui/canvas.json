@@ -217,6 +217,28 @@
       "h": 1080,
       "title": "U10 · Tasks as a board: available tickets, stages, and what needs you",
       "expand": "fill"
+    },
+    "U11-Member-Role.dc.html": {
+      "x": 0,
+      "y": 23700,
+      "w": 880,
+      "h": 800,
+      "title": "U11 · Member editor: what the member does, model and effort",
+      "is_interactive": true
+    },
+    "U11-Member-States.dc.html": {
+      "x": 960,
+      "y": 23700,
+      "w": 880,
+      "h": 900,
+      "title": "U11 · Responsibilities: states"
+    },
+    "U11-Model-Effort.dc.html": {
+      "x": 1920,
+      "y": 23700,
+      "w": 880,
+      "h": 800,
+      "title": "U11 · Model list from the engine (design only) and effort states"
     }
   },
   "order": [
@@ -245,7 +267,10 @@
     "U7-GitHub-States.dc.html",
     "U8-Integrations.dc.html",
     "U9-Tools.dc.html",
-    "U10-Tasks-Board.dc.html"
+    "U10-Tasks-Board.dc.html",
+    "U11-Member-Role.dc.html",
+    "U11-Member-States.dc.html",
+    "U11-Model-Effort.dc.html"
   ],
   "notes": {
     "rowA": {
@@ -372,6 +397,20 @@
       "y": 22000,
       "w": 440,
       "text": "Needs you is a band above the board, not a column: a decision can be due before planning (mode choice) or after it (plan approval), so those tasks are lifted out of the board to the top, each with one button, and return to the board once decided. The flow below has six columns. Available holds tickets from Jira and the connected ticket tools that match a project's pick-up rule and are not started; a card names its source and ticket number and offers Start task, or says it starts on its own. Then Planning (draft, planning), Queued (ready), Working (running, validating, reviewing, repairing, committing; the chip names the step), Done (completed), Stopped (failed, cancelled). A task that came from a ticket keeps the ticket number on its card. Cards are not dragged. The List view stays behind the Board / List switch. Needs backend work that does not exist yet: reading the matching tickets for Available and starting a task from one. Available has a pin in its top right corner: pinned, it stays open in the row; not pinned, it folds to a narrow strip with its name and count and opens over the board while the mouse is on it. The choice is remembered per browser.",
+      "fill": "blue"
+    },
+    "rowU11": {
+      "x": 0,
+      "y": 23400,
+      "text": "U11 — Team member: responsibilities in place of the role dropdown, effort, and a model list read from the engine",
+      "kind": "title1",
+      "maxW": 10000
+    },
+    "legendU11": {
+      "x": 2880,
+      "y": 23700,
+      "w": 440,
+      "text": "The Worker / Planner dropdown becomes four tiles: Plans work, Implements, Reviews, Tests. They write the fields the backend already selects on (delegation and the planning, implementation, review and testing capabilities), so no new role field exists. Planning is exclusive because a member cannot both delegate and receive tasks. Effort is Low, Medium or High and starts at Medium. Implemented on the Teams page on 2026-11-18. Not implemented: loading the model list from the engine with Refresh and the New badge (third board, and the hint under Model on the first); the model list is still the built-in one.",
       "fill": "blue"
     }
   },
