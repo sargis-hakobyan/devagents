@@ -21,7 +21,7 @@ export function outputJsonSchema(schema: z.ZodType): Record<string, unknown> {
 
 export const ImplementationOutput = z.strictObject({
   summary: z.string().min(1),
-  limitations: z.array(Limitation).max(10).default([]).describe('Checks that could not run in this environment (missing browser, library, network, tool), each with its reason. Tried once at most; not failures.'),
+  limitations: z.array(Limitation).max(10).default([]).describe('Checks that could not run in this environment (missing browser, library, network, tool), each with its reason. Tried once at most; not failures.'),  skillsUsed: z.array(z.string().min(1).max(64)).max(40).default([]).describe('Names of the project skills you read and followed for this work. Empty when none applied or the project has none.'),
 });
 export const SetupOutput = z.strictObject({ ready: z.boolean(), summary: z.string().min(1), limitations: z.array(Limitation).max(10).default([]).describe('Optional checks unavailable here, not failures of declared validation. Report newly noticed limitations only.') });
 export const QualityOutput = z.strictObject({

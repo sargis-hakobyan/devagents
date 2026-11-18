@@ -194,6 +194,8 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
         const change = z.strictObject({ name: z.unknown(), expectedVersion: z.number().int().nonnegative() }).parse(await body(req));
         return send(res, 200, service.renameProject(projectName[1]!, change.name, change.expectedVersion));
       }
+      const projectSkillList = /^\/projects\/([a-z0-9][a-z0-9-]{0,63})\/skills$/.exec(path);
+      if (req.method === 'GET' && projectSkillList) return send(res, 200, await service.projectSkills(projectSkillList[1]!));
       const projectArchive = /^\/projects\/([a-z0-9][a-z0-9-]{0,63})\/archive$/.exec(path);
       if (req.method === 'POST' && projectArchive) {
         const change = z.strictObject({ archived: z.boolean(), expectedVersion: z.number().int().nonnegative() }).parse(await body(req));

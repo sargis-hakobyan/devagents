@@ -2,6 +2,7 @@ import type { EngineRegistry } from '../engines/registry.js';
 import { priceFor } from '../domain/usage.js';
 import { validationEvidence } from './validation-evidence.js';
 import { ImplementationEvidence } from './implementation-evidence.js';
+import { projectSkills, skillInstructions, type ProjectSkill } from '../workspace/skills.js';
 import { describeLimitations, implementationLimitationInstructions, LimitationLedger, planningLimitationInstructions, redactReportProse, reportDataInstructions, reviewLimitationInstructions } from '../domain/limitations.js';
 import { executionAgent, taskRules, validationInstructions } from '../domain/execution-policy.js';
 import { randomUUID } from 'node:crypto';
@@ -41,6 +42,7 @@ export class TaskExecution {
   private readonly setupRecoveries = new Set<string>();
   private readonly setupSummaries = new Map<string, string>();
   private readonly implementationEvidence = new Map<string, string>();
+  private projectSkills?: Promise<ProjectSkill[]>;
   private readonly qualityEvidence = new Map<string, string>();
   private prepared: { task: Task; rules: boolean; agents: AgentDefinition[]; lead: AgentDefinition } | undefined;
   constructor(readonly id: string, private readonly service: TaskService, private readonly engines: EngineRegistry,
@@ -100,7 +102,13 @@ export class TaskExecution {
       const observed = phase === 'implementation' ? new ImplementationEvidence(this.service.store.secrets) : undefined;
       // Setup prepares tools and needs no ticket; every other phase sees the ticket's pictures and text.
       const material = task.ticket && phase !== 'setup' ? await this.service.ticketMaterial(id) : undefined;
-      const result = await this.resources.run(id, signal, () => this.engines.get(this.engineOf(task, agent)).execute({ devagentsRules: taskRules(task), runId, phase, cwd, ...(context ? { workItemId: context.workItemId } : {}), ...(material?.images.length ? { images: material.images } : {}), prompt: `${agent.instructions}\n\n${reportDataInstructions}\n\n${setup ? `Environment preparation notes (including any baseline failures to address):\n${setup}\n\n` : ''}${handoff ? `${handoff}\n\n` : ''}${quality ? `QA report for this diff:\n${quality}\n\n` : ''}${prompt}${material?.text ?? ''}`, agent, provider, schema: outputJsonSchema(schema), signal, timeoutMs: this.service.config.executionTimeoutMs }, event => {
+      // Read once per task from the commit it started at; every later run and engine gets the same list.
+      this.projectSkills ??= projectSkills(task.workspace!.path, task.workspace!.baseSha, signal).then(found => {
+        this.service.store.record(id, 'project-skills', { skills: found.skills.map(s => s.name), ...(found.error ? { error: found.error } : {}) });
+        return found.skills;
+      });
+      const offered = await this.projectSkills; const skills = skillInstructions(offered, phase);
+      const result = await this.resources.run(id, signal, () => this.engines.get(this.engineOf(task, agent)).execute({ devagentsRules: taskRules(task), runId, phase, cwd, ...(context ? { workItemId: context.workItemId } : {}), ...(material?.images.length ? { images: material.images } : {}), prompt: `${agent.instructions}\n\n${reportDataInstructions}\n\n${skills ? `${skills}\n\n` : ''}${setup ? `Environment preparation notes (including any baseline failures to address):\n${setup}\n\n` : ''}${handoff ? `${handoff}\n\n` : ''}${quality ? `QA report for this diff:\n${quality}\n\n` : ''}${prompt}${material?.text ?? ''}`, agent, provider, schema: outputJsonSchema(schema), signal, timeoutMs: this.service.config.executionTimeoutMs }, event => {
         observed?.observe(event);
         this.service.store.record(id, 'progress', { runId, ...context, ...event });
       }));
@@ -114,6 +122,9 @@ export class TaskExecution {
           this.persistLimitations(id);
         }
       }
+      // Kept as its own small record so the task page can show it even when a long report is shortened. Names the project does not have are dropped.
+      const used = phase === 'implementation' ? ((output as { skillsUsed?: string[] }).skillsUsed ?? []).filter(name => offered.some(s => s.name === name)) : [];
+      if (used.length) this.service.store.record(id, 'skills-used', { runId, agentId: agent.id, ...(context ? { workItemId: context.workItemId } : {}), skills: [...new Set(used)] });
       if (observed) this.implementationEvidence.set(cwd, observed.render(output));
       this.service.store.record(id, 'run-completed', { runId, phase, ...context, output, usage: result.usage });
       return output;

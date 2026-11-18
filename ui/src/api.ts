@@ -53,6 +53,8 @@ export type Diagnostic = { level: 'error' | 'warning'; code: string; message: st
 export type Readiness = { ready: boolean; diagnostics: Diagnostic[] };
 export type TeamSummary = { id: string; name: string; description: string; revision: number; archived: boolean; createdAt: string; updatedAt: string; members: number; enabledMembers: number; readiness: Readiness };
 export type TeamDetail = TeamDraft & { id: string; revision: number; archived: boolean; createdAt: string; updatedAt: string; readiness: Readiness; revisions: { revision: number; createdAt: string; reason: string }[] };
+/** The skills a project keeps in `.agents/skills`, as a task submitted now would be told about them. */
+export type ProjectSkills = { skills: { name: string; description: string; path: string }[]; error?: string };
 /** A model list read from an engine on request; `newIds` appeared since the load before. */
 export type ModelCatalog = { engine: string; models: { id: string; name: string }[]; loadedAt: string; newIds: string[] };
 export type TeamOptions = { platform: string; defaults: { devagentsRules: boolean; engine: string; provider: string; model: string | null }; capabilities: string[]; engines: { id: string; executable: boolean; reason: string | null }[]; providers: { id: string; kind: string; auth: string; engines?: string[]; executable: boolean; reason: string | null }[]; limits: { members: number; instructions: number; instructionBytes: number; capabilities: number } };

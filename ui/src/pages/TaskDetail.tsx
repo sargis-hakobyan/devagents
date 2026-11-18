@@ -48,6 +48,10 @@ export function TaskDetailPage({ id }: { id: string }) {
   // A request started from a ticket is long: its first line is the heading and the whole text is one click away.
   const firstLine = task.request.split('\n', 1)[0]!.trim(); const requestTitle = firstLine.length > 200 ? `${firstLine.slice(0, 200)}…` : firstLine;
   const requestRest = task.request.trim() !== requestTitle;
+  // Which project skills the team was told about, and which the implementers say they followed. Older tasks have no record.
+  const skillRecord = evidence.rows.filter(e => e.kind === 'project-skills').at(-1);
+  const names = (value: unknown) => Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
+  const taskSkills = skillRecord ? { found: names(evidenceFacts(skillRecord).skills), error: typeof evidenceFacts(skillRecord).error === 'string' ? evidenceFacts(skillRecord).error as string : '', used: [...new Set(evidence.rows.filter(e => e.kind === 'skills-used').flatMap(e => names(evidenceFacts(e).skills)))] } : undefined;
   // What was fetched from the ticket for this task, from the task's own record.
   const fetched = evidence.rows.filter(e => e.kind === 'ticket-files').at(-1);
   const ticketFiles = fetched ? (() => {
@@ -81,6 +85,7 @@ export function TaskDetailPage({ id }: { id: string }) {
             </div>}
             {requestRest && <details class="request-full"><summary>Full request</summary><pre class="wrap-anywhere">{task.request}</pre></details>}
             <div class="muted" style={{ fontSize: '13.5px' }}>Project <ProjectRef id={task.projectId} name={task.projectName ?? task.projectId} archived={task.projectArchived === true} /> · Team: {task.team ? <><a href={`/ui/teams/${task.team.id}`}><b>{task.team.name}</b></a> revision {task.team.revision} · {task.team.members.filter(m => m.enabled).length} enabled members frozen at submission{task.team.modelPinned ? '' : ' · model: runtime default (not pinned)'}</> : <><b>Legacy agent configuration</b>{task.agents ? ` (${task.agents.length} agents snapshotted at worktree creation)` : ' (snapshotted when the worktree is created)'}</>}{task.workspace && tab !== 'plan' && <> · Branch <span class="mono">{task.workspace.branch}</span></>}</div>
+            {taskSkills && <div class={taskSkills.error ? 'diag-error' : 'muted'} style={{ fontSize: '13.5px' }}>{taskSkills.error ? `⚠ ${taskSkills.error} The team works without project skills.` : taskSkills.found.length === 0 ? 'Project skills: none found. The team works from role instructions and the request only.' : <>Project skills offered: <b class="wrap-anywhere">{taskSkills.found.join(', ')}</b> · {taskSkills.used.length ? <>reported as followed: <b class="wrap-anywhere">{taskSkills.used.join(', ')}</b></> : 'none reported as followed'}</>}</div>}
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {renderActions()}

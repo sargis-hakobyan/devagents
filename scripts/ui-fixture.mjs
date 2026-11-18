@@ -39,6 +39,8 @@ async function repo(name, files) {
 }
 const test = (id, expected) => `const test=require('node:test'),assert=require('node:assert/strict');test('${id}',()=>assert.equal(require('./${id}/${id}.cjs')(),'${expected}'));\n`;
 const fixtureProject = await repo('fixture', {
+  // One project skill, so the project and task pages have something to show.
+  '.agents/skills/house-style/SKILL.md': '---\nname: house-style\ndescription: Use for every code change in this project. Covers naming and test layout.\n---\n# House style\n\nKeep modules small and name tests after the module.\n',
   'README.md': '# Fixture project\n', '.gitignore': 'node_modules/\n*.local.cjs\n',
   'greeting.cjs': "module.exports = () => 'broken';\n",
   'greeting.test.cjs': "const test = require('node:test'); const assert = require('node:assert/strict'); const greet = require('./greeting.cjs'); test('greeting', () => assert.equal(greet(), 'hello'));\n",

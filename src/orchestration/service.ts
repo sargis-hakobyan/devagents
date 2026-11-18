@@ -8,7 +8,8 @@ import { Config, Mode, ProjectName, TaskInput, TeamInput, newProjectId, TEAM_INS
 import { terminalStates } from '../domain/lifecycle.js';
 import { AppError } from '../domain/errors.js';
 import { redactReportProse } from '../domain/limitations.js';
-import { folderIdentity, inspectProject, WorkspaceManager } from '../workspace/git.js';
+import { folderIdentity, inspectProject, mainCommit, WorkspaceManager } from '../workspace/git.js';
+import { projectSkills, type ProjectSkills } from '../workspace/skills.js';
 import { builtinCapabilities, builtinDirectory, loadRegistry } from '../agents/registry.js';
 import { providerExecutable, resolveEngine, resolveProviderId, teamReadiness, type RuntimeSupport } from '../domain/readiness.js';
 import { validatePlan } from '../domain/plan.js';
@@ -288,6 +289,12 @@ export class TaskService {
     return this.store.teams(filter).map(t => ({ id: t.id, name: t.name, description: t.description, revision: t.revision, archived: t.archived, createdAt: t.createdAt, updatedAt: t.updatedAt, members: t.members.length, enabledMembers: t.members.filter(m => m.enabled).length, readiness: teamReadiness(t.members, this.support) }));
   }
   team(id: string) { return { ...this.withReadiness(this.store.team(id)), revisions: this.store.teamRevisions(id) }; }
+  /** The skills a task submitted now would be told about: those on the project's main commit. */
+  async projectSkills(projectId: string): Promise<ProjectSkills> {
+    const project = this.store.project(projectId);
+    try { return await projectSkills(project.path, await mainCommit(project.path)); }
+    catch { return { skills: [], error: 'The project folder could not be read.' }; }
+  }
   /** What the member editor may offer, with the reason for everything it must disable. */
   teamOptions() {
     const executable = (id: string) => this.executableEngines.has(id);

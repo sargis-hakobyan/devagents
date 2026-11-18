@@ -30,7 +30,7 @@ export async function git(cwd: string, args: string[], trim = true, maxBuffer = 
   }
   return trim ? stdout.trim() : stdout;
 }
-async function mainCommit(path: string): Promise<string> {
+export async function mainCommit(path: string): Promise<string> {
   try { return await git(path, ['rev-parse', '--verify', 'refs/heads/main^{commit}']); }
   catch (error) {
     if ((error as { code?: unknown }).code === 128) throw new AppError('main_branch_missing', 'The project needs a local main branch before starting tasks. Create or update main from the intended upstream, then retry.');

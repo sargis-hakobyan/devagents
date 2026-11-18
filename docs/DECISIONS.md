@@ -544,3 +544,19 @@ The owner expected the **Refresh list** link from the U11 board and asked for it
 - **Failures show a fixed message.** Engine output is never passed to the browser because it can quote account details.
 - **Verified** on 2026-11-18 with the owner's authorization, by one request per engine inside the running container (Codex CLI 0.160.1 with ChatGPT sign-in, Claude with a subscription sign-in): both returned their lists. Whether either request counts against an allowance was not measured. The shipped code path was exercised with fixtures, not against the live services.
 - **Not built:** limiting Effort to the levels a model reports. Both engines reported low, medium and high for every model, so there was nothing to restrict.
+
+## Skills belong to the project, and members are told to use them — 2026-11-18
+
+The owner asked whether DevAgents should rely on the skills installed for Claude and Codex on the machine or offer its own skill editing. After looking at a real project that keeps three skills in `.agents/skills`, the owner decided: DevAgents keeps no skills; all skills live in the project's repository; they are trusted; and Claude and Codex members must be told to use them.
+
+- **One source: `.agents/skills/<folder>/SKILL.md` in the project.** Skills in a home folder stay unused: members run isolated from them, the container has none, and the two engines keep them in different places. `.claude/skills` is not read.
+- **DevAgents lists the skills itself, in every member prompt.** Name, description and file path, the same for every engine; the member opens the file when a skill matches its work. Neither engine's own skill loading is used: the Claude adapter runs without native tools, and what Codex discovers in a project folder under our flags was not tested.
+- **Project skills are trusted** and the prompt says so explicitly, as an exception to the standing rule that repository text is untrusted data. There is no per-project switch; the owner rejected one. The exception covers the skill files only.
+- **Read from the commit the task started at,** so a task cannot rewrite the guidance it works under.
+- **Listed always, read when relevant.** Putting every skill's full text into every run would cost more and steer members that should not be steered by it. All members get the same list; planning, implementation, QA and review each get one sentence on what to do with it. Setup gets none.
+- **Use is reported and checked.** An implementer names the skills it followed in `skillsUsed`, which reaches QA and review with its report. A reviewer treats a clear violation of an applicable skill as a finding, so the normal repair cycle enforces it. An instruction alone can be ignored by a model; this is the backstop.
+- **Precedence:** the task request, then a project skill, then the member's general instructions.
+- **A project or task without skills runs as before,** and the owner asked that this be visible. The project page lists the skills found on `main` (read-only), or says that none were found. Each task records the skills it offered (`project-skills`) and the ones its implementers reported following (`skills-used`, limited to names the project has), shown under the task's project line. A skills folder that cannot be read is recorded and shown as a warning; the task still runs, without skills.
+- **Not built:** recommending skills from the internet or from repeated review findings, editing skills in the browser, and telling members which skills cannot work here. Skills that need network access or credentials are covered by one sentence asking the member to skip that part and say so.
+- **Not verified with a live model:** the prompts were checked with the fake engine. No run confirmed that a real model opens and follows a matching skill.
+

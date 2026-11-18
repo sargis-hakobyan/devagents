@@ -1,5 +1,5 @@
 import { useRef, useState } from 'preact/hooks';
-import { api, resources, SignedOutError, type Project } from '../api';
+import { api, resources, SignedOutError, type Project, type ProjectSkills } from '../api';
 import { ProjectIntegrations } from '../components/Integrations';
 import { Card, Chip, ErrorNote, Skeleton } from '../components/ui';
 import { formatTime } from '../format';
@@ -77,6 +77,19 @@ function ArchiveProject({ project }: { project: Project }) {
 }
 
 /** One project: its name, where it lives, what it is connected to, and how to take it out of use. */
+/** Read-only: skills are kept and edited in the project's repository, never here. */
+function ProjectSkillsCard({ projectId }: { projectId: string }) {
+  const found = usePoll(`project-skills:${projectId}`, () => api<ProjectSkills>(`/projects/${projectId}/skills`), 60000);
+  const skills = found.data?.skills ?? [];
+  return <Card title={found.data && !found.data.error ? `Skills · ${skills.length}` : 'Skills'}><div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+    {!found.data ? (found.error ? <ErrorNote message={found.error} /> : <Skeleton rows={2} label="Loading skills" />)
+      : found.data.error ? <div class="note warn" role="alert">⚠ <b>Skills could not be read.</b> {found.data.error} Tasks run without them until this is fixed.</div>
+      : skills.length === 0 ? <span style={{ fontSize: '13.5px' }}><b>No skills found.</b> Team members work from their role instructions and the task request only.</span>
+      : <ul class="skill-list">{skills.map(s => <li key={s.path}><b class="wrap-anywhere">{s.name}</b><span class="muted wrap-anywhere">{s.description}</span></li>)}</ul>}
+    <span class="hint">Skills live in the project's repository: one folder per skill in <span class="mono">.agents/skills/</span> with a <span class="mono">SKILL.md</span>. Every team member is told about the ones committed on <span class="mono">main</span> and reads those that match its work. Add or change them in the repository, not here.</span>
+  </div></Card>;
+}
+
 export function ProjectPage({ id }: { id: string }) {
   const projects = useAllProjects();
   const status = usePoll(resources.status.key, resources.status.load, resources.status.intervalMs).data;
@@ -97,6 +110,7 @@ export function ProjectPage({ id }: { id: string }) {
       <RestoreButton project={project} primary />
     </div></Card> : <>
       <ProjectIntegrations projectId={project.id} />
+      <ProjectSkillsCard projectId={project.id} />
       <ArchiveProject project={project} />
     </>}
   </>;
