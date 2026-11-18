@@ -13,6 +13,7 @@ import type { DispatchClaim, DispatchRecord } from '../domain/dispatch.js';
 import type { ProjectIntegrations } from '../domain/integrations.js';
 import type { Tracker } from '../domain/trackers.js';
 import type { TaskTicket, TicketRef } from '../domain/tickets.js';
+import type { ModelCatalog } from '../domain/model-catalog.js';
 
 export class Store {
   private readonly db: DatabaseSync;
@@ -70,6 +71,7 @@ export class Store {
     if (version < 6) this.db.exec(`
       BEGIN IMMEDIATE;
       CREATE TABLE IF NOT EXISTS task_concurrency (id INTEGER PRIMARY KEY CHECK (id=1), max_concurrent_tasks INTEGER NOT NULL CHECK (max_concurrent_tasks BETWEEN 1 AND 8), version INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS model_catalogs (engine TEXT PRIMARY KEY, data TEXT NOT NULL);
       PRAGMA user_version=6;
       COMMIT;
     `);
@@ -132,6 +134,14 @@ export class Store {
       if ((this.taskConcurrency()?.version ?? 0) !== expectedVersion) throw new AppError('stale_settings', 'Task concurrency changed; reload before saving again', 409);
       this.db.prepare(`INSERT INTO task_concurrency VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET max_concurrent_tasks=excluded.max_concurrent_tasks, version=excluded.version`).run(maxConcurrentTasks, expectedVersion + 1);
     });
+  }
+  /** The model list last loaded from an engine; absent until someone loads it. */
+  modelCatalog(engine: string): ModelCatalog | undefined {
+    const row = this.db.prepare('SELECT data FROM model_catalogs WHERE engine=?').get(engine) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) as ModelCatalog : undefined;
+  }
+  saveModelCatalog(catalog: ModelCatalog): void {
+    this.db.prepare('INSERT INTO model_catalogs VALUES (?, ?) ON CONFLICT(engine) DO UPDATE SET data=excluded.data').run(catalog.engine, JSON.stringify(catalog));
   }
   close(): void { this.db.close(); }
   private transaction<T>(fn: () => T): T {

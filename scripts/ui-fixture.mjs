@@ -19,6 +19,7 @@ import { git } from '../dist/workspace/git.js';
 import { ProjectIntegrationService } from '../dist/integrations/service.js';
 import { TrackerService } from '../dist/integrations/trackers.js';
 import { downloadTicketFiles } from '../dist/integrations/ticket-files.js';
+import { ModelCatalogService } from '../dist/engines/model-catalog.js';
 import { fakeTracker } from './fake-tracker.mjs';
 
 const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : fallback; };
@@ -126,10 +127,16 @@ const integrations = new ProjectIntegrationService(store, fixtureSecrets, { fetc
 // A made-up ticket tool with an MCP server; its token is the one exported by fake-tracker.mjs.
 const trackers = new TrackerService(store, fixtureSecrets, { fetch: fakeTracker().fetcher });
 service.attachTicketFiles((task, directory) => downloadTicketFiles({ integrations, trackers }, task.projectId, task.ticket, directory));
+// Made-up engine answers: the second Codex load gains a model, and Claude cannot be reached.
+let codexLoads = 0;
+const models = new ModelCatalogService(store, {
+  codex: async () => [{ id: 'gpt-6.1-terra', name: 'GPT-6.1 Terra' }, { id: 'gpt-6-astra', name: 'GPT-6 Astra' }, ...(codexLoads++ ? [{ id: 'gpt-fixture-next', name: 'GPT Fixture Next' }] : [])],
+  'claude-code': async () => { throw new Error('fixture: unreachable'); },
+});
 const token = await accessToken(data); const sessions = new BrowserSessions();
 // Synthetic availability only: browser tests never inspect a host credential store or runtime login.
 const status = { service: { version: '0.1.0-fixture', host: '127.0.0.1', port, platform: process.platform, node: process.version, dataDir: data, executionEnabled: true, startedAt: new Date().toISOString(), checkedAt: new Date().toISOString() }, codex: { installed: true, version: 'fixture', signedIn: false, credentialStore: 'file', vaultLocked: false, modelAccessVerified: false }, claude: { installed: false, enabled: false, note: 'Adapter planned for M4' }, defaults: { devagentsRules: config.devagentsRules, engine: 'codex', provider: 'openai', model: null, providers: [{ id: 'openai', kind: 'openai', auth: 'login', apiKeyConfigured: null, executable: true }] }, limits: statusLimits(config), fixture: { label } };
-const server = createApi(service, token, { sessions, uiRoot: resolve('dist/ui'), status: async () => status, integrations, trackers });
+const server = createApi(service, token, { sessions, uiRoot: resolve('dist/ui'), status: async () => status, integrations, trackers, models });
 
 // Representative tasks. Each completes (or stops) through the real orchestrator against real Git worktrees.
 // The service starts listening only after they exist, so /health means the fixture is complete.

@@ -160,6 +160,9 @@ fieldset:disabled .field input, fieldset:disabled .field select, fieldset:disabl
 .engine-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 12px; align-items: start; }
 .effort-field .hint { max-width: 190px; }
 @media (max-width: 900px) { .engine-row { grid-template-columns: minmax(0, 1fr); } .effort-field .hint { max-width: none; } }
+.link-button { border: 0; background: none; padding: 0; font: inherit; font-weight: 700; color: var(--link); text-decoration: underline; cursor: pointer; }
+.link-button:hover { color: var(--link-hover); }
+.link-button:disabled { color: var(--muted); cursor: default; text-decoration: none; }
 .effort-seg { display: inline-flex; align-self: flex-start; padding: 3px; border-radius: 12px; background: var(--neutral-bg); gap: 2px; }
 .effort-seg button { min-height: 32px; padding: 0 15px; border-radius: 9px; border: 0; background: transparent; font: inherit; font-size: 13.5px; font-weight: 700; color: var(--muted); cursor: pointer; }
 .effort-seg button[aria-pressed="true"] { background: #fff; color: var(--text); box-shadow: 0 1px 2px rgba(28,26,51,.14); }

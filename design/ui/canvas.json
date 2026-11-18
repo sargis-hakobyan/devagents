@@ -238,7 +238,7 @@
       "y": 23700,
       "w": 880,
       "h": 800,
-      "title": "U11 · Model list from the engine (design only) and effort states"
+      "title": "U11 · Model list from the engine and effort states"
     }
   },
   "order": [
@@ -410,7 +410,7 @@
       "x": 2880,
       "y": 23700,
       "w": 440,
-      "text": "The Worker / Planner dropdown becomes four tiles: Plans work, Implements, Reviews, Tests. They write the fields the backend already selects on (delegation and the planning, implementation, review and testing capabilities), so no new role field exists. Planning is exclusive because a member cannot both delegate and receive tasks. Effort is Low, Medium or High and starts at Medium. Implemented on the Teams page on 2026-11-18. Not implemented: loading the model list from the engine with Refresh and the New badge (third board, and the hint under Model on the first); the model list is still the built-in one.",
+      "text": "The Worker / Planner dropdown becomes four tiles: Plans work, Implements, Reviews, Tests. They write the fields the backend already selects on (delegation and the planning, implementation, review and testing capabilities), so no new role field exists. Planning is exclusive because a member cannot both delegate and receive tasks. Effort is Low, Medium or High and starts at Medium. Implemented on the Teams page on 2026-11-18. The model list is loaded from the engine only when Refresh list is pressed; in the app the dropdown is the browser's own, so \"new\" is text after the model name.",
       "fill": "blue"
     }
   },

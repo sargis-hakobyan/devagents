@@ -529,4 +529,18 @@ The owner found the Worker / Planner dropdown on the Teams page too narrow and a
 - **Implements asks for a write scope in place** when it has none, because such a member is never given an item.
 - **Effort is `low`, `medium` or `high` on a member and a registry agent, default `medium`.** Codex receives it as `model_reasoning_effort`, Claude as the Agent SDK `effort` option. A team saved before the setting shows Medium in the editor and stores it on the next save; until then, and for every snapshot already frozen, no effort is sent and the engine's own default applies.
 - **Not verified with a live model:** the Codex key was checked against CLI 0.170.0 (accepted under `--strict-config`; an unknown key is rejected) and the Claude option against the installed SDK types. No run confirmed that a model changes its behaviour, and per-model support for each level is not checked.
-- **Unchanged:** the model list is still the built-in catalog. Reading it from the engine (board `U11-Model-Effort`) is design only; it would revise the 2026-11-03 decision that Teams sends no provider requests and has not been decided.
+- **The model list** was left as the built-in catalog in this change and followed the same day; see the next entry.
+
+## The model list can be loaded from the engine on request — 2026-11-18
+
+The owner expected the **Refresh list** link from the U11 board and asked for it. This revises the 2026-11-03 decision that Teams offers only a built-in catalog; its core is kept: opening Teams still contacts nobody.
+
+- **Only the Refresh list link asks an engine.** The saved lists are read from the database. The built-in catalog remains the fallback until a list has been loaded, and whenever loading fails.
+- **Codex** is asked through `codex app-server` with the `model/list` request (hidden models are left out). **Claude** is asked through the Agent SDK's `supportedModels()` with an input stream that stays empty, so no prompt is sent.
+- **Claude aliases are saved as the exact model they resolve to** (`fable` becomes its current model ID), so a member's choice stays pinned. The SDK's own "default" row is left out; DevAgents has its own Default.
+- **One list per engine is saved,** replaced only by a successful load. Models that were not in the previous load are marked "new"; the first load marks nothing.
+- **A list is not proof of access.** It is what the engine offers the signed-in account; only a run shows that a model answers.
+- **The Claude list follows the installed runtime.** It comes from the SDK bundled with DevAgents, so a newly released Claude model appears after that dependency is updated, not on the release day. Custom model ID covers the gap.
+- **Failures show a fixed message.** Engine output is never passed to the browser because it can quote account details.
+- **Verified** on 2026-11-18 with the owner's authorization, by one request per engine inside the running container (Codex CLI 0.160.1 with ChatGPT sign-in, Claude with a subscription sign-in): both returned their lists. Whether either request counts against an allowance was not measured. The shipped code path was exercised with fixtures, not against the live services.
+- **Not built:** limiting Effort to the levels a model reports. Both engines reported low, medium and high for every model, so there was nothing to restrict.

@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
+import { ModelCatalogService, claudeModelLister, codexModelLister } from '../engines/model-catalog.js';
 import { loadConfig, dataDirectory } from '../config.js';
 import { Store } from '../persistence/store.js';
 import { TaskService } from '../orchestration/service.js';
@@ -85,9 +86,11 @@ cli.command('serve').description('Start the local API').action(async () => {
   const integrations = new ProjectIntegrationService(store, secretStore); const trackers = new TrackerService(store, secretStore);
   // A task started from a ticket takes the ticket's pictures and short text files with it while it works.
   service.attachTicketFiles((task, directory) => downloadTicketFiles({ integrations, trackers }, task.projectId, task.ticket!, directory));
+  const providerOf = (kind: string) => config.providers.find(p => p.kind === kind && !p.baseUrl);
+  const models = new ModelCatalogService(store, { codex: codexModelLister(dataDir, providerOf('openai')), 'claude-code': claudeModelLister(dataDir, providerOf('anthropic')) });
   const server = createApi(service, await accessToken(dataDir), {
     sessions: new BrowserSessions(undefined, sessionLimits(), sessionFile(dataDir)), uiRoot, publicPort, setupAuth, claudeAuth, assertSetupIdle,
-    integrations, trackers,
+    integrations, trackers, models,
     status: statusReporter({ dataDir, config, version: '0.1.0', host, port: () => publicPort, executionEnabled: true, revision: () => setupAuth.revision + claudeAuth.revision }),
   });
   await service.agents();

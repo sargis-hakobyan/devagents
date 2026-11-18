@@ -53,6 +53,8 @@ export type Diagnostic = { level: 'error' | 'warning'; code: string; message: st
 export type Readiness = { ready: boolean; diagnostics: Diagnostic[] };
 export type TeamSummary = { id: string; name: string; description: string; revision: number; archived: boolean; createdAt: string; updatedAt: string; members: number; enabledMembers: number; readiness: Readiness };
 export type TeamDetail = TeamDraft & { id: string; revision: number; archived: boolean; createdAt: string; updatedAt: string; readiness: Readiness; revisions: { revision: number; createdAt: string; reason: string }[] };
+/** A model list read from an engine on request; `newIds` appeared since the load before. */
+export type ModelCatalog = { engine: string; models: { id: string; name: string }[]; loadedAt: string; newIds: string[] };
 export type TeamOptions = { platform: string; defaults: { devagentsRules: boolean; engine: string; provider: string; model: string | null }; capabilities: string[]; engines: { id: string; executable: boolean; reason: string | null }[]; providers: { id: string; kind: string; auth: string; engines?: string[]; executable: boolean; reason: string | null }[]; limits: { members: number; instructions: number; instructionBytes: number; capabilities: number } };
 export type Status = {
   scheduler?: SchedulerStatus;
@@ -76,6 +78,8 @@ export const resources = {
   teams: { key: 'teams', load: () => api<TeamSummary[]>('/teams?filter=all'), intervalMs: 10000 },
   templates: { key: 'templates', load: () => api<TeamMember[]>('/teams/templates'), intervalMs: 60000 },
   teamOptions: { key: 'team-options', load: () => api<TeamOptions>('/teams/options'), intervalMs: 60000 },
+  /** Saved lists only: reading them contacts no engine. */
+  teamModels: { key: 'team-models', load: () => api<ModelCatalog[]>('/teams/models'), intervalMs: 60000 },
 };
 /** Display label for the roster a task runs with; old tasks have no saved team. */
 export const teamLabel = (team: TeamRef | undefined): string => team ? `${team.name} · revision ${team.revision}` : 'Legacy agent configuration';

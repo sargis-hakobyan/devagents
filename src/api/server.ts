@@ -15,6 +15,7 @@ import { securityHeaders, serveUi } from './static.js';
 import { evidenceMetadata } from './evidence.js';
 import type { ProjectIntegrationService } from '../integrations/service.js';
 import type { TrackerService } from '../integrations/trackers.js';
+import type { ModelCatalogService } from '../engines/model-catalog.js';
 import { availableTickets } from '../integrations/available.js';
 import { readTicket } from '../integrations/tickets.js';
 import { ticketPicture } from '../integrations/ticket-files.js';
@@ -77,6 +78,8 @@ export type ApiOptions = {
   integrations?: ProjectIntegrationService;
   /** Ticket tools reached through their MCP server. */
   trackers?: TrackerService;
+  /** Model lists read from the engines on request; absent where no engine can be asked. */
+  models?: ModelCatalogService;
   /** Host header values that may carry a browser session; defaults to loopback names on the public port. */
   allowedHosts?: (port: number) => string[];
 };
@@ -262,6 +265,12 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       if (req.method === 'POST' && path === '/teams') return send(res, 201, service.createTeam(await body(req)));
       if (req.method === 'POST' && path === '/teams/check') return send(res, 200, service.checkTeam(await body(req)));
       if (req.method === 'GET' && path === '/teams/options') return send(res, 200, service.teamOptions());
+      // Reading the saved lists contacts nobody; only the explicit refresh asks an engine.
+      if (req.method === 'GET' && path === '/teams/models') return send(res, 200, options.models?.list() ?? []);
+      if (req.method === 'POST' && path === '/teams/models/refresh') {
+        if (!options.models) throw new AppError('model_list_unavailable', 'Model lists cannot be loaded on this service.', 503);
+        return send(res, 200, await options.models.refresh(z.strictObject({ engine: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/) }).parse(await body(req, 1024)).engine));
+      }
       if (req.method === 'GET' && path === '/teams/templates') return send(res, 200, await service.templates(url.searchParams.get('projectId') ?? undefined));
       const teamMatch = /^\/teams\/([a-f0-9-]{36})(?:\/(archive|duplicate))?$/.exec(path);
       if (teamMatch) {
