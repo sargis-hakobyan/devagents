@@ -55,7 +55,7 @@ repository rules; `CLAUDE.md` is the companion entry point for Claude Code.
 ## Repository Context
 
 DevAgents is a local-first AI development-team orchestrator. It uses TypeScript,
-Mastra workflows, Zod validation and SQLite persistence. The browser UI uses
+Mastra workflows, Zod validation, Prisma Client and PostgreSQL persistence. The browser UI uses
 Preact, Vite and local CSS. Codex and Claude adapters are implemented; Claude
 account/model access still requires authenticated verification. Additional engines
 must not be presented as working until implemented and verified.
@@ -66,7 +66,8 @@ must not be presented as working until implemented and verified.
 | `src/orchestration/` | Mastra workflows, execution, DAG scheduling, validation and review |
 | `src/engines/` | Coding-engine adapters, processes, sandbox and preparation |
 | `src/workspace/` | Git worktrees, integration, diffs, cleanup and compaction |
-| `src/persistence/` | Durable task state, evidence and service locks |
+| `src/persistence/` | Prisma repositories, PostgreSQL-specific queries, migration imports and service locks |
+| `prisma/schema.prisma`, `infra/postgres/migrations/` | Client models and reviewed SQL migrations for the shared public schema |
 | `src/api/`, `src/cli/` | HTTP/browser sessions and command-line workflows |
 | `src/security/`, `src/setup/` | Credential vault and authentication setup |
 | `agents/builtin/` | Built-in YAML definitions and Markdown instructions |
@@ -95,7 +96,7 @@ Read documentation according to the task:
 | --- | --- |
 | Backend/test typecheck | `npm run typecheck` |
 | UI typecheck | `npm run typecheck:ui` |
-| Focused test file | `./node_modules/.bin/tsx --test tests/unit/plan.test.ts` (substitute the relevant file) |
+| Focused test file | `node scripts/with-test-postgres.mjs ./node_modules/.bin/tsx --test tests/unit/plan.test.ts` (substitute the relevant file) |
 | Unit and integration suite | `npm test` |
 | Backend and UI build | `npm run build` |
 | Combined standard checks | `npm run check` |

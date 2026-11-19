@@ -16,8 +16,8 @@ export interface SetupAuthDriver {
   login(method: 'chatgpt' | 'api-key' | 'subscription', key: string | undefined, signal: AbortSignal, challenge: (value: DeviceChallenge) => void): Promise<void>;
 }
 /** Persisted Ready tasks may be idle after recovery. The runner guards queued work. */
-export function assertSignInIdle(store: Pick<Store, 'summaries'>, runner: { readonly busy: boolean }): void {
-  if (runner.busy || store.summaries({ states: ['planning', 'running', 'validating', 'reviewing', 'repairing', 'committing'], limit: 1 }).tasks.length) {
+export async function assertSignInIdle(store: Pick<Store, 'summaries'>, runner: { busy(): Promise<boolean> }): Promise<void> {
+  if (await runner.busy() || (await store.summaries({ states: ['planning', 'running', 'validating', 'reviewing', 'repairing', 'committing'], limit: 1 })).tasks.length) {
     throw new AppError('work_active', 'Finish or cancel running work before changing sign-in.', 409);
   }
 }
@@ -43,8 +43,8 @@ export function claudeSetupDriver(dataDir: string): SetupAuthDriver {
 }
 /** One ephemeral login, owned by its authenticated session. No credentials or output enter task storage. */
 export class SetupAuth {
-  private current: { owner: string; fingerprint: string; job: AuthJob; abort: AbortController; done: Promise<void>; expires: number } | undefined;
-  constructor(private readonly driver: SetupAuthDriver, private readonly assertIdle: () => void = () => {}) {}
+  private current: { owner: string; fingerprint: string; job: AuthJob; abort: AbortController; admitted: Promise<void>; done: Promise<void>; expires: number } | undefined;
+  constructor(private readonly driver: SetupAuthDriver, private readonly assertIdle: () => void | Promise<void> = () => {}) {}
   private stopped = false;
   revision = 0;
   get busy() { return this.current?.job.state === 'running'; }
@@ -55,21 +55,26 @@ export class SetupAuth {
     return { available: true, connection, locked, unavailable, busy: this.busy, ...(this.current?.owner === owner ? { job: this.view() } : {}) };
   }
   private view(): AuthJob { return structuredClone(this.current!.job); }
-  start(owner: string, input: unknown): AuthJob {
+  async start(owner: string, input: unknown): Promise<AuthJob> {
     if (this.stopped) throw new AppError('setup_unavailable', 'The service is shutting down.', 503);
     const parsed = AuthInput.parse(input);
     const fingerprint = createHash('sha256').update(JSON.stringify([parsed.method, parsed.apiKey])).digest('hex');
     if (this.current?.owner === owner && this.current.job.attemptId === parsed.attemptId) {
       if (this.current.fingerprint !== fingerprint) throw new AppError('attempt_conflict', 'This sign-in attempt has different input. Start a new attempt.', 409);
-      return this.view();
+      const existing = this.current;
+      await existing.admitted;
+      return structuredClone(existing.job);
     }
     if (this.busy) throw new AppError('setup_busy', 'Another sign-in is in progress. Finish or cancel it first.', 409);
-    this.assertIdle();
-    const current = { owner, fingerprint, job: { attemptId: parsed.attemptId, method: parsed.method, state: 'running', message: 'Starting sign-in…' } as AuthJob, abort: new AbortController(), done: Promise.resolve(), expires: Date.now() + 10 * 60 * 1000 };
+    const previous = this.current;
+    const admitted = Promise.resolve().then(() => this.assertIdle());
+    const current = { owner, fingerprint, admitted, job: { attemptId: parsed.attemptId, method: parsed.method, state: 'running', message: 'Starting sign-in…' } as AuthJob, abort: new AbortController(), done: Promise.resolve(), expires: Date.now() + 10 * 60 * 1000 };
     this.current = current;
     const timer = setTimeout(() => current.abort.abort(), 10 * 60 * 1000);
     current.done = (async () => {
       try {
+        await admitted;
+        current.abort.signal.throwIfAborted();
         await this.driver.login(parsed.method, parsed.apiKey, current.abort.signal, challenge => {
           if (!current.abort.signal.aborted) { current.job.challenge = challenge; current.job.message = 'Open the official sign-in page and enter this one-time code. Do not share the code.'; }
         });
@@ -82,7 +87,9 @@ export class SetupAuth {
         current.job.message = current.abort.signal.aborted ? 'Sign-in stopped. Check the saved connection before retrying.' : 'Sign-in could not finish. Check the runtime and unlocked credential store. For ChatGPT, enable device code sign-in in Security settings. Claude browser setup requires the Docker credential vault.';
       } finally { this.revision++; clearTimeout(timer); parsed.apiKey = undefined; delete current.job.challenge; }
     })();
-    return this.view();
+    try { await admitted; }
+    catch (error) { if (this.current === current) this.current = previous; throw error; }
+    return structuredClone(current.job);
   }
   async cancel(owner: string) {
     if (!this.current || this.current.owner !== owner) throw new AppError('not_found', 'No sign-in attempt for this session.', 404);

@@ -90,7 +90,7 @@ export async function cleanupTerminalWorktrees(dataDir: string, project: Project
     }
     const record = { ...workspace, head, ...(recoveryPath ? { recoveryPath } : {}) };
     // Persist the recovery location before removal. If storage fails, leave the original intact.
-    try { intent(record); }
+    try { await intent(record); }
     catch (error) {
       // The original is untouched and no durable reference exists. Do not accumulate duplicate
       // archives when a full database repeatedly refuses the intent.
@@ -101,7 +101,7 @@ export async function cleanupTerminalWorktrees(dataDir: string, project: Project
     await withRepositoryLock(common, async () => {
       if (await verify() !== head || (await inventory(path, initial.dev)).digest !== before.digest || await git(path, ['ls-files', '--stage', '-z'], false, 32 * 1024 ** 2) !== index || await git(path, ['ls-files', '-v', '-z'], false, 32 * 1024 ** 2) !== flags) throw refused('Worktree changed during cleanup; keeping the checkout and recovery snapshot');
       await git(project.path, ['worktree', 'remove', ...(dirty ? ['--force'] : []), path], true, 2 * 1024 ** 2, { timeoutMs: 120000 });
-      completed(record); // All branches remain; only the disposable checkout is removed.
+      await completed(record); // All branches remain; only the disposable checkout is removed.
     });
   }
 }

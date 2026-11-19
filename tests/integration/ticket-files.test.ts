@@ -32,17 +32,17 @@ async function setup() {
   f.service.attachTicketFiles((task, directory) => downloadTicketFiles({ trackers }, task.projectId, task.ticket!, directory));
   const engine = new WatchingEngine(); const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   const folder = (id: string) => join(f.dataDir, 'ticket-files', id);
-  const kinds = (id: string) => f.store.evidence(id).map(e => e.kind).filter(kind => kind.startsWith('ticket-files'));
+  const kinds = async (id: string) => (await f.store.evidence(id)).map(e => e.kind).filter(kind => kind.startsWith('ticket-files'));
   return { f, tracker, trackers, engine, runner, folder, kinds, tool: added.tracker.id };
 }
 
 test('a task started from a ticket shows the team its pictures and text files, and the copies go when the task ends', async () => {
   const s = await setup();
   try {
-    const task = s.f.service.submit({ projectId: 'fixture', request: 'FX-1: Add a contact form', mode: 'autonomous', ticket: { source: s.tool, key: 'FX-1' } }, 'files');
+    const task = await s.f.service.submit({ projectId: 'fixture', request: 'FX-1: Add a contact form', mode: 'autonomous', ticket: { source: s.tool, key: 'FX-1' } }, 'files');
     await s.runner.idle();
-    assert.equal(s.f.store.task(task.id).state, 'completed', JSON.stringify(s.f.store.task(task.id).outcome));
-    const fetched = s.f.store.evidence(task.id).find(e => e.kind === 'ticket-files')!.data as Record<string, unknown>;
+    assert.equal((await s.f.store.task(task.id)).state, 'completed', JSON.stringify((await s.f.store.task(task.id)).outcome));
+    const fetched = (await s.f.store.evidence(task.id)).find(e => e.kind === 'ticket-files')!.data as Record<string, unknown>;
     assert.deepEqual(fetched, {
       ticket: 'FX-1', source: 'Team board',
       saved: [{ name: 'footer.png', file: '01.png', kind: 'image', type: 'image/png', bytes: 68 }, { name: 'notes.txt', file: '02.txt', kind: 'text', type: 'text/plain', bytes: 26 }],
@@ -60,23 +60,23 @@ test('a task started from a ticket shows the team its pictures and text files, a
     assert.equal(files.length, 2); assert.ok(files.every(call => call.authorization === `Bearer ${fake.FAKE_TRACKER_TOKEN}`));
     assert.ok(!s.tracker.calls.some(call => call.url.includes('files.fixture.invalid')));
     // Finished: the request and the record stay, the copies are gone.
-    assert.deepEqual(s.kinds(task.id), ['ticket-files', 'ticket-files-removed']);
+    assert.deepEqual(await s.kinds(task.id), ['ticket-files', 'ticket-files-removed']);
     await assert.rejects(readdir(s.folder(task.id)), /ENOENT/);
-    assert.equal(s.f.store.task(task.id).ticket!.key, 'FX-1');
+    assert.equal((await s.f.store.task(task.id)).ticket!.key, 'FX-1');
   } finally { await s.runner.stop(); await s.f.cleanup(); }
 });
 
 test('files are fetched once, kept while a plan waits for approval, and removed when the task is cancelled', async () => {
   const s = await setup();
   try {
-    const task = s.f.service.submit({ projectId: 'fixture', request: 'FX-1: Add a contact form', mode: 'plan-approval', ticket: { source: s.tool, key: 'FX-1' } }, 'waiting');
+    const task = await s.f.service.submit({ projectId: 'fixture', request: 'FX-1: Add a contact form', mode: 'plan-approval', ticket: { source: s.tool, key: 'FX-1' } }, 'waiting');
     await s.runner.idle();
-    assert.equal(s.f.store.task(task.id).state, 'awaiting_plan_approval');
+    assert.equal((await s.f.store.task(task.id)).state, 'awaiting_plan_approval');
     assert.deepEqual((await readdir(s.folder(task.id))).sort(), ['01.png', '02.txt']);
     assert.equal(await readFile(join(s.folder(task.id), '02.txt'), 'utf8'), 'Three fields, no captcha.\n');
     assert.equal(((await stat(s.folder(task.id))).mode & 0o777), 0o700);
-    s.f.service.cancel(task.id); await s.runner.idle(); await new Promise(resolve => setTimeout(resolve, 50));
-    assert.deepEqual(s.kinds(task.id), ['ticket-files', 'ticket-files-removed']);
+    await s.f.service.cancel(task.id); await s.runner.idle(); await new Promise(resolve => setTimeout(resolve, 50));
+    assert.deepEqual(await s.kinds(task.id), ['ticket-files', 'ticket-files-removed']);
     await assert.rejects(readdir(s.folder(task.id)), /ENOENT/);
   } finally { await s.runner.stop(); await s.f.cleanup(); }
 });
@@ -84,15 +84,15 @@ test('files are fetched once, kept while a plan waits for approval, and removed 
 test('a ticket whose files cannot be fetched does not stop the task, and a task without a ticket fetches nothing', async () => {
   const s = await setup();
   try {
-    const plain = s.f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'plain');
+    const plain = await s.f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'plain');
     await s.runner.idle();
-    assert.equal(s.f.store.task(plain.id).state, 'completed'); assert.deepEqual(s.kinds(plain.id), []);
+    assert.equal((await s.f.store.task(plain.id)).state, 'completed'); assert.deepEqual(await s.kinds(plain.id), []);
     assert.ok(s.engine.calls.every(call => call.images === undefined));
     const before = s.tracker.calls.length;
-    const task = s.f.service.submit({ projectId: 'fixture', request: 'FX-99: a ticket that is gone', mode: 'autonomous', ticket: { source: s.tool, key: 'FX-99' } }, 'gone');
+    const task = await s.f.service.submit({ projectId: 'fixture', request: 'FX-99: a ticket that is gone', mode: 'autonomous', ticket: { source: s.tool, key: 'FX-99' } }, 'gone');
     await s.runner.idle();
-    assert.equal(s.f.store.task(task.id).state, 'completed', JSON.stringify(s.f.store.task(task.id).outcome));
-    const fetched = s.f.store.evidence(task.id).find(e => e.kind === 'ticket-files')!.data as { saved: unknown[]; error: string };
+    assert.equal((await s.f.store.task(task.id)).state, 'completed', JSON.stringify((await s.f.store.task(task.id)).outcome));
+    const fetched = (await s.f.store.evidence(task.id)).find(e => e.kind === 'ticket-files')!.data as { saved: unknown[]; error: string };
     assert.deepEqual(fetched.saved, []); assert.match(fetched.error, /FX-99 was not found/);
     assert.match(s.engine.calls.at(-1)!.prompt, /The ticket's files could not be fetched: .*FX-99 was not found/);
     assert.ok(s.tracker.calls.length > before);
@@ -100,7 +100,7 @@ test('a ticket whose files cannot be fetched does not stop the task, and a task 
 });
 
 test('pictures are shown from the ticket before a task exists and from the task while it works, and from neither afterwards', async () => {
-  const s = await setup(); const server = createApi(s.f.service, 'test-token', { trackers: s.trackers });
+  const s = await setup(); const server = await createApi(s.f.service, 'test-token', { trackers: s.trackers });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const root = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const get = async (path: string, signedIn = true) => { const response = await fetch(`${root}${path}`, { headers: signedIn ? { authorization: 'Bearer test-token' } : {} }); return { status: response.status, type: response.headers.get('content-type'), headers: response.headers, bytes: Buffer.from(await response.arrayBuffer()) }; };
@@ -119,7 +119,7 @@ test('pictures are shown from the ticket before a task exists and from the task 
     await assert.rejects(readdir(join(s.f.dataDir, 'ticket-files')), /ENOENT/);
 
     // While the task waits or works: from its own copies.
-    const task = s.f.service.submit({ projectId: 'fixture', request: 'FX-1: Add a contact form', mode: 'plan-approval', ticket: { source: s.tool, key: 'FX-1' } }, 'pictures');
+    const task = await s.f.service.submit({ projectId: 'fixture', request: 'FX-1: Add a contact form', mode: 'plan-approval', ticket: { source: s.tool, key: 'FX-1' } }, 'pictures');
     await s.runner.idle();
     const kept = await get(`/tasks/${task.id}/ticket-files/01.png`);
     assert.deepEqual([kept.status, kept.type, kept.bytes.equals(shown.bytes)], [200, 'image/png', true]);
@@ -127,7 +127,7 @@ test('pictures are shown from the ticket before a task exists and from the task 
     assert.equal((await get(`/tasks/${task.id}/ticket-files/02.txt`)).status, 404, 'only pictures are served');
     assert.equal((await get(`/tasks/${task.id}/ticket-files/09.png`)).status, 404);
     // Ended: the copies are gone and so is the picture.
-    s.f.service.cancel(task.id); await s.runner.idle(); await new Promise(resolve => setTimeout(resolve, 50));
+    await s.f.service.cancel(task.id); await s.runner.idle(); await new Promise(resolve => setTimeout(resolve, 50));
     const gone = await get(`/tasks/${task.id}/ticket-files/01.png`); assert.equal(gone.status, 404); assert.match(gone.bytes.toString(), /removed when the task ends/);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await s.runner.stop(); await s.f.cleanup(); }
 });

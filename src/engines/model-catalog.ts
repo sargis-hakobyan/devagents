@@ -99,7 +99,10 @@ export function claudeModelLister(dataDir: string, provider: Provider | undefine
 export class ModelCatalogService {
   private readonly loading = new Map<string, Promise<ModelCatalog>>();
   constructor(private readonly store: Store, private readonly listers: Record<string, ModelLister>, private readonly now: () => Date = () => new Date()) {}
-  list(): ModelCatalog[] { return Object.keys(this.listers).flatMap(engine => this.store.modelCatalog(engine) ?? []); }
+  async list(): Promise<ModelCatalog[]> {
+    const catalogs = await Promise.all(Object.keys(this.listers).map(engine => this.store.modelCatalog(engine)));
+    return catalogs.filter(catalog => catalog !== undefined);
+  }
   /** One request per engine at a time; a second click joins the first. */
   refresh(engine: string): Promise<ModelCatalog> {
     const lister = this.listers[engine];
@@ -120,10 +123,10 @@ export class ModelCatalogService {
       throw new AppError('model_list_failed', known ? (error as AppError).message : `Could not load models from ${engine}. The saved list is unchanged.`, 502);
     } finally { clearTimeout(timer); }
     if (!models.length) throw new AppError('model_list_failed', `${engine} returned no models. The saved list is unchanged.`, 502);
-    const previous = this.store.modelCatalog(engine);
+    const previous = await this.store.modelCatalog(engine);
     const known = new Set(previous?.models.map(m => m.id));
     const catalog: ModelCatalog = { engine, models, loadedAt: this.now().toISOString(), newIds: previous ? models.filter(m => !known.has(m.id)).map(m => m.id) : [] };
-    this.store.saveModelCatalog(catalog);
+    await this.store.saveModelCatalog(catalog);
     return catalog;
   }
 }

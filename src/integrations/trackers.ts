@@ -39,10 +39,10 @@ export class TrackerService {
     this.fetcher = options.fetch ?? fetch; this.now = options.now ?? (() => new Date());
   }
   private stamp() { return this.now().toISOString(); }
-  private usedBy(id: string) { return this.store.projects().filter(p => p.integrations?.trackers?.some(c => c.trackerId === id)).map(p => ({ id: p.id, name: p.name ?? p.id })); }
-  private view(tracker: Tracker, locked: boolean): TrackerView {
+  private async usedBy(id: string) { return (await this.store.projects()).filter(p => p.integrations?.trackers?.some(c => c.trackerId === id)).map(p => ({ id: p.id, name: p.name ?? p.id })); }
+  private async view(tracker: Tracker, locked: boolean): Promise<TrackerView> {
     const { savedToken, ...shown } = tracker;
-    return { ...shown, state: connectionState(tracker, this.now(), locked).state, mapped: Boolean(tracker.mapping), usedBy: this.usedBy(tracker.id), ...(this.secrets.mode === 'environment' ? { variable: this.secrets.variable(savedToken) } : {}) };
+    return { ...shown, state: connectionState(tracker, this.now(), locked).state, mapped: Boolean(tracker.mapping), usedBy: await this.usedBy(tracker.id), ...(this.secrets.mode === 'environment' ? { variable: this.secrets.variable(savedToken) } : {}) };
   }
   private required(savedToken: string): AppError {
     return new AppError('token_required', this.secrets.mode === 'vault' ? 'Paste a token to connect.' : `Set ${this.secrets.variable(savedToken)} and restart the service, then try again.`, 422);
@@ -58,23 +58,23 @@ export class TrackerService {
     if (error.code === 'integration_unavailable') return { code: 'not_reachable', message: error.message, at: this.stamp() };
     return;
   }
-  private assertNameFree(name: string, except?: string): void {
-    const taken = this.store.trackers().find(t => t.id !== except && (same(t.name, name) || t.savedToken === `tracker-${slug(name)}`));
+  private async assertNameFree(name: string, except?: string): Promise<void> {
+    const taken = (await this.store.trackers()).find(t => t.id !== except && (same(t.name, name) || t.savedToken === `tracker-${slug(name)}`));
     if (taken) throw new AppError('tracker_conflict', `A tool named "${taken.name}" already exists. Choose another name.`, 409);
   }
 
   async list(): Promise<TrackerList> {
     const locked = await this.secrets.locked();
-    return { secrets: { mode: this.secrets.mode, locked }, trackers: this.store.trackers().map(t => this.view(t, locked)) };
+    return { secrets: { mode: this.secrets.mode, locked }, trackers: (await Promise.all((await this.store.trackers()).map(async t => await this.view(t, locked)))) };
   }
-  async show(id: string): Promise<TrackerView> { return this.view(this.store.tracker(TrackerId.parse(id)), await this.secrets.locked()); }
+  async show(id: string): Promise<TrackerView> { return this.view(await this.store.tracker(TrackerId.parse(id)), await this.secrets.locked()); }
 
   /** Signs in to the server and saves the tool. The mapping is proposed, not saved: the user confirms it. */
   async add(input: unknown): Promise<TrackerInspection> {
     const parsed = TrackerAddInput.parse(input); const url = normalizeMcpUrl(parsed.url);
     const key = slug(parsed.name);
     if (!key) throw new AppError('invalid_request', 'Use a name with at least one letter or digit.', 422);
-    this.assertNameFree(parsed.name);
+    await this.assertNameFree(parsed.name);
     const savedToken = `tracker-${key}`;
     // Environment mode refuses a pasted token here, before anything is contacted, and names the variable to set.
     if (parsed.token && this.secrets.mode === 'environment') await this.secrets.set(savedToken, parsed.token);
@@ -82,16 +82,16 @@ export class TrackerService {
     const server = await session.open();
     if (parsed.token) await this.secrets.set(savedToken, parsed.token);
     const stamp = this.stamp();
-    const tracker = this.store.saveTracker({ id: randomUUID(), name: parsed.name, url, savedToken, server, connectedAt: stamp, checkedAt: stamp });
+    const tracker = await this.store.saveTracker({ id: randomUUID(), name: parsed.name, url, savedToken, server, connectedAt: stamp, checkedAt: stamp });
     return this.inspection(tracker, session);
   }
   /** The server's tools and a proposed mapping, for the mapping form. */
   async inspect(id: string): Promise<TrackerInspection> {
-    const tracker = this.store.tracker(TrackerId.parse(id));
+    const tracker = await this.store.tracker(TrackerId.parse(id));
     return this.inspection(tracker, await this.session(tracker));
   }
   private async inspection(tracker: Tracker, session: McpSession): Promise<TrackerInspection> {
-    const tools = await session.tools(); const shown = this.view(tracker, false);
+    const tools = await session.tools(); const shown = await this.view(tracker, false);
     const list = tracker.mapping?.list ?? suggestList(tools);
     if (!list) return { tracker: shown, tools, note: tools.length ? 'No tool on this server looks like a ticket list. Choose one yourself.' : 'This server offers no tools to this account.' };
     let answer: unknown;
@@ -105,7 +105,7 @@ export class TrackerService {
   }
   /** Saves a mapping only after the server answered through it, so a saved mapping is one that works. */
   async setMapping(id: string, input: unknown): Promise<{ tracker: TrackerView; tickets: number }> {
-    const tracker = this.store.tracker(TrackerId.parse(id)); const mapping = TrackerMapping.parse(input);
+    const tracker = await this.store.tracker(TrackerId.parse(id)); const mapping = TrackerMapping.parse(input);
     const session = await this.session(tracker); const tool = (await session.tools()).find(t => t.name === mapping.list.tool);
     if (!tool) throw new AppError('invalid_mapping', `${tracker.name} has no tool named ${mapping.list.tool}.`, 422);
     const unknown = [...Object.keys(mapping.list.fixed), ...Object.values(mapping.list.filters).flatMap(f => f ? [f.name] : [])].filter(name => !tool.properties[name]);
@@ -119,8 +119,8 @@ export class TrackerService {
     const found = tickets(mapping, answer);
     if (rows.length && !found.length) throw new AppError('invalid_mapping', `No entry of "${mapping.result.tickets}" has both "${mapping.ticket.key}" and "${mapping.ticket.title}". Check the ticket fields.`, 422);
     const account = options(mapping, answer, found).account; const { problem: _, account: __, ...rest } = tracker;
-    const saved = this.store.saveTracker({ ...rest, mapping, ...(account ? { account } : {}), checkedAt: this.stamp() });
-    return { tracker: this.view(saved, false), tickets: found.length };
+    const saved = await this.store.saveTracker({ ...rest, mapping, ...(account ? { account } : {}), checkedAt: this.stamp() });
+    return { tracker: await this.view(saved, false), tickets: found.length };
   }
   /**
    * Edits a tool: its name, its address, its token, or any of them together. A new address or token
@@ -128,9 +128,9 @@ export class TrackerService {
    * a broken one. The mapping is kept; a different server may need it corrected afterwards.
    */
   async update(id: string, input: unknown): Promise<TrackerView> {
-    const tracker = this.store.tracker(TrackerId.parse(id)); const parsed = TrackerUpdateInput.parse(input);
+    const tracker = await this.store.tracker(TrackerId.parse(id)); const parsed = TrackerUpdateInput.parse(input);
     let next = tracker;
-    if (parsed.name !== undefined && parsed.name !== tracker.name) { this.assertNameFree(parsed.name, tracker.id); next = { ...next, name: parsed.name }; }
+    if (parsed.name !== undefined && parsed.name !== tracker.name) { await this.assertNameFree(parsed.name, tracker.id); next = { ...next, name: parsed.name }; }
     const url = parsed.url === undefined ? tracker.url : normalizeMcpUrl(parsed.url);
     if (url !== tracker.url || parsed.token !== undefined) {
       if (parsed.token !== undefined && this.secrets.mode === 'environment') await this.secrets.set(tracker.savedToken, parsed.token);
@@ -140,10 +140,10 @@ export class TrackerService {
       if (parsed.token !== undefined) await this.secrets.set(tracker.savedToken, parsed.token);
       const { problem: _, ...rest } = next; next = { ...rest, url, server, checkedAt: this.stamp() };
     }
-    return this.view(this.store.saveTracker(next), await this.secrets.locked());
+    return this.view(await this.store.saveTracker(next), await this.secrets.locked());
   }
   async check(id: string): Promise<TrackerView> {
-    const tracker = this.store.tracker(TrackerId.parse(id)); let update: Tracker;
+    const tracker = await this.store.tracker(TrackerId.parse(id)); let update: Tracker;
     try {
       const session = await this.session(tracker); const server = await session.open();
       // With a mapping the check also proves that the list tool still answers.
@@ -153,34 +153,34 @@ export class TrackerService {
       const problem = this.problem(error); if (!problem) throw error;
       update = { ...tracker, problem, checkedAt: problem.at };
     }
-    return this.view(this.store.saveTracker(update), await this.secrets.locked());
+    return this.view(await this.store.saveTracker(update), await this.secrets.locked());
   }
   /** Removes a tool and forgets its token. Refused while a project still points at it. */
   async remove(id: string): Promise<TrackerList> {
-    const tracker = this.store.tracker(TrackerId.parse(id)); const users = this.usedBy(tracker.id);
+    const tracker = await this.store.tracker(TrackerId.parse(id)); const users = await this.usedBy(tracker.id);
     if (users.length) throw new AppError('tracker_in_use', `${tracker.name} is used by ${users.map(u => u.name).join(', ')}. Disconnect it there first.`, 409);
-    this.store.removeTracker(tracker.id); await this.secrets.remove(tracker.savedToken);
+    await this.store.removeTracker(tracker.id); await this.secrets.remove(tracker.savedToken);
     return this.list();
   }
 
   // A project's use of tools. A project may use several; each connection has its own rule.
   async projectView(projectId: string): Promise<ProjectTrackerView> {
-    const connections = this.store.project(projectId).integrations?.trackers ?? []; const { trackers } = await this.list();
+    const connections = (await this.store.project(projectId)).integrations?.trackers ?? []; const { trackers } = await this.list();
     return { connections: connections.flatMap(c => { const tracker = trackers.find(t => t.id === c.trackerId); return tracker ? [{ ...c, tracker }] : []; }), trackers };
   }
   /** Uses an added tool for this project. The tool's address and token are already saved, so nothing is entered again. */
   async connect(projectId: string, trackerId: string): Promise<ProjectTrackerView> {
-    const project = this.store.project(projectId);
+    const project = await this.store.project(projectId);
     if (project.archivedAt) throw new AppError('project_archived', 'This project is archived. Restore it before connecting it.', 409);
-    const tracker = this.store.tracker(TrackerId.parse(trackerId));
+    const tracker = await this.store.tracker(TrackerId.parse(trackerId));
     if (!tracker.mapping) throw new AppError('tracker_unmapped', `${tracker.name} has no mapping yet. Finish adding the tool first.`, 409);
-    this.store.setProjectIntegrations(projectId, all => (all.trackers ?? []).some(c => c.trackerId === tracker.id) ? all : { ...all, trackers: [...(all.trackers ?? []), { trackerId: tracker.id, connectedAt: this.stamp() }] });
+    await this.store.setProjectIntegrations(projectId, all => (all.trackers ?? []).some(c => c.trackerId === tracker.id) ? all : { ...all, trackers: [...(all.trackers ?? []), { trackerId: tracker.id, connectedAt: this.stamp() }] });
     return this.projectView(projectId);
   }
   /** Stops using one tool for this project, or every tool when none is named. The tools themselves stay. */
   async disconnect(projectId: string, trackerId?: string): Promise<ProjectTrackerView> {
     const id = trackerId === undefined ? undefined : TrackerId.parse(trackerId);
-    this.store.setProjectIntegrations(projectId, current => {
+    await this.store.setProjectIntegrations(projectId, current => {
       const { trackers = [], ...rest } = current; const kept = id ? trackers.filter(c => c.trackerId !== id) : [];
       return kept.length ? { ...rest, trackers: kept } : rest;
     });
@@ -188,8 +188,8 @@ export class TrackerService {
   }
   private async load(projectId: string, trackerId: string): Promise<{ tracker: Tracker; mapping: TrackerMapping; session: McpSession }> {
     const id = TrackerId.parse(trackerId);
-    if (!this.store.project(projectId).integrations?.trackers?.some(c => c.trackerId === id)) throw new AppError('not_connected', 'This tool is not connected for this project', 404);
-    const tracker = this.store.tracker(id);
+    if (!(await this.store.project(projectId)).integrations?.trackers?.some(c => c.trackerId === id)) throw new AppError('not_connected', 'This tool is not connected for this project', 404);
+    const tracker = await this.store.tracker(id);
     if (!tracker.mapping) throw new AppError('tracker_unmapped', `${tracker.name} has no mapping yet. Finish adding the tool first.`, 409);
     return { tracker, mapping: tracker.mapping, session: await this.session(tracker) };
   }
@@ -236,7 +236,7 @@ export class TrackerService {
   /** Forgets one tool's pick-up rule and keeps the connection, so no tickets come from it until a rule is saved again. */
   async removeRule(projectId: string, trackerId: string): Promise<ProjectTrackerView> {
     const id = TrackerId.parse(trackerId);
-    this.store.setProjectIntegrations(projectId, current => {
+    await this.store.setProjectIntegrations(projectId, current => {
       if (!current.trackers?.some(c => c.trackerId === id)) throw new AppError('not_connected', 'This tool is not connected for this project', 404);
       return { ...current, trackers: current.trackers.map(c => { if (c.trackerId !== id) return c; const { rule: _, ...rest } = c; return rest; }) };
     });
@@ -244,7 +244,7 @@ export class TrackerService {
   }
   /** The tickets a project's saved rule for one tool matches now, for the board's Available column. */
   async ruleTickets(projectId: string, trackerId: string): Promise<{ source: { kind: 'tool'; name: string; id: string }; key: string; title: string; url?: string; why: string; start: 'manual' | 'auto' }[]> {
-    const rule = this.store.project(projectId).integrations?.trackers?.find(c => c.trackerId === trackerId)?.rule;
+    const rule = (await this.store.project(projectId)).integrations?.trackers?.find(c => c.trackerId === trackerId)?.rule;
     if (!rule) return [];
     const { tracker, mapping, session } = await this.load(projectId, trackerId);
     const entries = (values: { id: string; name: string; match?: string[] }[] | undefined): Choice[] => (values ?? []).map(value => ({ ...value, match: value.match ?? [value.id.toLowerCase(), value.name.toLowerCase()] }));
@@ -281,7 +281,7 @@ export class TrackerService {
   }
   /** The address and token a file of a ticket is fetched with. Files are only fetched from the tool's own host. */
   async fileAccess(trackerId: string): Promise<{ name: string; origins: string[]; authorization: string; fetch: Fetch }> {
-    const tracker = this.store.tracker(TrackerId.parse(trackerId)); const token = await this.secrets.get(tracker.savedToken);
+    const tracker = await this.store.tracker(TrackerId.parse(trackerId)); const token = await this.secrets.get(tracker.savedToken);
     if (!token) throw this.required(tracker.savedToken);
     return { name: tracker.name, origins: [new URL(tracker.url).origin], authorization: `Bearer ${token}`, fetch: this.fetcher };
   }
@@ -290,7 +290,7 @@ export class TrackerService {
   /** Saves a rule only after the tool answered its search. */
   async saveRule(projectId: string, trackerId: string, input: unknown): Promise<ProjectTrackerView & { matches: TrackerMatches }> {
     const { rule, matches: found } = await this.resolve(projectId, trackerId, input);
-    this.store.setProjectIntegrations(projectId, current => {
+    await this.store.setProjectIntegrations(projectId, current => {
       if (!current.trackers?.some(c => c.trackerId === trackerId)) throw new AppError('not_connected', 'This tool is not connected for this project', 404);
       return { ...current, trackers: current.trackers.map(c => c.trackerId === trackerId ? { ...c, rule } : c) };
     });

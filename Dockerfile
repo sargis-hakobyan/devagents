@@ -1,11 +1,12 @@
 FROM node:24.22.1-bookworm-slim AS build
 WORKDIR /app
 COPY package*.json ./
+COPY prisma/schema.prisma ./prisma/schema.prisma
 RUN npm ci
 COPY tsconfig*.json ./
 COPY src ./src
 COPY ui ./ui
-RUN npm run build && npm prune --omit=dev
+RUN npm run build && npm prune --omit=dev --ignore-scripts
 
 FROM node:24.22.1-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \

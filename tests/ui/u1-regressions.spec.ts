@@ -8,7 +8,7 @@ import { createApi } from '../../src/api/server.js';
 
 // Dedicated temporary data: boundary cases do not contaminate the existing visual fixtures.
 let f: Awaited<ReturnType<typeof fixture>>;
-let server: ReturnType<typeof createApi>;
+let server: Awaited<ReturnType<typeof createApi>>;
 let sessions: BrowserSessions;
 let base: string; let rejectedId: string; let approvedId: string; let completedId: string; let runningId: string;
 async function signIn(page: Page, path: string) {
@@ -17,22 +17,22 @@ async function signIn(page: Page, path: string) {
 }
 test.beforeAll(async () => {
   f = await fixture(); sessions = new BrowserSessions();
-  const submit = (request: string, mode?: 'autonomous' | 'plan-approval') => f.service.submit({ projectId: 'fixture', request, ...(mode ? { mode } : {}) }, request);
-  const rejected = submit('Rejected without approval', 'plan-approval'); rejectedId = rejected.id;
-  await f.service.proposePlan(rejectedId, validPlan()); f.service.cancel(rejectedId);
-  const approved = submit('Approved then cancelled', 'plan-approval'); approvedId = approved.id;
-  const planned = await f.service.proposePlan(approvedId, validPlan()); f.service.approve(approvedId, planned.version); f.service.cancel(approvedId);
-  const completed = submit('Completed with large evidence', 'autonomous'); completedId = completed.id;
+  const submit = async (request: string, mode?: 'autonomous' | 'plan-approval') => await f.service.submit({ projectId: 'fixture', request, ...(mode ? { mode } : {}) }, request);
+  const rejected = await submit('Rejected without approval', 'plan-approval'); rejectedId = rejected.id;
+  await f.service.proposePlan(rejectedId, validPlan()); await f.service.cancel(rejectedId);
+  const approved = await submit('Approved then cancelled', 'plan-approval'); approvedId = approved.id;
+  const planned = await f.service.proposePlan(approvedId, validPlan()); await f.service.approve(approvedId, planned.version); await f.service.cancel(approvedId);
+  const completed = await submit('Completed with large evidence', 'autonomous'); completedId = completed.id;
   await f.service.proposePlan(completedId, validPlan());
-  for (const state of ['running', 'validating', 'reviewing', 'completed'] as const) f.store.transition(completedId, f.store.task(completedId).version, state, 'fixture', 'fixture transition');
-  for (const [exitCode, truncated] of [[1, false], [0, false], [0, true], [0, false]] as const) f.store.record(completedId, 'validation', { workItemId: 'greeting', executable: 'node', args: ['--test'], exitCode, truncated, output: 'output '.repeat(4000) });
-  f.store.record(completedId, 'run-completed', { workItemId: 'greeting', phase: 'review', output: { approved: true, findings: [], summary: 'Successful independent review. '.repeat(1000) } });
-  const running = submit('Old running task remains visible', 'autonomous'); runningId = running.id;
-  const ready = await f.service.proposePlan(runningId, validPlan()); f.store.transition(runningId, ready.version, 'running', 'fixture', 'started');
-  const waiting = submit('Old approval remains discoverable', 'plan-approval'); await f.service.proposePlan(waiting.id, validPlan());
-  for (let i = 0; i < 51; i++) submit(`Mode choice ${i}`);
-  for (let i = 0; i < 201; i++) f.service.cancel(submit(`New cancelled ${i}`).id);
-  server = createApi(f.service, 'synthetic-ui-review-token', {
+  for (const state of ['running', 'validating', 'reviewing', 'completed'] as const) await f.store.transition(completedId, (await f.store.task(completedId)).version, state, 'fixture', 'fixture transition');
+  for (const [exitCode, truncated] of [[1, false], [0, false], [0, true], [0, false]] as const) await f.store.record(completedId, 'validation', { workItemId: 'greeting', executable: 'node', args: ['--test'], exitCode, truncated, output: 'output '.repeat(4000) });
+  await f.store.record(completedId, 'run-completed', { workItemId: 'greeting', phase: 'review', output: { approved: true, findings: [], summary: 'Successful independent review. '.repeat(1000) } });
+  const running = await submit('Old running task remains visible', 'autonomous'); runningId = running.id;
+  const ready = await f.service.proposePlan(runningId, validPlan()); await f.store.transition(runningId, ready.version, 'running', 'fixture', 'started');
+  const waiting = await submit('Old approval remains discoverable', 'plan-approval'); await f.service.proposePlan(waiting.id, validPlan());
+  for (let i = 0; i < 51; i++) await submit(`Mode choice ${i}`);
+  for (let i = 0; i < 201; i++) await f.service.cancel((await submit(`New cancelled ${i}`)).id);
+  server = await createApi(f.service, 'synthetic-ui-review-token', {
     sessions, uiRoot: resolve('dist/ui'), status: async () => ({
       service: { executionEnabled: false, startedAt: new Date().toISOString() },
       codex: { installed: false, signedIn: false, vaultLocked: false, modelAccessVerified: false },
@@ -92,11 +92,11 @@ test('large evidence retains pass, failure, truncation and review outcomes in ev
 });
 
 test('failed tasks explain no changes on desktop and mobile, retain historical evidence, and escape report text', async ({ page }) => {
-  const task = f.service.submit({ projectId: 'fixture', request: 'Remember project filters', mode: 'autonomous' }, 'historical-empty-change');
+  const task = await f.service.submit({ projectId: 'fixture', request: 'Remember project filters', mode: 'autonomous' }, 'historical-empty-change');
   await f.service.proposePlan(task.id, validPlan());
-  f.store.transition(task.id, f.store.task(task.id).version, 'running', 'fixture', 'Implementation started');
-  f.store.record(task.id, 'run-completed', { phase: 'implementation', output: { summary: 'The requested behavior already exists. No source changes were needed. <img src=x onerror=alert(1)>\n\nReported checks passed.' } });
-  f.store.transition(task.id, f.store.task(task.id).version, 'failed', 'fixture', 'Implementation produced no reviewable changes', { outcome: { error: 'Implementation produced no reviewable changes', repairCycles: 0 } });
+  await f.store.transition(task.id, (await f.store.task(task.id)).version, 'running', 'fixture', 'Implementation started');
+  await f.store.record(task.id, 'run-completed', { phase: 'implementation', output: { summary: 'The requested behavior already exists. No source changes were needed. <img src=x onerror=alert(1)>\n\nReported checks passed.' } });
+  await f.store.transition(task.id, (await f.store.task(task.id)).version, 'failed', 'fixture', 'Implementation produced no reviewable changes', { outcome: { error: 'Implementation produced no reviewable changes', repairCycles: 0 } });
   await signIn(page, `/ui/tasks/${task.id}`);
   const notice = page.getByRole('region', { name: 'Why this task failed' }).first();
   await expect(notice).toContainText('Stopped because no code changes were produced');

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { PgSession } from '../../src/persistence/pg-session.js';
 import { Store } from '../../src/persistence/store.js';
 import { LoginAccounts } from '../../src/persistence/login-accounts.js';
 import { PasswordLogin } from '../../src/auth/password.js';
@@ -23,30 +23,31 @@ test('shared login configuration is explicit and fails closed for unsupported pr
 
 test('bootstrap stores a salted hash, preserves identity and credentials on restart, and never exposes the hash as identity', async () => {
   const root = await mkdtemp(join(tmpdir(), 'devagents-login-')); const path = join(root, 'db.sqlite');
-  new Store(path, []).close(); // Run application migrations, including the existing login tables.
-  let store = new LoginAccounts(path);
+  await (await Store.open(path, [])).close(); // Run application migrations, including the existing login tables.
+  let store = await LoginAccounts.open(path);
   try {
-    assert.equal(store.passwordAccount('admin'), undefined, 'opening a local store does not create logins');
+    assert.equal(await store.passwordAccount('login-test'), undefined);
     const provider = await PasswordLogin.create(store);
     const user = await provider.authenticate({ username: 'admin', password: 'admin' });
     assert.ok(user); assert.match(user.id, /^[a-f0-9-]{36}$/); assert.deepEqual(Object.keys(user).sort(), ['id', 'name', 'role']);
-    const saved = store.passwordAccount('admin')!;
+    const saved = (await store.passwordAccount('admin'))!;
     assert.match(saved.salt, /^[a-f0-9]{32}$/); assert.match(saved.hash, /^[a-f0-9]{128}$/);
     assert.notEqual(saved.hash, 'admin');
     for (const input of [{ username: 'admin', password: 'wrong' }, { username: 'unknown', password: 'admin' }, { username: 'admin', password: 'admin', role: 'admin' }, { username: 'admin', password: 'a'.repeat(1025) }, null]) {
       assert.equal(await provider.authenticate(input), undefined);
     }
-    store.close(); store = new LoginAccounts(path);
+    await store.close(); store = await LoginAccounts.open(path);
     const restarted = await PasswordLogin.create({
-      passwordAccount: async username => store.passwordAccount(username),
-      bootstrapPasswordAccount: async (...args) => store.bootstrapPasswordAccount(...args),
+      passwordAccount: async username => await store.passwordAccount(username),
+      bootstrapPasswordAccount: async (...args) => await store.bootstrapPasswordAccount(...args),
     });
-    assert.deepEqual(store.passwordAccount('admin'), saved);
+    assert.deepEqual(await store.passwordAccount('admin'), saved);
     assert.deepEqual(await restarted.authenticate({ username: 'admin', password: 'admin' }), user);
     // An existing credential is authoritative even if it no longer matches the bootstrap password.
-    const raw = new DatabaseSync(path); raw.prepare('UPDATE password_accounts SET hash=?').run('00'.repeat(64)); raw.close();
+    await store.bootstrapPasswordAccount('login-test', 'Test', saved.salt, saved.hash);
+    const raw = await PgSession.open(path); await raw.prepare('UPDATE password_accounts SET hash=$1 WHERE username=$2').run('00'.repeat(64), 'login-test'); await raw.close();
     const changed = await PasswordLogin.create(store);
-    assert.equal(await changed.authenticate({ username: 'admin', password: 'admin' }), undefined);
-    assert.deepEqual(store.loginUser(user.id), user);
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+    assert.equal(await changed.authenticate({ username: 'login-test', password: 'admin' }), undefined);
+    assert.deepEqual(await store.loginUser(user.id), user);
+  } finally { await store.close(); await rm(root, { recursive: true, force: true }); }
 });

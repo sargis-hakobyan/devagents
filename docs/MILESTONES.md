@@ -1,5 +1,10 @@
 # Milestone checklist
 
+## PostgreSQL in local and shared deployments
+
+Local Compose and all shared runtimes use one PostgreSQL database and a single application schema, `public`, for task state, teams, projects, approvals, history, workflow snapshots, dispatch and accounts. Application database operations are asynchronous. Accounts, projects, teams and tasks use Prisma Client in the persistence layer. The one-time importer preserves existing workspace data and stable user IDs.
+
+
 ## Shared-server architecture — started 2026-11-19
 
 - [x] Extract login-provider and application-identity contracts from HTTP authentication.
@@ -113,10 +118,10 @@ Ownership clarified by the owner on 2026-10-30: Codex handles implementation fix
 - [x] U3: guided setup, project registration, task submission/mode, version-bound plan approval, cancellation and safe completed-task diff inspection. Delivery scope and verification below. Browser cleanup remains deferred.
 - [x] U1 browser workflow/security tests, responsive layout, regenerable screenshots in ignored `test-results/ui-screenshots/` and native/Docker packaging. Repeat for U2 and U3.
 - [x] U2 as above (18 browser workflows pass in full; Docker smoke re-run for the in-image UI).
-- [x] Codex U2 review fixes F1–F5 plus the team-backed DAG snapshot test (`CLAUDE_REVIEW_U2_FIXES.md`): readiness reuses plan-validation role rules, template copies are complete under a 192,000-byte team budget, and the editor keeps typed grants, ignores stale readiness responses and keeps Restore/member selection usable on archived teams. `npm run check` passed 122 tests; all 21 browser workflows passed. Docker/protocol/M2/M3 standalone suites were not repeated (no runtime, sandbox or adapter code changed).
+- [x] Codex U2 review fixes F1–F5 plus the team-backed DAG snapshot test: readiness reuses plan-validation role rules, template copies are complete under a 192,000-byte team budget, and the editor keeps typed grants, ignores stale readiness responses and keeps Restore/member selection usable on archived teams. `npm run check` passed 122 tests; all 21 browser workflows passed. Docker/protocol/M2/M3 standalone suites were not repeated (no runtime, sandbox or adapter code changed).
 - [x] U2 follow-up F6: template/custom additions are disabled and guarded while saving, including menus already open. The regression failed against the old UI, then passed with the fix and verified additions persist after saving resumes. `npm run check` passed 122 tests (no skips), typechecks and build; the final browser run passed all 22 workflows. The first browser run had an existing F2 timeout and an ambiguous F6 status locator when a connection banner appeared; the F6 locator now selects the save notice, and the full rerun passed in 37.2 seconds. Browser runs used an empty temporary credential runtime. U2 is accepted with the existing limitations; the mode-default idempotency follow-up remains separate. No authenticated fixtures, credential inspection, Docker rebuild or push was performed for this fix.
 - [x] U3 as above; no new engine integration or authenticated model calls.
-- [x] U3 review (`CLAUDE_REVIEW_U3.md`): accepted with one P2 fix applied, diff and response redaction now use the store's full secret list (configured provider keys as well as the environment heuristic). `npm run check` passed 132 tests; all 32 browser workflows passed. Five P3 notes remain open.
+- [x] U3 review: accepted with one P2 fix applied, diff and response redaction now use the store's full secret list (configured provider keys as well as the environment heuristic). `npm run check` passed 132 tests; all 32 browser workflows passed. Five P3 notes remain open.
 
 U1 is the first integrated UI increment before M4. Keep U2/U3 and M4 as separately reviewed work; a team editor must not claim unavailable engines or capabilities work.
 
@@ -188,7 +193,7 @@ Live acceptance is not claimed for this new increment. The earlier authorized li
 
 ## U3 remaining review notes F2–F6 — 2026-10-30
 
-All five P3 findings from `CLAUDE_REVIEW_U3.md` are addressed after the configured-secret fix:
+All five P3 findings from the U3 review are addressed after the configured-secret fix:
 
 - F2: Overview's setup note follows missing/locked runtime sign-in or an empty project list; a configured workspace no longer receives an unconditional prompt. Teams remain optional.
 - F3: Diff failures retain fail-closed 409 responses and emit bounded, redacted diagnostics with task ID, read phase and error code. Synthetic missing-runtime and secret-bearing process errors exercise the logging path.
@@ -305,7 +310,7 @@ Codex review findings F1–F4 fixed with regression tests (reports surviving rep
 
 ## Limitation reporting follow-up — 2026-11-02
 
-Implemented R1–R4 from `CODEX_REVIEW_LIMITATIONS_FIXES.md`: bounded identity deduplication and explicit counts, redaction before handoff and in legacy display projections, setup-report capture, failed/cancelled outcome retention, and run/attempt provenance. Result, Overview and task-list counts no longer include a generated omission notice. R5–R9 are handoff revisions only; shared dependency storage and cleanup remain unimplemented.
+Implemented R1–R4 from the limitation-reporting review: bounded identity deduplication and explicit counts, redaction before handoff and in legacy display projections, setup-report capture, failed/cancelled outcome retention, and run/attempt provenance. Result, Overview and task-list counts no longer include a generated omission notice. R5–R9 are handoff revisions only; shared dependency storage and cleanup remain unimplemented.
 
 Backend and UI compiler checks passed during the follow-up. Added regression tests remain unrun by owner instruction; no runtime/UI, Docker, protocol, M2/M3 or authenticated verification is claimed. Changes are prepared for Claude's independent review.
 
@@ -381,3 +386,8 @@ Completed task-specific cancellation/drain and serialized Git metadata creation/
 Added deterministic coverage for cancellation without interrupting siblings, cleanup alongside active work, approval slot release, simultaneous DAG tasks, shared-repository metadata, startup admission and a real browser flow with three active tasks plus queued/recovery states. The Docker suite now includes `parallel-smoke.mjs`, which proves two top-level tasks overlap and independently validate/commit/clean up while preserving the original checkout.
 
 Final verification: `npm run check` passed 305 tests (four optional checks skipped), both typechecks and production builds; all 50 browser workflows passed; the full isolated Docker suite passed. Narrow-screen layout inspected. No authenticated model calls, live service restart or deployment. Defaults remain one task and two operations; parallelism is explicitly configurable. AWS workers, external queues, Jira intake, automatic GitHub merging and general failed-task resume remain future work.
+
+
+## Rolling subtasks and Settings control — 2026-11-19
+
+Replaced fixed DAG waves with rolling admission, serial result integration and dependency-aware replenishment. Added the persistent, version-checked **Parallel subtasks per task** setting (1–8, default 2), independent of whole-task capacity. Running executions retain their initial limit. Cancellation, failure draining, per-agent capacity, disk headroom and combined validation/review remain required.

@@ -25,16 +25,16 @@ import { STARTER_TEAM_ID, STARTER_TEAM_NAME, STARTER_ROLES } from '../domain/sta
 import { log, redact } from '../telemetry/redact.js';
 import type { SchedulerStatus, TaskScheduling } from '../domain/dispatch.js';
 
-type Runner = { enqueue(id: string): void; cancel(id: string): void; isDrained?(id: string): boolean; readonly executionFailure?: { taskId: string; message: string } | undefined; readonly scheduling?: SchedulerStatus; taskScheduling?(id: string): TaskScheduling };
+type Runner = { enqueue(id: string): void | Promise<void>; cancel(id: string): void | Promise<void>; isDrained?(id: string): boolean | Promise<boolean>; readonly executionFailure?: { taskId: string; message: string } | undefined; scheduling?(): Promise<SchedulerStatus>; taskScheduling?(id: string): Promise<TaskScheduling> };
 /** Fetches the files of a task's ticket into a folder. Supplied by the integrations; execution only knows the result. */
 export type TicketFileLoader = (task: Task, directory: string) => Promise<TicketFiles>;
 /** What every engine call of a ticket task receives besides its prompt. */
 export type TicketMaterial = { images: { path: string; mediaType: string }[]; text: string };
 export class TaskService {
   /** Resolve the service only after the caller is authorized for this workspace. */
-  workspaceFor(mode: 'local' | { ownerId: string | undefined }): (actor: Actor) => TaskService {
+  async workspaceFor(mode: 'local' | { ownerId: string | undefined }): Promise<(actor: Actor) => TaskService> {
     const access = mode === 'local' ? WorkspaceAccess.local() : WorkspaceAccess.shared(mode.ownerId);
-    if (mode !== 'local') this.store.bindWorkspaceOwner(access.ownerId);
+    if (mode !== 'local') await this.store.bindWorkspaceOwner(access.ownerId);
     return actor => {
       access.authorize(actor);
       return this;
@@ -42,8 +42,8 @@ export class TaskService {
   }
 
   private sharedSubmissionOwner?: string;
-  enableSharedSubmissions(ownerId: string) {
-    if (this.store.workspaceOwnerId() !== ownerId) throw new AppError('workspace_owner_mismatch', 'Shared storage requires a bound workspace');
+  async enableSharedSubmissions(ownerId: string) {
+    if (await this.store.workspaceOwnerId() !== ownerId) throw new AppError('workspace_owner_mismatch', 'Shared storage requires a bound workspace');
     this.sharedSubmissionOwner = ownerId;
   }
   private runner?: Runner;
@@ -54,17 +54,29 @@ export class TaskService {
   private reserve?: DiskReserve;
   get diskReserve(): DiskReserve { return this.reserve ??= new DiskReserve(this.dataDir); }
   /** `executableEngines` is what this build can actually run; the schema accepts more engines than that. */
-  constructor(readonly store: Store, readonly config: AppConfig, readonly dataDir: string, readonly platform: NodeJS.Platform = process.platform, readonly executableEngines: ReadonlySet<string> = new Set(['codex'])) {
-    const saved = store.taskConcurrency();
+  private constructor(readonly store: Store, readonly config: AppConfig, readonly dataDir: string, readonly platform: NodeJS.Platform = process.platform, readonly executableEngines: ReadonlySet<string> = new Set(['codex'])) {}
+  static async create(store: Store, config: AppConfig, dataDir: string, platform: NodeJS.Platform = process.platform, executableEngines: ReadonlySet<string> = new Set(['codex'])) {
+    const workItems = await store.workItemConcurrency();
+    if (workItems) config.concurrency = Config.shape.concurrency.parse(workItems.concurrency);
+    const saved = await store.taskConcurrency();
     if (saved) config.maxConcurrentTasks = Config.shape.maxConcurrentTasks.parse(saved.maxConcurrentTasks);
+    return new TaskService(store, config, dataDir, platform, executableEngines);
   }
-  taskConcurrency() { return { maxConcurrentTasks: this.config.maxConcurrentTasks, version: this.store.taskConcurrency()?.version ?? 0 }; }
-  setTaskConcurrency(input: unknown) {
+  async taskConcurrency() { return { maxConcurrentTasks: this.config.maxConcurrentTasks, version: (await this.store.taskConcurrency())?.version ?? 0 }; }
+  async setTaskConcurrency(input: unknown) {
     const settings = z.object({ maxConcurrentTasks: Config.shape.maxConcurrentTasks.removeDefault(), expectedVersion: z.number().int().min(0) }).strict().parse(input);
     this.assertExecutionAvailable();
-    this.store.setTaskConcurrency(settings.maxConcurrentTasks, settings.expectedVersion);
+    await this.store.setTaskConcurrency(settings.maxConcurrentTasks, settings.expectedVersion);
     this.config.maxConcurrentTasks = settings.maxConcurrentTasks;
     return this.taskConcurrency();
+  }
+  async workItemConcurrency() { return { concurrency: this.config.concurrency, version: (await this.store.workItemConcurrency())?.version ?? 0 }; }
+  async setWorkItemConcurrency(input: unknown) {
+    const settings = z.object({ concurrency: Config.shape.concurrency.removeDefault(), expectedVersion: z.number().int().min(0) }).strict().parse(input);
+    this.assertExecutionAvailable();
+    await this.store.setWorkItemConcurrency(settings.concurrency, settings.expectedVersion);
+    this.config.concurrency = settings.concurrency;
+    return this.workItemConcurrency();
   }
   get support(): RuntimeSupport { return { config: this.config, capabilities: builtinCapabilities, executableEngines: this.executableEngines, platform: this.platform }; }
   attachRunner(runner: Runner): void { this.runner = runner; }
@@ -74,10 +86,10 @@ export class TaskService {
   onSubmitted(hook: (task: Task) => void): void { this.submitted = hook; }
   private admitted?: (task: Task) => void;
   onAdmitted(hook: (task: Task) => void) { this.admitted = hook; }
-  admitSubmission(task: Task) {
+  async admitSubmission(task: Task) {
     if (terminalStates.includes(task.state)) return;
-    try { this.admitted?.(task); } catch { /* Integration notifications are best effort. */ }
-    this.runner?.enqueue(task.id);
+    try { await this.admitted?.(task); } catch { /* Integration notifications are best effort. */ }
+    await this.runner?.enqueue(task.id);
   }
   private startBase?: (task: Task) => Promise<string | undefined>;
   /** Lets an integration name the commit a task's worktree starts from. Without one, or when it names none, the task starts from local `main`. */
@@ -92,17 +104,17 @@ export class TaskService {
    * fetched does not stop the task: the request already holds its text, and the reason is recorded.
    */
   async loadTicketFiles(id: string): Promise<void> {
-    const task = this.store.task(id);
-    if (!task.ticket || !this.ticketLoader || this.store.evidence(id).some(e => e.kind === 'ticket-files')) return;
-    try { this.store.record(id, 'ticket-files', { ticket: task.ticket.key, source: task.ticket.name, ...await this.ticketLoader(task, this.ticketDirectory(id)) }); }
+    const task = await this.store.task(id);
+    if (!task.ticket || !this.ticketLoader || (await this.store.evidence(id)).some(e => e.kind === 'ticket-files')) return;
+    try { await this.store.record(id, 'ticket-files', { ticket: task.ticket.key, source: task.ticket.name, ...await this.ticketLoader(task, this.ticketDirectory(id)) }); }
     catch (error) {
       if (!(error instanceof AppError)) throw error;
-      this.store.record(id, 'ticket-files', { ticket: task.ticket.key, source: task.ticket.name, saved: [], skipped: [], error: error.message });
+      await this.store.record(id, 'ticket-files', { ticket: task.ticket.key, source: task.ticket.name, saved: [], skipped: [], error: error.message });
     }
   }
   /** The fetched files as engines take them: pictures by path, short text inside the prompt, both marked as material and not as instructions. */
   async ticketMaterial(id: string): Promise<TicketMaterial> {
-    const record = this.store.evidence(id).filter(e => e.kind === 'ticket-files').at(-1)?.data as (Partial<TicketFiles> & { error?: string }) | undefined;
+    const record = (await this.store.evidence(id)).filter(e => e.kind === 'ticket-files').at(-1)?.data as (Partial<TicketFiles> & { error?: string }) | undefined;
     const none: TicketMaterial = { images: [], text: '' };
     if (!record) return none;
     const directory = this.ticketDirectory(id); const images: TicketMaterial['images'] = []; const lines: string[] = []; const texts: string[] = [];
@@ -121,7 +133,7 @@ export class TaskService {
   }
   /** One fetched picture of a working task's ticket, for the task page. Gone once the task has ended. */
   async ticketPicture(id: string, file: string): Promise<{ type: string; bytes: Buffer }> {
-    const records = this.store.evidence(id).filter(e => ['ticket-files', 'ticket-files-removed'].includes(e.kind)); const last = records.at(-1);
+    const records = (await this.store.evidence(id)).filter(e => ['ticket-files', 'ticket-files-removed'].includes(e.kind)); const last = records.at(-1);
     const saved = last?.kind === 'ticket-files' ? ((last.data as Partial<TicketFiles>).saved ?? []).find(entry => entry.file === file && entry.kind === 'image') : undefined;
     const bytes = saved && /^\d{2}\.[a-z]{2,4}$/.test(saved.file) ? await readFile(join(this.ticketDirectory(id), saved.file)).catch(() => undefined) : undefined;
     if (!saved || !bytes) throw new AppError('not_found', 'This picture is not kept: the copies of a ticket\'s files are removed when the task ends', 404);
@@ -131,25 +143,25 @@ export class TaskService {
   removeTicketFiles(id: string): Promise<void> {
     // Cancelling and the clean-up after a worker stops can both ask; the second waits for the first and then finds nothing to do.
     const next = (this.removingTicketFiles.get(id) ?? Promise.resolve()).catch(() => undefined).then(async () => {
-      const task = this.store.task(id);
+      const task = await this.store.task(id);
       if (!task.ticket || !terminalStates.includes(task.state)) return;
-      const fetched = this.store.evidence(id).filter(e => ['ticket-files', 'ticket-files-removed'].includes(e.kind)).at(-1);
+      const fetched = (await this.store.evidence(id)).filter(e => ['ticket-files', 'ticket-files-removed'].includes(e.kind)).at(-1);
       if (fetched?.kind !== 'ticket-files') return;
       await rm(this.ticketDirectory(id), { recursive: true, force: true });
-      this.store.record(id, 'ticket-files-removed', { files: ((fetched.data as Partial<TicketFiles>).saved ?? []).length });
+      await this.store.record(id, 'ticket-files-removed', { files: ((fetched.data as Partial<TicketFiles>).saved ?? []).length });
     }).finally(() => { if (this.removingTicketFiles.get(id) === next) this.removingTicketFiles.delete(id); });
     this.removingTicketFiles.set(id, next);
     return next;
   }
   get executionEnabled(): boolean { return Boolean(this.runner); }
   get executionFailure() { return this.runner?.executionFailure; }
-  scheduling(): SchedulerStatus {
-    return this.runner?.scheduling ?? { enabled: false, maxConcurrentTasks: this.config.maxConcurrentTasks,
+  async scheduling(): Promise<SchedulerStatus> {
+    return await this.runner?.scheduling?.() ?? { enabled: false, maxConcurrentTasks: this.config.maxConcurrentTasks,
       maxConcurrentOperations: this.config.maxConcurrentOperations, active: [], queued: 0,
       runningOperations: 0, waitingOperations: 0, held: 0, attention: [] };
   }
-  taskScheduling(id: string): TaskScheduling | undefined {
-    if (this.sharedSubmissionOwner && this.store.heldForSharedClaim(id)) {
+  async taskScheduling(id: string): Promise<TaskScheduling | undefined> {
+    if (this.sharedSubmissionOwner && await this.store.heldForSharedClaim(id)) {
       return { status: 'held', reason: 'Waiting for the workspace claim in PostgreSQL' };
     }
     return this.runner?.taskScheduling?.(id);
@@ -169,14 +181,14 @@ export class TaskService {
   }
   private async maintenance<T>(id: string, action: (task: Task) => Promise<T>): Promise<T> {
     this.assertNotMaintaining(id);
-    if (this.store.dispatch(id)?.blocker) throw new AppError('recovery_required', 'Task execution was interrupted; inspect prior workers and retained work before cleanup', 409);
-    const task = this.store.task(id);
-    if (!terminalStates.includes(task.state)) throw new AppError('task_active', 'Storage maintenance requires a completed, failed or cancelled task', 409);
-    if (this.runner && !this.runner.isDrained?.(id)) throw new AppError('task_active', 'Task workers are still draining; try again after they stop', 409);
-    // Synchronous acquisition with no await between state/ownership checks and the lease.
-    // Run/approve/cancel share this guard; never wait for drain while holding it.
     this.maintaining.add(id);
-    try { return await action(task); } finally { this.maintaining.delete(id); }
+    try {
+      if ((await this.store.dispatch(id))?.blocker) throw new AppError('recovery_required', 'Task execution was interrupted; inspect prior workers and retained work before cleanup', 409);
+      const task = await this.store.task(id);
+      if (!terminalStates.includes(task.state)) throw new AppError('task_active', 'Storage maintenance requires a completed, failed or cancelled task', 409);
+      if (this.runner && !await this.runner.isDrained?.(id)) throw new AppError('task_active', 'Task workers are still draining; try again after they stop', 409);
+      return await action(task);
+    } finally { this.maintaining.delete(id); }
   }
   private async taskWorkspaces(task: Task): Promise<{ path: string; branch: string }[]> {
     const dataRoot = await realpath(this.dataDir);
@@ -191,7 +203,7 @@ export class TaskService {
       }
     };
     add(task.workspace);
-    for (const e of this.store.evidence(task.id)) {
+    for (const e of await this.store.evidence(task.id)) {
       if (e.kind === 'work-item') add((e.data as { workspace?: unknown }).workspace);
       if (e.kind === 'worktree-intent') {
         const d = e.data as { owner?: string; workItemId?: string; branch?: string };
@@ -202,63 +214,63 @@ export class TaskService {
     }
     return [...workspaces.values()];
   }
-  private taskRunIds(id: string): string[] {
-    return this.store.evidence(id).filter(e => e.kind === 'run-started').map(e => {
+  private async taskRunIds(id: string): Promise<string[]> {
+    return (await this.store.evidence(id)).filter(e => e.kind === 'run-started').map(e => {
       const runId = (e.data as { runId?: unknown }).runId;
       if (typeof runId !== 'string') throw new AppError('compaction_ownership', 'Malformed execution run ownership record', 409);
       return runId;
     });
   }
   compactionPreview(id: string) {
-    return this.maintenance(id, async task => (this.compactor ??= new WorktreeCompactor(this.dataDir)).preview(this.store.project(task.projectId), id, await this.taskWorkspaces(task), this.taskRunIds(id)));
+    return this.maintenance(id, async task => (this.compactor ??= new WorktreeCompactor(this.dataDir)).preview(await this.store.project(task.projectId), id, await this.taskWorkspaces(task), await this.taskRunIds(id)));
   }
   compact(id: string, digest: string) {
-    return this.maintenance(id, async task => (this.compactor ??= new WorktreeCompactor(this.dataDir)).compact(this.store.project(task.projectId), id, await this.taskWorkspaces(task), digest,
-      preview => this.store.record(id, 'compaction-intent', preview),
-      result => this.store.record(id, 'compaction', { digest, ...result }), this.taskRunIds(id)));
+    return this.maintenance(id, async task => (this.compactor ??= new WorktreeCompactor(this.dataDir)).compact(await this.store.project(task.projectId), id, await this.taskWorkspaces(task), digest,
+      async preview => await this.store.record(id, 'compaction-intent', preview),
+      async result => await this.store.record(id, 'compaction', { digest, ...result }), await this.taskRunIds(id)));
   }
   /** Reclaim terminal task resources after drain, preserving branches and unfinished work. */
   async cleanupTerminalTask(id: string): Promise<void> {
-    const state = this.store.task(id).state;
+    const state = (await this.store.task(id)).state;
     if (terminalStates.includes(state)) await this.removeTicketFiles(id).catch(error => log('ticket_files_cleanup_failed', { taskId: id, error: redact(error instanceof Error ? error.message : String(error), this.store.secrets) }));
     if (!terminalStates.includes(state) || (!this.config.cleanupTerminalTasks && !(this.config.compactCompletedTasks && state === 'completed'))) return;
     try {
       await this.maintenance(id, async task => {
         const compactor = this.compactor ??= new WorktreeCompactor(this.dataDir);
-        const project = this.store.project(task.projectId); const workspaces = await this.taskWorkspaces(task);
-        const runIds = this.taskRunIds(id);
+        const project = await this.store.project(task.projectId); const workspaces = await this.taskWorkspaces(task);
+        const runIds = await this.taskRunIds(id);
         const preview = await compactor.preview(project, id, workspaces, runIds);
         if (preview.candidates.length) await compactor.compact(project, id, workspaces, preview.digest,
-          intent => this.store.record(id, 'compaction-intent', { ...intent, automatic: true }),
-          result => this.store.record(id, 'compaction', { digest: preview.digest, automatic: true, ...result }), runIds);
+          async intent => await this.store.record(id, 'compaction-intent', { ...intent, automatic: true }),
+          async result => await this.store.record(id, 'compaction', { digest: preview.digest, automatic: true, ...result }), runIds);
         if (this.config.cleanupTerminalTasks) {
           await cleanupTerminalWorktrees(this.dataDir, project, id, workspaces,
-            workspace => this.store.record(id, 'worktree-cleanup-intent', { automatic: true, ...workspace }),
-            workspace => this.store.record(id, 'worktree-cleanup', { automatic: true, ...workspace }));
-          if (this.store.evidence(id).filter(e => ['terminal-cleanup', 'compaction-deferred'].includes(e.kind)).at(-1)?.kind !== 'terminal-cleanup') this.store.record(id, 'terminal-cleanup', { automatic: true, status: 'completed', workspaces: workspaces.map(w => w.path) });
+            async workspace => await this.store.record(id, 'worktree-cleanup-intent', { automatic: true, ...workspace }),
+            async workspace => await this.store.record(id, 'worktree-cleanup', { automatic: true, ...workspace }));
+          if ((await this.store.evidence(id)).filter(e => ['terminal-cleanup', 'compaction-deferred'].includes(e.kind)).at(-1)?.kind !== 'terminal-cleanup') await this.store.record(id, 'terminal-cleanup', { automatic: true, status: 'completed', workspaces: workspaces.map(w => w.path) });
         } else if (task.workspace && task.outcome?.commit) await new WorkspaceManager(this.dataDir).removeCleanCompleted(project, id, workspaces,
           { branch: task.workspace.branch, commit: task.outcome.commit },
-          workspace => this.store.record(id, 'worktree-cleanup-intent', { automatic: true, ...workspace }),
-          workspace => this.store.record(id, 'worktree-cleanup', { automatic: true, ...workspace }));
+          async workspace => await this.store.record(id, 'worktree-cleanup-intent', { automatic: true, ...workspace }),
+          async workspace => await this.store.record(id, 'worktree-cleanup', { automatic: true, ...workspace }));
       });
     } catch (error) {
       // Maintenance cannot turn a reviewed result into a failed task or hide storage trouble.
       const message = String(redact(error instanceof Error ? error.message : String(error), this.store.secrets)).slice(0, 2000);
-      try { this.store.record(id, 'compaction-deferred', { automatic: true, message }); } catch { /* log without the database */ }
+      try { await this.store.record(id, 'compaction-deferred', { automatic: true, message }); } catch { /* log without the database */ }
       log('compaction_deferred', { taskId: id, message });
     }
   }
-  run(id: string): Task {
+  async run(id: string): Promise<Task> {
     this.assertExecutionAvailable();
     this.assertNotMaintaining(id);
-    if (this.store.dispatch(id)?.blocker) throw new AppError('recovery_required', 'Inspect the interrupted execution before requesting more work', 409);
+    if ((await this.store.dispatch(id))?.blocker) throw new AppError('recovery_required', 'Inspect the interrupted execution before requesting more work', 409);
     if (!this.runner) throw new AppError('execution_unavailable', 'No execution runtime attached', 503);
     this.runner.enqueue(id); return this.store.task(id);
   }
   /** In Docker one folder can be mounted under two project IDs; the paths differ but the directory is the same. */
   private async folderHolder(path: string, except?: string) {
     const identity = await folderIdentity(path);
-    for (const other of this.store.projects()) {
+    for (const other of await this.store.projects()) {
       if (other.id === except || other.archivedAt) continue;
       if (other.path === path || (identity && await folderIdentity(other.path) === identity)) return other;
     }
@@ -266,7 +278,7 @@ export class TaskService {
   }
   /** Archiving keeps history and the ID; restoring needs the folder to be reachable and not held by an active project. */
   async setProjectArchived(projectId: string, archived: boolean, expectedVersion: number) {
-    const project = this.store.project(projectId);
+    const project = await this.store.project(projectId);
     if (!archived && project.archivedAt) {
       if (!await folderIdentity(project.path)) throw new AppError('invalid_path', 'The folder of this project is not reachable by the service, so it cannot be restored.', 409);
       const holder = await this.folderHolder(project.path, projectId);
@@ -274,25 +286,25 @@ export class TaskService {
     }
     return this.store.setProjectArchived(projectId, archived, expectedVersion);
   }
-  renameProject(projectId: string, name: unknown, expectedVersion: number) { return this.store.setProjectName(projectId, ProjectName.parse(name), expectedVersion); }
+  async renameProject(projectId: string, name: unknown, expectedVersion: number) { return this.store.setProjectName(projectId, ProjectName.parse(name), expectedVersion); }
   /** For the launcher, which needs the ID before it can attach the folder: checks the name and reserves nothing. */
-  prepareProject(name: unknown) {
+  async prepareProject(name: unknown) {
     const parsed = ProjectName.parse(name);
-    const holder = this.store.projects().find(p => !p.archivedAt && p.name!.toLowerCase() === parsed.toLowerCase());
+    const holder = (await this.store.projects()).find(p => !p.archivedAt && p.name!.toLowerCase() === parsed.toLowerCase());
     if (holder) throw new AppError('project_conflict', `An active project is already named "${holder.name}". Choose another name.`, 409);
-    return { id: this.freeProjectId(), name: parsed };
+    return { id: await this.freeProjectId(), name: parsed };
   }
-  private freeProjectId(): string {
-    const taken = new Set(this.store.projects().map(p => p.id));
+  private async freeProjectId(): Promise<string> {
+    const taken = new Set((await this.store.projects()).map(p => p.id));
     for (;;) { const id = newProjectId(); if (!taken.has(id)) return id; }
   }
   async registerProject(input: unknown) {
     const project = await inspectProject(input);
     // A generated ID never collides with a registered one; an explicit ID is the caller's choice.
-    if ((input as { id?: unknown } | null)?.id === undefined) project.id = this.freeProjectId();
+    if ((input as { id?: unknown } | null)?.id === undefined) project.id = await this.freeProjectId();
     const holder = await this.folderHolder(project.path, project.id);
     if (holder) throw new AppError('project_conflict', `This folder is already registered as project "${holder.name}". Use it, or archive it first.`, 409);
-    const starter = this.store.teams('all').find(t => t.id === STARTER_TEAM_ID);
+    const starter = (await this.store.teams('all')).find(t => t.id === STARTER_TEAM_ID);
     return this.store.registerProject(project, starter && !starter.archived && teamReadiness(starter.members, this.support).ready ? starter.id : undefined);
   }
   /** Called before serving requests. Seed only bundled roles, never project/user registry overrides. */
@@ -303,13 +315,13 @@ export class TaskService {
       if (!agent) throw new AppError('starter_unavailable', `Missing bundled starter role: ${id}`);
       return this.memberTemplate(agent);
     });
-    const team = this.store.ensureStarterTeam({ name: STARTER_TEAM_NAME, description: 'Plans changes, develops independent frontend and backend work in parallel, and independently reviews the combined result.', members }, t => !t.archived && teamReadiness(t.members, this.support).ready);
+    const team = await this.store.ensureStarterTeam({ name: STARTER_TEAM_NAME, description: 'Plans changes, develops independent frontend and backend work in parallel, and independently reviews the combined result.', members }, t => !t.archived && teamReadiness(t.members, this.support).ready);
     return this.withReadiness(team);
   }
   async agents(projectId?: string) {
     const directories = [builtinDirectory, join(this.dataDir, 'agents')];
     if (projectId) {
-      const project = this.store.project(projectId);
+      const project = await this.store.project(projectId);
       const overrides = join(project.path, '.devagents', 'agents');
       try {
         if (!isWithin(project.path, await realpath(overrides))) throw new AppError('path_denied', 'Agent override directory escapes project');
@@ -320,13 +332,13 @@ export class TaskService {
   }
   // Saved teams. Validity (throws) and readiness (diagnostics) are separate: a draft can be saved, not run.
   private withReadiness(team: TeamRecord): TeamRecord & { readiness: TeamReadiness } { return { ...team, readiness: teamReadiness(team.members, this.support) }; }
-  teams(filter: 'active' | 'archived' | 'all' = 'active'): TeamSummary[] {
-    return this.store.teams(filter).map(t => ({ id: t.id, name: t.name, description: t.description, revision: t.revision, archived: t.archived, createdAt: t.createdAt, updatedAt: t.updatedAt, members: t.members.length, enabledMembers: t.members.filter(m => m.enabled).length, readiness: teamReadiness(t.members, this.support) }));
+  async teams(filter: 'active' | 'archived' | 'all' = 'active'): Promise<TeamSummary[]> {
+    return (await this.store.teams(filter)).map(t => ({ id: t.id, name: t.name, description: t.description, revision: t.revision, archived: t.archived, createdAt: t.createdAt, updatedAt: t.updatedAt, members: t.members.length, enabledMembers: t.members.filter(m => m.enabled).length, readiness: teamReadiness(t.members, this.support) }));
   }
-  team(id: string) { return { ...this.withReadiness(this.store.team(id)), revisions: this.store.teamRevisions(id) }; }
+  async team(id: string) { return { ...this.withReadiness(await this.store.team(id)), revisions: await this.store.teamRevisions(id) }; }
   /** The skills a task submitted now would be told about: those on the project's main commit. */
   async projectSkills(projectId: string): Promise<ProjectSkills> {
-    const project = this.store.project(projectId);
+    const project = await this.store.project(projectId);
     try { return await projectSkills(project.path, await mainCommit(project.path)); }
     catch { return { skills: [], error: 'The project folder could not be read.' }; }
   }
@@ -344,11 +356,11 @@ export class TaskService {
   }
   /** Server-side diagnostics for an unsaved draft; the browser never computes readiness itself. */
   checkTeam(input: unknown): { readiness: TeamReadiness } { return { readiness: teamReadiness(TeamInput.parse(input).members, this.support) }; }
-  createTeam(input: unknown) { const team = TeamInput.parse(input); teamReadiness(team.members, this.support); return this.withReadiness(this.store.createTeam(team)); }
-  updateTeam(id: string, expectedRevision: number, input: unknown) { const team = TeamInput.parse(input); teamReadiness(team.members, this.support); return this.withReadiness(this.store.updateTeam(id, expectedRevision, team)); }
-  setTeamArchived(id: string, expectedRevision: number, archived: boolean) { return this.withReadiness(this.store.setTeamArchived(id, expectedRevision, archived)); }
-  duplicateTeam(id: string, name: unknown) { return this.withReadiness(this.store.duplicateTeam(id, z.string().min(1).max(100).parse(name))); }
-  setProjectDefaultTeam(projectId: string, teamId: string | null, expectedVersion: number) { return this.store.setProjectDefaultTeam(projectId, teamId, expectedVersion); }
+  async createTeam(input: unknown) { const team = TeamInput.parse(input); teamReadiness(team.members, this.support); return this.withReadiness(await this.store.createTeam(team)); }
+  async updateTeam(id: string, expectedRevision: number, input: unknown) { const team = TeamInput.parse(input); teamReadiness(team.members, this.support); return this.withReadiness(await this.store.updateTeam(id, expectedRevision, team)); }
+  async setTeamArchived(id: string, expectedRevision: number, archived: boolean) { return this.withReadiness(await this.store.setTeamArchived(id, expectedRevision, archived)); }
+  async duplicateTeam(id: string, name: unknown) { return this.withReadiness(await this.store.duplicateTeam(id, z.string().min(1).max(100).parse(name))); }
+  async setProjectDefaultTeam(projectId: string, teamId: string | null, expectedVersion: number) { return this.store.setProjectDefaultTeam(projectId, teamId, expectedVersion); }
   /** Registry agents offered as member templates: complete explicit copies, never links back to the YAML and never truncated. */
   async templates(projectId?: string): Promise<TeamMember[]> {
     return (await this.agents(projectId)).map(a => this.memberTemplate(a));
@@ -361,11 +373,11 @@ export class TaskService {
    * Engine, provider and model are made concrete now; `model: default` without a configured
    * `defaultModel` stays unpinned and is recorded as such (`modelPinned: false`) rather than guessed.
    */
-  private freezeTeam(explicitTeamId: string | undefined, projectId: string): TaskTeam | undefined {
-    const project = this.store.project(projectId);
+  private async freezeTeam(explicitTeamId: string | undefined, projectId: string): Promise<TaskTeam | undefined> {
+    const project = await this.store.project(projectId);
     const teamId = explicitTeamId ?? project.defaultTeamId;
     if (!teamId) return undefined;
-    const team = this.store.team(teamId);
+    const team = await this.store.team(teamId);
     if (team.archived) throw new AppError('team_archived', explicitTeamId ? `Team "${team.name}" is archived; restore it or choose another team` : `The default team "${team.name}" of project ${projectId} is archived; choose a team explicitly or change the project default`, 409);
     const readiness = teamReadiness(team.members, this.support);
     if (!readiness.ready) throw new AppError('team_not_ready', `Team "${team.name}" is a draft and cannot receive work: ${readiness.diagnostics.filter(d => d.level === 'error').map(d => d.message).join('; ')}`, 409);
@@ -375,42 +387,42 @@ export class TaskService {
     return { id: team.id, revision: team.revision, name: team.name, snapshotAt: new Date().toISOString(), members, providers, ...(this.config.defaultModel ? { defaultModel: this.config.defaultModel } : {}), modelPinned: members.filter(m => m.enabled).every(m => m.model !== 'default') };
   }
   /** Diff text is redacted with the same secret list the store applies at rest, not only the environment heuristic. */
-  diff(id: string) { const task = this.store.task(id); return readTaskDiff(this.store.project(task.projectId), task, this.dataDir, this.store.secrets); }
-  submissionOptions() {
-    return { projects: this.store.projects().filter(p => !p.archivedAt).map(p => ({ projectId: p.id, mode: p.defaultMode ?? this.config.defaultMode ?? null, source: p.defaultMode ? 'project' : this.config.defaultMode ? 'service' : 'none' })) };
+  async diff(id: string) { const task = await this.store.task(id); return readTaskDiff(await this.store.project(task.projectId), task, this.dataDir, this.store.secrets); }
+  async submissionOptions() {
+    return { projects: (await this.store.projects()).filter(p => !p.archivedAt).map(p => ({ projectId: p.id, mode: p.defaultMode ?? this.config.defaultMode ?? null, source: p.defaultMode ? 'project' : this.config.defaultMode ? 'service' : 'none' })) };
   }
   /** `followUp` marks a fix round of a pull request; only the pull request service passes it. */
-  submit(input: unknown, key: string, followUp?: Task['followUp']): Task {
+  async submit(input: unknown, key: string, followUp?: Task['followUp']): Promise<Task> {
     this.assertExecutionAvailable();
     const task = TaskInput.parse(input);
-    const created = this.store.createTask(task, key, () => this.freezeTeam(task.teamId, task.projectId), () => this.store.project(task.projectId).defaultMode ?? this.config.defaultMode, this.config.devagentsRules, followUp, this.sharedSubmissionOwner);
-    try { this.submitted?.(created); } catch { /* an integration's bookkeeping never refuses a task */ }
-    if (!this.sharedSubmissionOwner) this.admitSubmission(created);
+    const created = await this.store.createTask(task, key, async () => await this.freezeTeam(task.teamId, task.projectId), async () => (await this.store.project(task.projectId)).defaultMode ?? this.config.defaultMode, this.config.devagentsRules, followUp, this.sharedSubmissionOwner);
+    try { await this.submitted?.(created); } catch { /* an integration's bookkeeping never refuses a task */ }
+    if (!this.sharedSubmissionOwner) await this.admitSubmission(created);
     return created;
   }
-  mode(id: string, mode: unknown): Task {
+  async mode(id: string, mode: unknown): Promise<Task> {
     this.assertExecutionAvailable();
     this.assertNotMaintaining(id);
-    const parsed = Mode.parse(mode); const task = this.store.task(id);
+    const parsed = Mode.parse(mode); const task = await this.store.task(id);
     if (task.state !== 'awaiting_mode') throw new AppError('invalid_transition', 'Autonomy mode has already been selected', 409);
-    const updated = this.store.transition(id, task.version, 'planning', 'user', `Autonomy selected: ${parsed}`, { mode: parsed });
-    this.runner?.enqueue(id); return updated;
+    const updated = await this.store.transition(id, task.version, 'planning', 'user', `Autonomy selected: ${parsed}`, { mode: parsed });
+    await this.runner?.enqueue(id); return updated;
   }
   async proposePlan(id: string, input: unknown, snapshot?: AgentDefinition[]): Promise<Task> {
     if (this.runner && !snapshot) throw new AppError('automatic_planning', 'The active execution service generates plans automatically', 409);
-    const task = this.store.task(id);
+    const task = await this.store.task(id);
     if (task.state !== 'planning') throw new AppError('invalid_transition', 'Task is not awaiting a plan', 409);
     const plan = redactReportProse(validatePlan(input, task.projectId, snapshot ?? task.agents ?? await this.agents(task.projectId), { platform: this.platform, devagentsRules: taskRules(task) }), this.store.secrets);
     if (task.workspace && plan.items.some(item => item.branch !== (plan.items.length === 1 ? task.workspace!.branch : `${task.workspace!.branch}-${item.id}`))) throw new AppError('branch_mismatch', 'Plan branches must match their managed task/work-item branches');
     return this.store.transition(id, task.version, task.mode === 'plan-approval' ? 'awaiting_plan_approval' : 'ready', 'planner', 'Validated plan stored', { plan });
   }
-  approve(id: string, version: number): Task {
+  async approve(id: string, version: number): Promise<Task> {
     this.assertExecutionAvailable();
     this.assertNotMaintaining(id);
-    const task = this.store.task(id);
+    const task = await this.store.task(id);
     if (task.state !== 'awaiting_plan_approval') throw new AppError('invalid_transition', 'Task is not awaiting plan approval', 409);
-    const updated = this.store.transition(id, version, 'ready', 'user', 'Plan explicitly approved');
-    this.runner?.enqueue(id); return updated;
+    const updated = await this.store.transition(id, version, 'ready', 'user', 'Plan explicitly approved');
+    await this.runner?.enqueue(id); return updated;
   }
   /** Explicit, user-invoked removal of a finished task's managed worktrees and item branches. Never automatic. */
   async cleanup(id: string): Promise<{ removedWorktrees: string[]; removedBranches: string[]; keptBranches: string[] }> {
@@ -422,22 +434,22 @@ export class TaskService {
         seen.add(workspace.path); workspaces.push({ path: workspace.path, branch: workspace.branch });
       };
       add(task.workspace);
-      for (const event of this.store.evidence(id)) if (event.kind === 'work-item') add((event.data as { workspace?: unknown }).workspace);
+      for (const event of await this.store.evidence(id)) if (event.kind === 'work-item') add((event.data as { workspace?: unknown }).workspace);
       // Legacy explicit removal may discard unfinished work. Use compaction to preserve it.
       const keep = new Set(task.state === 'completed' && task.workspace ? [task.workspace.branch] : []);
-      const result = await new WorkspaceManager(this.dataDir).cleanup(this.store.project(task.projectId), id, workspaces, keep);
-      this.store.record(id, 'cleanup', result);
+      const result = await new WorkspaceManager(this.dataDir).cleanup(await this.store.project(task.projectId), id, workspaces, keep);
+      await this.store.record(id, 'cleanup', result);
       return result;
     });
   }
-  cancel(id: string): Task {
+  async cancel(id: string): Promise<Task> {
     this.assertNotMaintaining(id);
-    const task = this.store.task(id);
+    const task = await this.store.task(id);
     if (task.state === 'cancelled') return task;
     if (task.state === 'committing') throw new AppError('commit_in_progress', 'Local commit is being finalized; inspect the resulting task before further action', 409);
     if (terminalStates.includes(task.state)) throw new AppError('invalid_transition', 'Task already finished', 409);
-    const cancelled = this.store.transition(id, task.version, 'cancelled', 'user', 'Task cancelled or plan rejected');
-    this.runner?.cancel(id);
+    const cancelled = await this.store.transition(id, task.version, 'cancelled', 'user', 'Task cancelled or plan rejected');
+    await this.runner?.cancel(id);
     // A task that was waiting has no worker to drain, so its ticket files go now; a working one is cleaned up again after it stops.
     void this.removeTicketFiles(id).catch(() => undefined);
     return cancelled;

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { access, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { PgSession } from '../persistence/pg-session.js';
 import { AppError } from '../domain/errors.js';
 
 const missing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === 'ENOENT';
@@ -10,13 +10,13 @@ async function exists(path: string): Promise<boolean> {
   catch (error) { if (missing(error)) return false; throw error; }
 }
 
-export function sharedVaultOwner(dataDir: string): string {
-  const db = new DatabaseSync(join(dataDir, 'devagents.db'), { readOnly: true });
+export async function sharedVaultOwner(dataDir: string): Promise<string> {
+  const db = await PgSession.open(join(dataDir, 'devagents.db'));
   try {
-    const owner = db.prepare('SELECT user_id FROM workspace_owner WHERE singleton=1').get()?.user_id;
+    const owner = (await db.prepare('SELECT user_id FROM workspace_owner WHERE singleton=1').get())?.user_id;
     if (typeof owner !== 'string') throw new AppError('missing_workspace_owner', 'Start the shared service before unlocking its vault');
     return owner;
-  } finally { db.close(); }
+  } finally { await db.close(); }
 }
 
 export async function vaultMaterialExists(dataDir: string, runtimeDir: string): Promise<boolean> {
@@ -41,7 +41,7 @@ export async function verifyVaultBinding(dataDir: string, runtimeDir: string, ma
     if (previous !== undefined) throw new AppError('vault_key_source', 'This workspace requires its KMS-protected key');
     return;
   }
-  if (owner !== sharedVaultOwner(dataDir)) throw new AppError('vault_owner', 'The vault belongs to a different workspace owner');
+  if (owner !== await sharedVaultOwner(dataDir)) throw new AppError('vault_owner', 'The vault belongs to a different workspace owner');
   const digest = createHash('sha256').update(Buffer.from(master, 'hex')).digest('hex');
   const binding = JSON.stringify({ owner, digest });
   if (previous === binding) return;

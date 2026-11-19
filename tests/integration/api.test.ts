@@ -5,7 +5,7 @@ import { createApi } from '../../src/api/server.js';
 import { fixture } from '../helpers.js';
 
 test('API is authenticated, rejects browser origins, validates input and supports durable events', async () => {
-  const f = await fixture(); const server = createApi(f.service, 'test-token');
+  const f = await fixture(); const server = await createApi(f.service, 'test-token');
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {

@@ -6,8 +6,8 @@ import { Config } from '../../src/domain/schemas.js';
 import { FakeEngine, FixtureValidator } from './fake-engine.js';
 
 const [dataDir, id] = process.argv.slice(2) as [string, string];
-const store = new Store(join(dataDir, 'test.db'));
-const service = new TaskService(store, Config.parse({ schemaVersion: 1, devagentsRules: true }), dataDir);
+const store = await Store.open(join(dataDir, 'test.db'));
+const service = await TaskService.create(store, Config.parse({ schemaVersion: 1, devagentsRules: true }), dataDir);
 const engine = new FakeEngine({ waitForCancel: true });
 const execute = engine.execute.bind(engine);
 engine.execute = async request => {
@@ -15,6 +15,6 @@ engine.execute = async request => {
   return execute(request);
 };
 const runner = new TaskRunner(service, engine, new FixtureValidator()); service.attachRunner(runner);
-runner.enqueue(id);
+await runner.enqueue(id);
 await runner.idle();
-await runner.stop(); store.close();
+await runner.stop(); await store.close();

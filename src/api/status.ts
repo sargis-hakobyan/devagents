@@ -24,7 +24,7 @@ export function statusReporter(input: { dataDir: string; config: AppConfig; vers
   const startedAt = new Date().toISOString(); let cached: { at: number; revision: number; value: ServiceStatus } | undefined;
   return async () => {
     const revision = input.revision?.() ?? 0;
-    if (cached && cached.revision === revision && Date.now() - cached.at < (input.ttlMs ?? 30000)) return cached.value;
+    if (cached && cached.value.limits.concurrency === input.config.concurrency && cached.revision === revision && Date.now() - cached.at < (input.ttlMs ?? 30000)) return cached.value;
     const health = await engineHealth(input.dataDir);
     const codex = health.engines.find(e => e.id === 'codex'); const claude = health.engines.find(e => e.id === 'claude-code');
     const vault = await configuredVault(input.dataDir).catch(() => undefined);

@@ -23,25 +23,25 @@ test('usage normalizes cache subsets, rejects invalid numbers and never treats m
 });
 
 test('authenticated usage endpoint counts each attempt once, retains failed usage and excludes large evidence', async () => {
-  const f = await fixture(); const server = createApi(f.service, 'synthetic-usage-token');
+  const f = await fixture(); const server = await createApi(f.service, 'synthetic-usage-token');
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Usage fixture', mode: 'autonomous' }, 'usage');
-    const start = (runId: string, extra = {}) => f.store.record(task.id, 'run-started', { runId, phase: 'review', workItemId: 'item-a', agentId: 'reviewer', model: 'fixture-model', providerKind: 'openai', auth: 'api-key', usagePrice: price, ...extra });
-    start('one');
-    f.store.record(task.id, 'progress', { runId: 'one', kind: 'usage', data: usage });
-    f.store.record(task.id, 'run-completed', { runId: 'one', usage, output: 'fixture-secret-value' + 'x'.repeat(100000) });
-    for (let i = 0; i < 1001; i++) f.store.record(task.id, 'progress', { runId: 'one', kind: 'command', data: { output: 'command output' } });
-    start('two', { auth: 'login' });
-    f.store.record(task.id, 'progress', { runId: 'two', kind: 'started', data: { billing: 'subscription' } });
-    f.store.record(task.id, 'progress', { runId: 'two', kind: 'usage', data: usage });
-    f.store.record(task.id, 'run-failed', { runId: 'two', error: 'Invalid final output' });
-    start('three', { model: 'default', usagePrice: null });
-    f.store.record(task.id, 'run-completed', { runId: 'three', usage });
-    start('four'); // cancelled before usage was reported
-    start('five'); f.store.record(task.id, 'run-completed', { runId: 'five', usage: { input_tokens: 10, output_tokens: 3 } });
-    f.service.cancel(task.id);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Usage fixture', mode: 'autonomous' }, 'usage');
+    const start = async (runId: string, extra = {}) => await f.store.record(task.id, 'run-started', { runId, phase: 'review', workItemId: 'item-a', agentId: 'reviewer', model: 'fixture-model', providerKind: 'openai', auth: 'api-key', usagePrice: price, ...extra });
+    await start('one');
+    await f.store.record(task.id, 'progress', { runId: 'one', kind: 'usage', data: usage });
+    await f.store.record(task.id, 'run-completed', { runId: 'one', usage, output: 'fixture-secret-value' + 'x'.repeat(100000) });
+    for (let i = 0; i < 1001; i++) await f.store.record(task.id, 'progress', { runId: 'one', kind: 'command', data: { output: 'command output' } });
+    await start('two', { auth: 'login' });
+    await f.store.record(task.id, 'progress', { runId: 'two', kind: 'started', data: { billing: 'subscription' } });
+    await f.store.record(task.id, 'progress', { runId: 'two', kind: 'usage', data: usage });
+    await f.store.record(task.id, 'run-failed', { runId: 'two', error: 'Invalid final output' });
+    await start('three', { model: 'default', usagePrice: null });
+    await f.store.record(task.id, 'run-completed', { runId: 'three', usage });
+    await start('four'); // cancelled before usage was reported
+    await start('five'); await f.store.record(task.id, 'run-completed', { runId: 'five', usage: { input_tokens: 10, output_tokens: 3 } });
+    await f.service.cancel(task.id);
     const url = `${origin}/tasks/${task.id}/usage`;
     assert.equal((await fetch(url)).status, 401);
     const response = await fetch(url, { headers: { authorization: 'Bearer synthetic-usage-token' } });
@@ -57,7 +57,7 @@ test('authenticated usage endpoint counts each attempt once, retains failed usag
     assert.match(result.runs[4]!.unavailableReason!, /Cached input/);
     assert.doesNotMatch(JSON.stringify(result), /command output|fixture-secret-value|xxxx/);
     // Changing today's rates cannot rewrite the recorded per-run estimate.
-    const changed = taskUsage(f.store.task(task.id), f.store.usageEvidence(task.id), Config.parse({ schemaVersion: 1, usagePricing: { models: { 'fixture-model': { ...price, inputPerMillion: 99 } } } }));
+    const changed = taskUsage(await f.store.task(task.id), await f.store.usageEvidence(task.id), Config.parse({ schemaVersion: 1, usagePricing: { models: { 'fixture-model': { ...price, inputPerMillion: 99 } } } }));
     assert.equal(changed.runs[0]!.estimatedUsd, 0.0016);
     assert.equal(changed.runs[2]!.price, null);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await f.cleanup(); }
@@ -66,19 +66,19 @@ test('authenticated usage endpoint counts each attempt once, retains failed usag
 test('historical usage uses only saved models and provider identity, with independent work-item attempt counters', async () => {
   const f = await fixture();
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Historical usage', mode: 'autonomous' }, 'legacy');
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Historical usage', mode: 'autonomous' }, 'legacy');
     const members = (await f.service.templates()).map(m => ({ ...m, model: 'gpt-5.3-codex' }));
     const saved = { ...task, team: { id: 'fixture', revision: 1, name: 'Fixture', snapshotAt: task.createdAt, members, providers: [{ id: 'openai', kind: 'openai' as const, auth: 'login' as const }], modelPinned: true } };
     // Templates use a provider ID; no live config is consulted for historical defaults.
     saved.team.members = saved.team.members.map(m => ({ ...m, provider: 'openai' }));
     for (const [runId, workItemId] of [['a', 'item-a'], ['b', 'item-b']]) {
-      f.store.record(task.id, 'run-started', { runId, workItemId, phase: 'implementation', agentId: members[0]!.id });
-      f.store.record(task.id, 'run-completed', { runId, usage });
+      await f.store.record(task.id, 'run-started', { runId, workItemId, phase: 'implementation', agentId: members[0]!.id });
+      await f.store.record(task.id, 'run-completed', { runId, usage });
     }
-    const result = taskUsage(saved, f.store.usageEvidence(task.id), f.service.config);
+    const result = taskUsage(saved, await f.store.usageEvidence(task.id), f.service.config);
     assert.deepEqual(result.runs.map(r => r.attempt), [1, 1]);
     assert.ok(result.runs.every(r => r.priceBasis === 'reference' && r.estimatedUsd !== null && r.billing === 'unknown'));
-    const unknown = taskUsage(task, f.store.usageEvidence(task.id), f.service.config);
+    const unknown = taskUsage(task, await f.store.usageEvidence(task.id), f.service.config);
     assert.ok(unknown.runs.every(r => r.model === null && r.estimatedUsd === null && r.billing === 'unknown'));
   } finally { await f.cleanup(); }
 });

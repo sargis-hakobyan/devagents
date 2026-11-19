@@ -1,10 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import type { MastraCompositeStore } from '@mastra/core/storage';
 import { Mastra } from '@mastra/core/mastra';
 import { createStep, createWorkflow, type WorkflowOptions } from '@mastra/core/workflows';
-import { LibSQLStore } from '@mastra/libsql';
+import { workspaceCheckpoints } from '../persistence/postgres-checkpoints.js';
 import { z } from 'zod';
 import { AppError } from '../domain/errors.js';
 import { terminalStates } from '../domain/lifecycle.js';
@@ -24,11 +22,12 @@ const errorMessage = (error: unknown): string => error && typeof error === 'obje
 export class TaskWorkflows {
   private readonly ownedWork = new Map<string, Set<Promise<unknown>>>();
   private readonly storage: MastraCompositeStore;
+  private readonly externalStorage: boolean;
   private readonly workflow;
   private readonly options: WorkflowOptions;
   constructor(private readonly service: TaskService, hooks: Hooks, storage?: MastraCompositeStore) {
-    if (!storage && service.store.checkpointBinding()) throw new AppError('checkpoint_store_required', 'This workspace requires its PostgreSQL workflow checkpoints');
-    this.storage = storage ?? new LibSQLStore({ id: 'devagents-workflows', url: pathToFileURL(join(service.dataDir, 'workflows.db')).href });
+    this.externalStorage = Boolean(storage);
+    this.storage = storage ?? workspaceCheckpoints(service.store, service.dataDir);
     this.options = {
       autoRestartActiveRuns: false,
       pruneSnapshot: ({ snapshot }) => redactValues(JSON.parse(JSON.stringify(snapshot, (_key, value: unknown) =>
@@ -46,7 +45,7 @@ export class TaskWorkflows {
       resumeSchema: z.object({ version: z.number().int() }),
       suspendSchema: z.object({ taskId: z.string(), version: z.number().int() }),
       execute: async ({ inputData, suspend }) => {
-        const task = service.store.task(inputData.taskId);
+        const task = await service.store.task(inputData.taskId);
         if (terminalStates.includes(task.state)) throw new Error('Task already finished');
         // Resume data never grants permission. Only the version-checked domain mutation does.
         if (task.state === (name === 'mode' ? 'awaiting_mode' : 'awaiting_plan_approval')) {
@@ -84,44 +83,44 @@ export class TaskWorkflows {
   }
   private checked<T>(id: string, step: string, work: () => Promise<T>): Promise<T> {
     return this.track(id, async () => {
-      this.service.store.record(id, 'workflow-step', { workflow: TASK_WORKFLOW_ID, step, state: 'running' });
+      await this.service.store.record(id, 'workflow-step', { workflow: TASK_WORKFLOW_ID, step, state: 'running' });
       try {
         const result = await work();
-        this.service.store.record(id, 'workflow-step', { workflow: TASK_WORKFLOW_ID, step, state: 'completed' });
+        await this.service.store.record(id, 'workflow-step', { workflow: TASK_WORKFLOW_ID, step, state: 'completed' });
         return result;
       } catch (error) {
         const message = String(redact(errorMessage(error), this.service.store.secrets)).slice(0, 8000);
-        try { this.service.store.record(id, 'workflow-step', { workflow: TASK_WORKFLOW_ID, step, state: 'failed', error: message }); }
+        try { await this.service.store.record(id, 'workflow-step', { workflow: TASK_WORKFLOW_ID, step, state: 'failed', error: message }); }
         catch { /* Keep the original failure; runner health reports persistence failures separately. */ }
         throw new Error(message);
       }
     });
   }
 
-  async state(id: string) { return this.workflow.getWorkflowRunById(id, { withNestedWorkflows: false }); }
+  async state(id: string) { if (!this.externalStorage) await this.storage.init(); return this.workflow.getWorkflowRunById(id, { withNestedWorkflows: false }); }
 
   async run(id: string): Promise<void> {
-    const task = this.service.store.task(id);
+    const task = await this.service.store.task(id);
     const previous = await this.state(id);
     if (terminalStates.includes(task.state)) {
       if (previous && !['success', 'failed', 'canceled'].includes(previous.status)) await (await this.workflow.createRun({ runId: id })).cancel();
       // A hard process death can leave child loop/wave snapshots running. They contain
       // references, not replayable closures; reconcile them under the service's single-owner lock.
       const workflows = await this.storage.getStore('workflows');
-      for (const event of this.service.store.evidence(id)) {
+      for (const event of await this.service.store.evidence(id)) {
         if (event.kind !== 'workflow-child') continue;
         const child = event.data as { workflow: string; workflowRunId: string };
-        if (!['devagents-cycle-v1', 'devagents-wave-v1'].includes(child.workflow)) continue;
+        if (!['devagents-cycle-v1', 'devagents-wave-v1', 'devagents-worker-v1'].includes(child.workflow)) continue;
         const key = { workflowName: child.workflow, runId: child.workflowRunId };
         const status = await workflows?.loadWorkflowRunStatus(key);
         if (status && !['success', 'failed', 'canceled'].includes(status)) {
           await workflows?.updateWorkflowState({ ...key, opts: { status: 'canceled' } });
-          this.service.store.record(id, 'workflow-reconciled', { ...child, status: 'canceled', taskState: task.state });
+          await this.service.store.record(id, 'workflow-reconciled', { ...child, status: 'canceled', taskState: task.state });
         }
       }
       return;
     }
-    if (!previous && this.service.store.checkpointBinding() && this.service.store.lastEvidence(id, 'workflow-started')) {
+    if (!previous && await this.service.store.checkpointBinding() && await this.service.store.lastEvidence(id, 'workflow-started')) {
       throw new AppError('workflow_interrupted', 'A previously started workflow is missing its checkpoint. Inspect the saved work before recovery.');
     }
     if (previous && previous.status !== 'suspended') {
@@ -136,10 +135,10 @@ export class TaskWorkflows {
       if (task.state === (step === 'mode' ? 'awaiting_mode' : 'awaiting_plan_approval')) return;
       result = await run.resume({ step, resumeData: { version: task.version } });
     } else {
-      this.service.store.record(id, 'workflow-started', { workflow: TASK_WORKFLOW_ID, workflowRunId: id });
+      await this.service.store.record(id, 'workflow-started', { workflow: TASK_WORKFLOW_ID, workflowRunId: id });
       result = await run.start({ inputData: { taskId: id } });
     }
-    this.service.store.record(id, 'workflow-status', { workflow: TASK_WORKFLOW_ID, workflowRunId: id, status: result.status });
+    await this.service.store.record(id, 'workflow-status', { workflow: TASK_WORKFLOW_ID, workflowRunId: id, status: result.status });
     if (result.status === 'failed') throw new Error(errorMessage(result.error));
     if (!['success', 'suspended'].includes(result.status)) throw new AppError('workflow_stopped', `Workflow stopped: ${result.status}`);
   }
@@ -157,37 +156,30 @@ export class TaskWorkflows {
     }).dountil(step, async ({ inputData }) => inputData.done).commit();
     new Mastra({ workflows: { cycle: workflow }, storage: this.storage, logger: false });
     const run = await workflow.createRun({ runId: randomUUID() });
-    this.service.store.record(id, 'workflow-child', { scope, workflow: workflow.id, workflowRunId: run.runId });
+    await this.service.store.record(id, 'workflow-child', { scope, workflow: workflow.id, workflowRunId: run.runId });
     const result = await run.start({ inputData: { taskId: id, iteration: 0, done: false } });
     if (result.status !== 'success') throw new Error(result.status === 'failed' ? errorMessage(result.error) : `Execution cycle stopped: ${result.status}`);
   }
 
-  /** Mastra dispatches a bounded wave. Drain every sibling before propagating a failure. */
-  async parallel<T>(id: string, count: number, work: (index: number) => Promise<T>): Promise<T[]> {
-    const shape = identity.extend({ index: z.number().int() });
-    const results: T[] = []; let failure: unknown;
+  /** Dispatch one dynamically admitted worker. Only references enter the workflow snapshot. */
+  async worker<T>(id: string, itemId: string, work: () => Promise<T>): Promise<T> {
+    const shape = identity.extend({ itemId: z.string() });
+    let output!: T;
     const step = createStep({ id: 'worker', inputSchema: shape, outputSchema: shape, retries: 0,
       execute: async ({ inputData }) => {
-        // Catch here so a failed foreach branch cannot release the task slot while siblings write.
-        try { results[inputData.index] = await this.track(inputData.taskId, () => work(inputData.index)); } catch (error) { failure ??= error; }
+        output = await this.checked(id, `worker:${itemId}`, work);
         return inputData;
       },
     });
-    const workflow = createWorkflow({ id: 'devagents-wave-v1', inputSchema: z.array(shape), outputSchema: z.array(shape),
+    const workflow = createWorkflow({ id: 'devagents-worker-v1', inputSchema: shape, outputSchema: shape,
       retryConfig: { attempts: 0, delay: 0 }, options: this.options,
-    }).foreach(step, { concurrency: count }).then(createStep({
-      id: 'join', inputSchema: z.array(shape), outputSchema: z.array(shape), retries: 0,
-      execute: async ({ inputData }) => this.checked(id, 'join-workers', async () => {
-        if (failure) throw failure;
-        return inputData;
-      }),
-    })).commit();
-    new Mastra({ workflows: { wave: workflow }, storage: this.storage, logger: false });
+    }).then(step).commit();
+    new Mastra({ workflows: { worker: workflow }, storage: this.storage, logger: false });
     const run = await workflow.createRun({ runId: randomUUID() });
-    this.service.store.record(id, 'workflow-child', { scope: 'workers', workflow: workflow.id, workflowRunId: run.runId });
-    const result = await run.start({ inputData: Array.from({ length: count }, (_, index) => ({ taskId: id, index })) });
-    if (result.status !== 'success') throw new Error(result.status === 'failed' ? errorMessage(result.error) : `Worker wave stopped: ${result.status}`);
-    return results;
+    await this.service.store.record(id, 'workflow-child', { scope: `worker:${itemId}`, workflow: workflow.id, workflowRunId: run.runId });
+    const result = await run.start({ inputData: { taskId: id, itemId } });
+    if (result.status !== 'success') throw new Error(result.status === 'failed' ? errorMessage(result.error) : `Worker stopped: ${result.status}`);
+    return output;
   }
 
   async close(): Promise<void> { await this.storage.close(); }

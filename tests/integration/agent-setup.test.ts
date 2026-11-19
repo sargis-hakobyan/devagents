@@ -28,10 +28,10 @@ test('rules-off setup uses the frozen implementer after approval and accepts cus
   const runner = new TaskRunner(f.service, engine, new FixtureValidator(), { async prepare() { throw new Error('Restricted Node preparation must not run'); } });
   f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'plan-approval' }, 'custom-setup');
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'plan-approval' }, 'custom-setup');
     await runner.idle(); assert.deepEqual(calls.map(c => c.phase), ['planning']);
-    f.service.approve(task.id, f.store.task(task.id).version); await runner.idle();
-    const done = f.store.task(task.id);
+    await f.service.approve(task.id, (await f.store.task(task.id)).version); await runner.idle();
+    const done = await f.store.task(task.id);
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     assert.deepEqual(calls.map(c => c.phase), ['planning', 'setup', 'implementation', 'qa', 'review']);
     assert.match(calls.find(c => c.phase === 'review')!.prompt, /Reviewed project-specific setup adjustment/);
@@ -61,12 +61,12 @@ for (const remainsMissing of [false, true]) test(`missing dependencies get a sep
       output: remainsMissing || validations === 1 ? "Cannot find package 'jiti' imported from /workspace/" : 'passed' };
   } }); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'recover-setup');
-    await runner.idle(); const done = f.store.task(task.id);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'recover-setup');
+    await runner.idle(); const done = await f.store.task(task.id);
     assert.equal(done.state, remainsMissing ? 'failed' : 'completed', JSON.stringify(done.outcome));
     assert.equal(setups, 2); assert.equal(validations, 2); assert.equal(repairs, 1);
     assert.equal(done.outcome?.repairCycles, 0);
-    assert.equal(f.store.evidence(task.id).filter(e => e.kind === 'validation').length, 2);
+    assert.equal((await f.store.evidence(task.id)).filter(e => e.kind === 'validation').length, 2);
     if (!remainsMissing) assert.match(fake.calls.find(c => c.phase === 'review')!.prompt, /Recovery configuration change for review/);
   } finally { await runner.stop(); await f.cleanup(); }
 });
@@ -83,9 +83,9 @@ test('setup cancellation and concrete blockers stop before implementation', asyn
     } };
     const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
     try {
-      const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'setup-blocked');
-      await setupStarted; if (cancel) f.service.cancel(task.id);
-      await runner.idle(); const done = f.store.task(task.id);
+      const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'setup-blocked');
+      await setupStarted; if (cancel) await f.service.cancel(task.id);
+      await runner.idle(); const done = await f.store.task(task.id);
       assert.equal(done.state, cancel ? 'cancelled' : 'failed');
       assert.equal(fake.calls.filter(c => c.phase === 'implementation').length, 0);
       if (!cancel) assert.match(String(done.outcome?.error), /Private registry authentication/);
@@ -100,8 +100,8 @@ test('a validation command that mutates source cannot hide behind environment re
     return { ...command, exitCode: 1, output: "Cannot find package 'jiti' imported from /workspace/" };
   } }); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'mutating-test');
-    await runner.idle(); const done = f.store.task(task.id);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'mutating-test');
+    await runner.idle(); const done = await f.store.task(task.id);
     assert.equal(done.state, 'failed'); assert.match(String(done.outcome?.error), /Validation changed reviewed project files/);
     assert.equal(fake.calls.filter(c => c.phase === 'setup').length, 1);
     assert.equal(await readFile(join(f.project, 'README.md'), 'utf8'), '# Fixture\n');
@@ -115,8 +115,8 @@ test('setup receives executable-preflight diagnostics once before implementation
     execute: (cwd, command, signal, timeout) => base.execute(cwd, command, signal, timeout),
   }); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'setup-preflight');
-    await runner.idle(); const done = f.store.task(task.id);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'setup-preflight');
+    await runner.idle(); const done = await f.store.task(task.id);
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome)); assert.equal(probes, 2);
     assert.equal(done.outcome?.repairCycles, 0);
     const setup = fake.calls.filter(c => c.phase === 'setup'); assert.equal(setup.length, 2);
@@ -140,8 +140,8 @@ test('setup gets one recovery and passes baseline failures to implementation and
   } };
   const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'baseline-recovery');
-    await runner.idle(); const done = f.store.task(task.id);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'baseline-recovery');
+    await runner.idle(); const done = await f.store.task(task.id);
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome)); assert.equal(setups, 2);
     assert.equal(done.outcome?.repairCycles, 0);
     for (const phase of ['implementation', 'review']) assert.ok(seen.find(r => r.phase === phase)?.prompt.includes(note));
@@ -169,8 +169,8 @@ test('review receives actual supplementary repair commands without replacing man
   const runner = new TaskRunner(f.service, engine, { execute(cwd, command, signal, timeout) { validations++; return baseValidator.execute(cwd, command, signal, timeout); } });
   f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'repair-evidence');
-    await runner.idle(); const done = f.store.task(task.id);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'repair-evidence');
+    await runner.idle(); const done = await f.store.task(task.id);
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     assert.equal(done.outcome?.repairCycles, 1); assert.equal(validations, 2); assert.equal(reviews, 2);
   } finally { await runner.stop(); await f.cleanup(); }

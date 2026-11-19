@@ -11,9 +11,9 @@ import type { AuthStatus } from '../../src/domain/auth.js';
 test('Claude connection forms save both credential types privately and members select compatible engines/models', async ({ page }) => {
   const f = await fixture(); let saved: AuthStatus = { saved: false }; const methods: string[] = [];
   const claudeAuth = new SetupAuth({ status: async () => saved, login: async (method, secret) => { expect(secret).toBe('synthetic-credential'); methods.push(method); saved = { saved: true, method }; } });
-  const service = new TaskService(f.store, f.service.config, f.dataDir, process.platform, new Set(['codex', 'claude-code']));
-  const team = service.createTeam({ name: 'Mixed browser team', members: (await service.templates()).filter(a => ['tech-lead', 'general-developer', 'code-reviewer'].includes(a.id)) });
-  const server = createApi(service, 'synthetic-browser-token', { claudeAuth, uiRoot: resolve('dist/ui'), status: async () => ({
+  const service = await TaskService.create(f.store, f.service.config, f.dataDir, process.platform, new Set(['codex', 'claude-code']));
+  const team = await service.createTeam({ name: 'Mixed browser team', members: (await service.templates()).filter(a => ['tech-lead', 'general-developer', 'code-reviewer'].includes(a.id)) });
+  const server = await createApi(service, 'synthetic-browser-token', { claudeAuth, uiRoot: resolve('dist/ui'), status: async () => ({
     service: { version: 'fixture', platform: 'fixture', executionEnabled: false, startedAt: new Date().toISOString() },
     codex: { installed: true, version: 'fixture', signedIn: false, vaultLocked: false, credentialStore: 'file', modelAccessVerified: false },
     claude: { installed: true, enabled: true, signedIn: saved.saved, note: 'Fixture' },
@@ -46,10 +46,10 @@ test('Claude connection forms save both credential types privately and members s
     await page.getByRole('button', { name: /Code Reviewer from template code-reviewer/ }).click();
     await model.selectOption('gpt-6.1-sol');
     await page.getByRole('button', { name: 'Save team', exact: true }).click();
-    await expect.poll(() => service.team(team.id).members.find(m => m.id === 'general-developer')?.model).toBe('gpt-6-astra');
-    expect(service.team(team.id).members.find(m => m.id === 'code-reviewer')?.model).toBe('gpt-6.1-sol');
+    await expect.poll(async () => (await service.team(team.id)).members.find(m => m.id === 'general-developer')?.model).toBe('gpt-6-astra');
+    expect((await service.team(team.id)).members.find(m => m.id === 'code-reviewer')?.model).toBe('gpt-6.1-sol');
     // Submission freezes the two different model choices before later edits.
-    const task = service.submit({ projectId: 'fixture', teamId: team.id, request: 'Fixture only', mode: 'plan-approval' }, 'browser-models');
+    const task = await service.submit({ projectId: 'fixture', teamId: team.id, request: 'Fixture only', mode: 'plan-approval' }, 'browser-models');
     await page.reload();
     await page.getByRole('button', { name: /Developer from template general-developer/ }).first().click();
     await expect(model).toHaveValue('gpt-6-astra');
@@ -63,8 +63,8 @@ test('Claude connection forms save both credential types privately and members s
     for (const id of ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']) await expect(model.locator(`option[value="${id}"]`)).toHaveCount(1);
     await model.selectOption('claude-sonnet-5-5');
     await page.getByRole('button', { name: 'Save team', exact: true }).click();
-    await expect.poll(() => service.team(team.id).members.find(m => m.id === 'general-developer')?.model).toBe('claude-sonnet-5-5');
-    expect(service.team(team.id).members.find(m => m.id === 'general-developer')?.provider).toBe('anthropic');
+    await expect.poll(async () => (await service.team(team.id)).members.find(m => m.id === 'general-developer')?.model).toBe('claude-sonnet-5-5');
+    expect((await service.team(team.id)).members.find(m => m.id === 'general-developer')?.provider).toBe('anthropic');
     await page.setViewportSize({ width: 390, height: 844 });
     await model.scrollIntoViewIfNeeded();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -72,7 +72,7 @@ test('Claude connection forms save both credential types privately and members s
     await model.selectOption('__custom__');
     await page.getByLabel('Custom model ID', { exact: true }).fill('claude-fixture-model');
     await page.getByRole('button', { name: 'Save team', exact: true }).click();
-    await expect.poll(() => service.team(team.id).members.find(m => m.id === 'general-developer')?.model).toBe('claude-fixture-model');
+    await expect.poll(async () => (await service.team(team.id)).members.find(m => m.id === 'general-developer')?.model).toBe('claude-fixture-model');
     await page.reload();
     await page.getByRole('button', { name: /Developer from template general-developer/ }).first().click();
     await expect(model).toHaveValue('__custom__');
@@ -80,10 +80,10 @@ test('Claude connection forms save both credential types privately and members s
     await model.selectOption('default');
     await expect(page.getByLabel('Custom model ID', { exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: 'Save team', exact: true }).click();
-    await expect.poll(() => service.team(team.id).members.find(m => m.id === 'general-developer')?.model).toBe('default');
-    expect(f.store.task(task.id).team!.members.find(m => m.id === 'general-developer')?.model).toBe('gpt-6-astra');
-    expect(f.store.task(task.id).team!.members.find(m => m.id === 'code-reviewer')?.model).toBe('gpt-6.1-sol');
-    expect(service.team(team.id).members.find(m => m.id === 'code-reviewer')?.engine).toBe('default');
+    await expect.poll(async () => (await service.team(team.id)).members.find(m => m.id === 'general-developer')?.model).toBe('default');
+    expect((await f.store.task(task.id)).team!.members.find(m => m.id === 'general-developer')?.model).toBe('gpt-6-astra');
+    expect((await f.store.task(task.id)).team!.members.find(m => m.id === 'code-reviewer')?.model).toBe('gpt-6.1-sol');
+    expect((await service.team(team.id)).members.find(m => m.id === 'code-reviewer')?.engine).toBe('default');
     // Multiple real connections remain selectable under Advanced, without changing the model.
     service.config.providers.push({ id: 'openai-work', kind: 'openai', auth: 'api-key', apiKeyEnv: 'FIXTURE_ONLY_KEY' });
     await page.reload();
@@ -93,8 +93,8 @@ test('Claude connection forms save both credential types privately and members s
     await page.getByText('Advanced · capabilities, scope, commands, concurrency', { exact: true }).click();
     await connection.selectOption('openai-work');
     await page.getByRole('button', { name: 'Save team', exact: true }).click();
-    await expect.poll(() => service.team(team.id).members.find(m => m.id === 'code-reviewer')?.provider).toBe('openai-work');
-    expect(service.team(team.id).members.find(m => m.id === 'code-reviewer')?.model).toBe('gpt-6.1-sol');
+    await expect.poll(async () => (await service.team(team.id)).members.find(m => m.id === 'code-reviewer')?.provider).toBe('openai-work');
+    expect((await service.team(team.id)).members.find(m => m.id === 'code-reviewer')?.model).toBe('gpt-6.1-sol');
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${origin}/ui/settings/setup`);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);

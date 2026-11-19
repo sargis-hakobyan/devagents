@@ -58,9 +58,17 @@ export type ApiOptions = BrowserAccessOptions & {
   models?: ModelCatalogService;
 };
 
-export function createApi(application: TaskService, token: string, options: ApiOptions = {}) {
+export async function createApi(application: TaskService, token: string, options: ApiOptions = {}) {
   let maintenanceUntil = 0;
-  const workspaceFor = application.workspaceFor(options.privateRuntimeOwner || options.sharedLogin ? { ownerId: options.privateRuntimeOwner ?? options.workspaceOwnerId } : 'local');
+  let checkingMaintenance = false;
+  let admittingTasks = 0;
+  const setupBusy = () => Boolean(options.setupAuth?.busy || options.claudeAuth?.busy || checkingMaintenance || maintenanceUntil > Date.now());
+  const admit = async <T>(work: () => Promise<T>) => {
+    if (setupBusy()) throw new AppError('setup_busy', 'Setup is in progress. Retry after it finishes.', 409);
+    admittingTasks++;
+    try { return await work(); } finally { admittingTasks--; }
+  };
+  const workspaceFor = await application.workspaceFor(options.privateRuntimeOwner || options.sharedLogin ? { ownerId: options.privateRuntimeOwner ?? options.workspaceOwnerId } : 'local');
   // Responses use the store's secret list (environment heuristic plus configured provider keys), the same list applied at rest.
   const secrets = [...new Set([...environmentSecrets(), ...application.store.secrets])];
   const send = (res: ServerResponse, code: number, data: unknown, extra: Record<string, string> = {}) => respond(res, code, data, extra, secrets);
@@ -82,17 +90,18 @@ export function createApi(application: TaskService, token: string, options: ApiO
         return send(res, 200, { ended: true });
       }
       /** Tasks store the project ID; the name is added on the way out because it can change. */
-      const projectNames = () => new Map(service.store.projects().map(p => [p.id, p.name ?? p.id]));
-      const named = <T extends { projectId: string }>(task: T, names = projectNames()) => ({ ...task, projectName: names.get(task.projectId) ?? task.projectId });
+      const projectNames = async () => new Map((await service.store.projects()).map(p => [p.id, p.name ?? p.id]));
+      const named = async <T extends { projectId: string }>(task: T, names?: Map<string, string>) => ({ ...task, projectName: (names ?? await projectNames()).get(task.projectId) ?? task.projectId });
       const authController = path.startsWith('/setup/claude-auth') ? options.claudeAuth : options.setupAuth;
       const authPath = path.replace('/setup/claude-auth', '/setup/auth');
       if (authPath === '/setup/auth' && req.method === 'GET') return send(res, 200, authController ? await authController.status(owner) : { available: false, busy: false, connection: { saved: false } });
       if (authPath === '/setup/auth' && req.method === 'POST') {
         if (!authController) throw new AppError('setup_unavailable', 'Provider setup is not enabled on this service.', 503);
         const input = await body(req, 8192);
-        if (maintenanceUntil > Date.now()) throw new AppError('setup_busy', 'The launcher is updating project mounts. Try again afterwards.', 409);
+        if (admittingTasks) throw new AppError('work_active', 'Finish task admission before changing sign-in.', 409);
+        if (checkingMaintenance || maintenanceUntil > Date.now()) throw new AppError('setup_busy', 'The launcher is updating project mounts. Try again afterwards.', 409);
         if ((authController !== options.setupAuth && options.setupAuth?.busy) || (authController !== options.claudeAuth && options.claudeAuth?.busy)) throw new AppError('setup_busy', 'Another provider sign-in is in progress', 409);
-        return send(res, 202, authController.start(owner, input));
+        return send(res, 202, await authController.start(owner, input));
       }
       if (authPath === '/setup/auth/cancel' && req.method === 'POST') {
         if (!authController) throw new AppError('setup_unavailable', 'Provider setup is not enabled on this service.', 503);
@@ -104,29 +113,32 @@ export function createApi(application: TaskService, token: string, options: ApiO
       }
       if (path === '/setup/maintenance' && req.method === 'POST') {
         if (actor.kind !== 'operator') throw new AppError('bearer_required', 'Project mounts are managed by the local launcher.', 403);
-        options.assertSetupIdle?.();
-        if (options.setupAuth?.busy || options.claudeAuth?.busy || service.store.summaries({ states: ['planning', 'ready', 'running', 'validating', 'reviewing', 'repairing', 'committing'], limit: 1 }).tasks.length) throw new AppError('setup_busy', 'Finish or cancel active work and sign-in before changing project mounts.', 409);
-        maintenanceUntil = Date.now() + 120000;
-        return send(res, 200, { ready: true });
+        if (admittingTasks || checkingMaintenance) throw new AppError('setup_busy', 'A task or maintenance request is in progress', 409);
+        checkingMaintenance = true;
+        try {
+          await options.assertSetupIdle?.();
+          if (options.setupAuth?.busy || options.claudeAuth?.busy || (await service.store.summaries({ states: ['planning', 'ready', 'running', 'validating', 'reviewing', 'repairing', 'committing'], limit: 1 })).tasks.length) throw new AppError('setup_busy', 'Finish or cancel active work and sign-in before changing project mounts.', 409);
+          maintenanceUntil = Date.now() + 120000;
+          return send(res, 200, { ready: true });
+        } finally { checkingMaintenance = false; }
       }
-      const assertExecutionReady = () => { if ((options.setupAuth?.busy || options.claudeAuth?.busy) || maintenanceUntil > Date.now()) throw new AppError('setup_busy', 'Setup is in progress. Retry after it finishes.', 409); };
-      if (((options.setupAuth?.busy || options.claudeAuth?.busy) || maintenanceUntil > Date.now()) && req.method === 'POST' && (path === '/tasks' || /^\/tasks\/[^/]+\/(mode|approve|run|plan)$/.test(path))) throw new AppError('setup_busy', 'Setup is in progress. Retry after it finishes.', 409);
-      if (req.method === 'GET' && path === '/submission-options') return send(res, 200, service.submissionOptions());
+      if (setupBusy() && req.method === 'POST' && (path === '/tasks' || /^\/tasks\/[^/]+\/(mode|approve|run|plan)$/.test(path))) throw new AppError('setup_busy', 'Setup is in progress. Retry after it finishes.', 409);
+      if (req.method === 'GET' && path === '/submission-options') return send(res, 200, await service.submissionOptions());
       if (req.method === 'GET' && path === '/projects') {
         const filter = z.enum(['active', 'archived', 'all']).parse(url.searchParams.get('filter') ?? 'active');
-        return send(res, 200, service.store.projects().filter(p => filter === 'all' || Boolean(p.archivedAt) === (filter === 'archived')));
+        return send(res, 200, (await service.store.projects()).filter(p => filter === 'all' || Boolean(p.archivedAt) === (filter === 'archived')));
       }
       if (req.method === 'PUT' && path === '/projects/host-folders') {
         if (actor.kind !== 'operator') throw new AppError('bearer_required', 'Project folders are reported by the local launcher.', 403);
         const input = z.strictObject({ folders: z.record(z.string().min(1).max(4096), z.string().min(1).max(4096)) }).parse(await body(req));
         if (Object.keys(input.folders).length > 500) throw new AppError('invalid_request', 'Too many folders');
-        return send(res, 200, { updated: service.store.setProjectHostPaths(input.folders) });
+        return send(res, 200, { updated: await service.store.setProjectHostPaths(input.folders) });
       }
-      if (req.method === 'POST' && path === '/projects/prepare') return send(res, 200, service.prepareProject(z.strictObject({ name: z.unknown() }).parse(await body(req)).name));
+      if (req.method === 'POST' && path === '/projects/prepare') return send(res, 200, await service.prepareProject(z.strictObject({ name: z.unknown() }).parse(await body(req)).name));
       const projectName = /^\/projects\/([a-z0-9][a-z0-9-]{0,63})\/name$/.exec(path);
       if (req.method === 'PUT' && projectName) {
         const change = z.strictObject({ name: z.unknown(), expectedVersion: z.number().int().nonnegative() }).parse(await body(req));
-        return send(res, 200, service.renameProject(projectName[1]!, change.name, change.expectedVersion));
+        return send(res, 200, await service.renameProject(projectName[1]!, change.name, change.expectedVersion));
       }
       const projectSkillList = /^\/projects\/([a-z0-9][a-z0-9-]{0,63})\/skills$/.exec(path);
       if (req.method === 'GET' && projectSkillList) return send(res, 200, await service.projectSkills(projectSkillList[1]!));
@@ -137,7 +149,7 @@ export function createApi(application: TaskService, token: string, options: ApiO
         // An archived project holds no connections; a token goes only when no other project uses it.
         if (change.archived && options.integrations) for (const kind of ['github', 'jira'] as const) await options.integrations.disconnect(project.id, kind);
         if (change.archived && options.trackers) await options.trackers.disconnect(project.id);
-        return send(res, 200, service.store.project(project.id));
+        return send(res, 200, await service.store.project(project.id));
       }
       if (req.method === 'POST' && path === '/projects') {
         const input = await body(req);
@@ -150,7 +162,7 @@ export function createApi(application: TaskService, token: string, options: ApiO
       const projectDefault = /^\/projects\/([a-z0-9][a-z0-9-]{0,63})\/default-team$/.exec(path);
       if (req.method === 'PUT' && projectDefault) {
         const change = z.strictObject({ teamId: TeamId.nullable(), expectedVersion: z.number().int().nonnegative() }).parse(await body(req));
-        return send(res, 200, service.setProjectDefaultTeam(projectDefault[1]!, change.teamId, change.expectedVersion));
+        return send(res, 200, await service.setProjectDefaultTeam(projectDefault[1]!, change.teamId, change.expectedVersion));
       }
       // Ticket tools: added once by their MCP address, then used by projects. Tokens are write-only here too.
       const trackerRoute = /^\/trackers(?:\/([0-9a-f-]{36})(?:\/(inspect|mapping|check))?)?$/.exec(path);
@@ -186,16 +198,16 @@ export function createApi(application: TaskService, token: string, options: ApiO
         const pulls = options.pullRequests;
         if (!pulls) throw new AppError('integrations_unavailable', 'Integrations are not enabled on this service.', 503);
         if (projectPulls) {
-          const id = service.store.project(projectPulls[1]!).id;
-          if (req.method === 'GET') return send(res, 200, projectPulls[2] ? await pulls.branches(id) : pulls.project(id));
-          if (req.method === 'PUT' && !projectPulls[2]) return send(res, 200, pulls.save(id, await body(req, 4096)));
+          const id = (await service.store.project(projectPulls[1]!)).id;
+          if (req.method === 'GET') return send(res, 200, projectPulls[2] ? await pulls.branches(id) : await pulls.project(id));
+          if (req.method === 'PUT' && !projectPulls[2]) return send(res, 200, await pulls.save(id, await body(req, 4096)));
         } else {
-          const id = service.store.task(taskPull![1]!).id;
-          if (req.method === 'GET' && !taskPull![2]) return send(res, 200, pulls.view(id));
-          if (req.method === 'POST' && !taskPull![2]) { await pulls.publish(id, 'user'); return send(res, 200, pulls.view(id)); }
-          if (req.method === 'POST' && taskPull![2] === 'rounds') { await pulls.startRound(id, await body(req, 16384), 'user'); return send(res, 200, pulls.view(id)); }
-          if (req.method === 'POST' && taskPull![2] === 'merge') { await pulls.merge(id, 'user'); return send(res, 200, pulls.view(id)); }
-          if (req.method === 'POST' && taskPull![2] === 'push-round') { await pulls.releaseRound(id); return send(res, 200, pulls.view(id)); }
+          const id = (await service.store.task(taskPull![1]!)).id;
+          if (req.method === 'GET' && !taskPull![2]) return send(res, 200, await pulls.view(id));
+          if (req.method === 'POST' && !taskPull![2]) { await pulls.publish(id, 'user'); return send(res, 200, await pulls.view(id)); }
+          if (req.method === 'POST' && taskPull![2] === 'rounds') { await pulls.startRound(id, await body(req, 16384), 'user'); return send(res, 200, await pulls.view(id)); }
+          if (req.method === 'POST' && taskPull![2] === 'merge') { await pulls.merge(id, 'user'); return send(res, 200, await pulls.view(id)); }
+          if (req.method === 'POST' && taskPull![2] === 'push-round') { await pulls.releaseRound(id); return send(res, 200, await pulls.view(id)); }
         }
         throw new AppError('method_not_allowed', 'Method not allowed', 405);
       }
@@ -217,12 +229,12 @@ export function createApi(application: TaskService, token: string, options: ApiO
         if (kind === 'jira' && req.method === 'DELETE' && action === 'rule') return send(res, 200, await integrations.removeJiraRule(id));
       }
       // Saved teams: every mutation is behind the same authentication, CSRF and origin checks as task actions.
-      if (req.method === 'GET' && path === '/teams') return send(res, 200, service.teams(z.enum(['active', 'archived', 'all']).parse(url.searchParams.get('filter') ?? 'active')));
-      if (req.method === 'POST' && path === '/teams') return send(res, 201, service.createTeam(await body(req)));
+      if (req.method === 'GET' && path === '/teams') return send(res, 200, await service.teams(z.enum(['active', 'archived', 'all']).parse(url.searchParams.get('filter') ?? 'active')));
+      if (req.method === 'POST' && path === '/teams') return send(res, 201, await service.createTeam(await body(req)));
       if (req.method === 'POST' && path === '/teams/check') return send(res, 200, service.checkTeam(await body(req)));
       if (req.method === 'GET' && path === '/teams/options') return send(res, 200, service.teamOptions());
       // Reading the saved lists contacts nobody; only the explicit refresh asks an engine.
-      if (req.method === 'GET' && path === '/teams/models') return send(res, 200, options.models?.list() ?? []);
+      if (req.method === 'GET' && path === '/teams/models') return send(res, 200, await options.models?.list() ?? []);
       if (req.method === 'POST' && path === '/teams/models/refresh') {
         if (!options.models) throw new AppError('model_list_unavailable', 'Model lists cannot be loaded on this service.', 503);
         return send(res, 200, await options.models.refresh(z.strictObject({ engine: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/) }).parse(await body(req, 1024)).engine));
@@ -231,28 +243,30 @@ export function createApi(application: TaskService, token: string, options: ApiO
       const teamMatch = /^\/teams\/([a-f0-9-]{36})(?:\/(archive|duplicate))?$/.exec(path);
       if (teamMatch) {
         const id = teamMatch[1]!; const action = teamMatch[2];
-        if (req.method === 'GET' && !action) return send(res, 200, service.team(id));
+        if (req.method === 'GET' && !action) return send(res, 200, await service.team(id));
         if (req.method === 'PUT' && !action) {
           const change = z.strictObject({ expectedRevision: z.number().int().positive(), team: z.unknown() }).parse(await body(req));
-          return send(res, 200, service.updateTeam(id, change.expectedRevision, change.team));
+          return send(res, 200, await service.updateTeam(id, change.expectedRevision, change.team));
         }
         if (req.method === 'POST' && action === 'archive') {
           const change = z.strictObject({ expectedRevision: z.number().int().positive(), archived: z.boolean() }).parse(await body(req));
-          return send(res, 200, service.setTeamArchived(id, change.expectedRevision, change.archived));
+          return send(res, 200, await service.setTeamArchived(id, change.expectedRevision, change.archived));
         }
-        if (req.method === 'POST' && action === 'duplicate') return send(res, 201, service.duplicateTeam(id, z.strictObject({ name: z.unknown() }).parse(await body(req)).name));
+        if (req.method === 'POST' && action === 'duplicate') return send(res, 201, await service.duplicateTeam(id, z.strictObject({ name: z.unknown() }).parse(await body(req)).name));
       }
       if (req.method === 'GET' && path === '/overview') {
-        const scheduler = service.scheduling(); const overview = service.store.overview(scheduler.active);
-        const names = projectNames();
-        return send(res, 200, { ...overview, scheduler, attention: overview.attention.map(task => named(task, names)), recent: overview.recent.map(task => named(task, names)), active: overview.active.map(task => ({ ...named(task, names), scheduling: service.taskScheduling(task.id) })) });
+        const scheduler = await service.scheduling(); const overview = await service.store.overview(scheduler.active);
+        const names = await projectNames();
+        return send(res, 200, { ...overview, scheduler, attention: (await Promise.all(overview.attention.map(async task => await named(task, names)))), recent: (await Promise.all(overview.recent.map(async task => await named(task, names)))), active: (await Promise.all(overview.active.map(async task => ({ ...await named(task, names), scheduling: await service.taskScheduling(task.id) })))) });
       }
-      if (req.method === 'GET' && path === '/settings/task-concurrency') return send(res, 200, service.taskConcurrency());
-      if (req.method === 'PUT' && path === '/settings/task-concurrency') return send(res, 200, service.setTaskConcurrency(await body(req)));
-      if (req.method === 'GET' && path === '/scheduler') return send(res, 200, service.scheduling());
+      if (req.method === 'GET' && path === '/settings/work-item-concurrency') return send(res, 200, await service.workItemConcurrency());
+      if (req.method === 'PUT' && path === '/settings/work-item-concurrency') return send(res, 200, await service.setWorkItemConcurrency(await body(req)));
+      if (req.method === 'GET' && path === '/settings/task-concurrency') return send(res, 200, await service.taskConcurrency());
+      if (req.method === 'PUT' && path === '/settings/task-concurrency') return send(res, 200, await service.setTaskConcurrency(await body(req)));
+      if (req.method === 'GET' && path === '/scheduler') return send(res, 200, await service.scheduling());
       if (req.method === 'GET' && path === '/status') {
         if (!options.status) throw new AppError('not_found', 'Status reporting is not configured', 404);
-        return send(res, 200, { ...await options.status() as object, ...(options.privateRuntimeOwner ? { privateWorkspace: true } : {}), ...(options.sharedTasks ? { sharedTaskStorage: { backend: 'postgresql', problem: options.sharedTasks.problem } } : {}), scheduler: service.scheduling() });
+        return send(res, 200, { ...await options.status() as object, ...(options.privateRuntimeOwner ? { privateWorkspace: true } : {}), ...(options.sharedTasks ? { sharedTaskStorage: { backend: 'postgresql', problem: options.sharedTasks.problem } } : {}), scheduler: await service.scheduling() });
       }
       if (req.method === 'GET' && path === '/storage') return send(res, 200, await service.storageStatus());
       // Tickets that match a project's rule and have no task yet. Read only; starting one is a normal task submission.
@@ -260,12 +274,12 @@ export function createApi(application: TaskService, token: string, options: ApiO
       // One ticket with its text and comments, for the submit form. Read only.
       if (req.method === 'GET' && path === '/tickets/content') {
         const query = z.strictObject({ projectId: ProjectId, source: z.string().min(1).max(60), key: z.string().min(1).max(60) }).parse(Object.fromEntries(url.searchParams));
-        return send(res, 200, await readTicket({ integrations: options.integrations, trackers: options.trackers }, service.store.project(query.projectId).id, query.source, query.key));
+        return send(res, 200, await readTicket({ integrations: options.integrations, trackers: options.trackers }, (await service.store.project(query.projectId)).id, query.source, query.key));
       }
       // A ticket's picture for the submit form, read from the tool now and not kept.
       if (req.method === 'GET' && path === '/tickets/picture') {
         const query = z.strictObject({ projectId: ProjectId, source: z.string().min(1).max(60), key: z.string().min(1).max(60), index: z.coerce.number().int().min(0).max(99) }).parse(Object.fromEntries(url.searchParams));
-        return picture(res, await ticketPicture({ integrations: options.integrations, trackers: options.trackers }, service.store.project(query.projectId).id, query.source, query.key, query.index));
+        return picture(res, await ticketPicture({ integrations: options.integrations, trackers: options.trackers }, (await service.store.project(query.projectId)).id, query.source, query.key, query.index));
       }
       const taskPicture = /^\/tasks\/([a-f0-9-]{36})\/ticket-files\/(\d{2}\.[a-z]{2,4})$/.exec(path);
       if (req.method === 'GET' && taskPicture) return picture(res, await service.ticketPicture(taskPicture[1]!, taskPicture[2]!));
@@ -273,22 +287,22 @@ export function createApi(application: TaskService, token: string, options: ApiO
         const states = z.array(State).max(State.options.length).parse(url.searchParams.getAll('state'));
         const project = url.searchParams.get('projectId'); const projectId = project ? ProjectId.parse(project) : undefined;
         const before = url.searchParams.get('before');
-        const page = service.store.summaries({
+        const page = await service.store.summaries({
           limit: integer(url.searchParams.get('limit'), 50),
           ...(before ? { before: integer(before, 0) } : {}),
           ...(projectId ? { projectId } : {}),
           ...(states.length ? { states } : {}),
           ...(url.searchParams.get('pullRequest') === 'open' ? { openPullRequest: true } : {}),
         });
-        const names = projectNames();
-        return send(res, 200, { ...page, tasks: page.tasks.map(task => ({ ...named(task, names), scheduling: service.taskScheduling(task.id) })), counts: service.store.stateCounts(projectId) });
+        const names = await projectNames();
+        return send(res, 200, { ...page, tasks: (await Promise.all(page.tasks.map(async task => ({ ...await named(task, names), scheduling: await service.taskScheduling(task.id) })))), counts: await service.store.stateCounts(projectId) });
       }
       if (req.method === 'POST' && path === '/tasks') {
         const key = z.string().min(1).max(200).parse(req.headers['idempotency-key']);
-        const input = await body(req); assertExecutionReady();
-        const task = service.submit(input, key);
+        const input = await body(req);
+        const task = await admit(() => service.submit(input, key));
         if (options.sharedTasks) await options.sharedTasks.publish(task.id);
-        return send(res, 201, named(task));
+        return send(res, 201, await named(task));
       }
       const match = /^\/tasks\/([a-f0-9-]{36})(?:\/(events|evidence|items|diff|result|usage|execution|run|mode|plan|approve|cancel|cleanup|compaction-preview|compact)(?:\/(\d{1,12}))?)?$/.exec(path);
       if (match) {
@@ -299,19 +313,19 @@ export function createApi(application: TaskService, token: string, options: ApiO
           if (!result) throw new AppError('not_found', 'No shared result for this task', 404);
           return send(res, 200, result);
         }
-        if (req.method === 'GET' && action === 'execution' && !sub) return send(res, 200, taskExecution(service.store.task(id), service.store.executionEvidence(id)));
-        if (req.method === 'GET' && action === 'usage' && !sub) return send(res, 200, taskUsage(service.store.task(id), service.store.usageEvidence(id), service.config));
+        if (req.method === 'GET' && action === 'execution' && !sub) return send(res, 200, taskExecution(await service.store.task(id), await service.store.executionEvidence(id)));
+        if (req.method === 'GET' && action === 'usage' && !sub) return send(res, 200, taskUsage(await service.store.task(id), await service.store.usageEvidence(id), service.config));
         if (req.method === 'GET' && action === 'diff' && !sub) {
           if (url.search) throw new AppError('invalid_diff_request', 'Diff requests accept a task ID only; no paths, refs or options');
           return send(res, 200, await service.diff(id));
         }
         if (req.method === 'GET' && action === 'compaction-preview' && !sub) return send(res, 200, await service.compactionPreview(id));
         if (req.method === 'GET' && !action) {
-          const local = service.store.task(id);
-          const archived = terminalStates.includes(local.state) && options.sharedTasks && service.store.sharedHandoff(id)
+          const local = await service.store.task(id);
+          const archived = terminalStates.includes(local.state) && options.sharedTasks && await service.store.sharedHandoff(id)
             ? await options.sharedTasks.result(id) : undefined;
           const task = archived?.task ?? local;
-          return send(res, 200, { ...named(task), approval: service.store.planApproval(id), scheduling: service.taskScheduling(id), ...(service.store.project(task.projectId).archivedAt ? { projectArchived: true } : {}) });
+          return send(res, 200, { ...await named(task), approval: await service.store.planApproval(id), scheduling: await service.taskScheduling(id), ...((await service.store.project(task.projectId)).archivedAt ? { projectArchived: true } : {}) });
         }
         const history = options.sharedTasks?.history ?? service.store;
         if (req.method === 'GET' && action === 'events') return send(res, 200, await history.events(id, integer(url.searchParams.get('after'), 0), Math.min(integer(url.searchParams.get('limit'), 500), 1000)));
@@ -320,13 +334,13 @@ export function createApi(application: TaskService, token: string, options: ApiO
           const entries = await history.evidence(id, integer(url.searchParams.get('after'), 0), Math.min(integer(url.searchParams.get('limit'), 200), 1000));
           return send(res, 200, entries.map(e => boundEvidence(e, EVIDENCE_PREVIEW_BYTES)));
         }
-        if (req.method === 'GET' && action === 'items') return send(res, 200, service.store.workItems(id));
+        if (req.method === 'GET' && action === 'items') return send(res, 200, await service.store.workItems(id));
         if (req.method === 'POST' && !sub) {
-          if (action === 'run') return send(res, 202, service.run(id));
-          if (action === 'mode') { const input = await body(req); assertExecutionReady(); return send(res, 200, service.mode(id, z.strictObject({ mode: z.unknown() }).parse(input).mode)); }
-          if (action === 'plan') { const input = await body(req); assertExecutionReady(); return send(res, 200, await service.proposePlan(id, input)); }
-          if (action === 'approve') { const input = await body(req); assertExecutionReady(); return send(res, 200, service.approve(id, z.strictObject({ version: z.number().int().nonnegative() }).parse(input).version)); }
-          if (action === 'cancel') return send(res, 200, service.cancel(id));
+          if (action === 'run') return send(res, 202, await admit(() => service.run(id)));
+          if (action === 'mode') { const input = await body(req); return send(res, 200, await admit(() => service.mode(id, z.strictObject({ mode: z.unknown() }).parse(input).mode))); }
+          if (action === 'plan') { const input = await body(req); return send(res, 200, await admit(() => service.proposePlan(id, input))); }
+          if (action === 'approve') { const input = await body(req); return send(res, 200, await admit(() => service.approve(id, z.strictObject({ version: z.number().int().nonnegative() }).parse(input).version))); }
+          if (action === 'cancel') return send(res, 200, await service.cancel(id));
           if (action === 'compact') { const input = z.strictObject({ digest: z.string().regex(/^\d{13}\.[a-f0-9]{64}$/) }).parse(await body(req)); return send(res, 200, await service.compact(id, input.digest)); }
           if (action === 'cleanup') return send(res, 200, await service.cleanup(id));
         }

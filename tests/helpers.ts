@@ -17,11 +17,11 @@ export async function fixture(devagentsRules = true) {
   execFileSync('git', ['-C', project, 'add', '.']);
   execFileSync('git', ['-C', project, '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'Initial fixture']);
   const dataDir = join(root, 'data');
-  const store = new Store(join(dataDir, 'test.db'), ['fixture-secret-value']);
+  const store = await Store.open(join(dataDir, 'test.db'), ['fixture-secret-value']);
   // Most workflow fixtures inspect their final checkout. Retention tests explicitly enable cleanup.
-  const service = new TaskService(store, Config.parse({ schemaVersion: 1, devagentsRules, qaEnabled: true, compactCompletedTasks: false, cleanupTerminalTasks: false }), dataDir);
+  const service = await TaskService.create(store, Config.parse({ schemaVersion: 1, devagentsRules, qaEnabled: true, compactCompletedTasks: false, cleanupTerminalTasks: false }), dataDir);
   await service.registerProject({ id: 'fixture', path: project });
-  return { root, project, dataDir, store, service, cleanup: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
+  return { root, project, dataDir, store, service, cleanup: async () => { await store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 export const validPlan = () => ({
   summary: 'Implement a greeting', risks: [], items: [{

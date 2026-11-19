@@ -17,7 +17,7 @@ async function serve() {
   execFileSync('git', ['-C', f.project, 'remote', 'add', 'origin', 'https://github.com/example-org/website.git']);
   const github = (async (input: string | URL | Request) => new Response(JSON.stringify(String(input).endsWith('/user') ? { login: 'fixture-user' } : { permissions: { push: true } }), { status: 200 })) as typeof fetch;
   const integrations = new ProjectIntegrationService(f.store, secrets, { fetch: github, githubApiUrl: 'https://api.github.test' });
-  const server = createApi(f.service, 'test-token', { integrations });
+  const server = await createApi(f.service, 'test-token', { integrations });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const root = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (path: string, method = 'GET', body?: unknown, key?: string) => {

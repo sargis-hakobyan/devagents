@@ -39,8 +39,8 @@ export class ProjectIntegrationService {
     this.fetcher = options.fetch ?? fetch; this.githubApi = options.githubApiUrl ?? GITHUB_API; this.now = options.now ?? (() => new Date());
   }
   private get shared() { return this.secrets.mode === 'vault'; }
-  private active(projectId: string) {
-    const project = this.store.project(projectId);
+  private async active(projectId: string) {
+    const project = await this.store.project(projectId);
     if (project.archivedAt) throw new AppError('project_archived', 'This project is archived. Restore it before connecting it.', 409);
     return project;
   }
@@ -53,10 +53,10 @@ export class ProjectIntegrationService {
     if (!this.shared) return `${kind}-${projectId}`;
     return kind === 'github' ? `github-${account.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 100)}` : `jira-${createHash('sha256').update(account.toLowerCase()).digest('hex').slice(0, 20)}`;
   }
-  private savedTokens(kind: Kind): SavedToken[] {
+  private async savedTokens(kind: Kind): Promise<SavedToken[]> {
     if (!this.shared) return [];
     const found = new Map<string, SavedToken>();
-    for (const project of this.store.projects()) {
+    for (const project of await this.store.projects()) {
       const connection = project.integrations?.[kind]; if (!connection) continue;
       const label = kind === 'github' ? `@${(connection as GitHubIntegration).login}` : `${(connection as JiraIntegration).account} · ${(connection as JiraIntegration).site.replace(/^https:\/\//, '')}`;
       const entry = found.get(connection.savedToken) ?? { id: connection.savedToken, label, usedBy: [] };
@@ -66,7 +66,7 @@ export class ProjectIntegrationService {
   }
   /** A saved-token id is only honoured when a project already uses it, so it cannot name an arbitrary secret. */
   private async reuse(kind: Kind, id: string): Promise<{ token: string; from: string }> {
-    const saved = this.savedTokens(kind).find(t => t.id === id);
+    const saved = (await this.savedTokens(kind)).find(t => t.id === id);
     const token = saved && await this.secrets.get(id);
     if (!saved || !token) throw new AppError('unknown_saved_token', 'No saved token with this id. Look at the integrations view for the ones that exist.', 422);
     return { token, from: saved.usedBy[0]!.id };
@@ -80,27 +80,27 @@ export class ProjectIntegrationService {
     return;
   }
   /** Applies what was learned about a shared token to every other project that uses it. */
-  private spread<T extends GitHubIntegration | JiraIntegration>(kind: Kind, savedToken: string, except: string, change: (connection: T) => T): void {
+  private async spread<T extends GitHubIntegration | JiraIntegration>(kind: Kind, savedToken: string, except: string, change: (connection: T) => T): Promise<void> {
     if (!this.shared) return;
-    for (const project of this.store.projects()) {
+    for (const project of await this.store.projects()) {
       if (project.id === except || project.integrations?.[kind]?.savedToken !== savedToken) continue;
-      this.store.setProjectIntegrations(project.id, current => current[kind] ? { ...current, [kind]: change(current[kind] as T) } : current);
+      await this.store.setProjectIntegrations(project.id, current => current[kind] ? { ...current, [kind]: change(current[kind] as T) } : current);
     }
   }
   /** Forgets a token once no project uses it any more. */
   private async release(kind: Kind, savedToken: string | undefined): Promise<void> {
-    if (!savedToken || this.store.projects().some(p => p.integrations?.[kind]?.savedToken === savedToken)) return;
+    if (!savedToken || (await this.store.projects()).some(p => p.integrations?.[kind]?.savedToken === savedToken)) return;
     await this.secrets.remove(savedToken);
   }
 
   async view(projectId: string): Promise<IntegrationsView> {
-    const project = this.store.project(projectId);
+    const project = await this.store.project(projectId);
     const locked = await this.secrets.locked(); const now = this.now();
     const { github, jira } = project.integrations ?? {};
     return {
       projectId, folder: { path: project.path, ...(project.hostPath ? { hostPath: project.hostPath } : {}), repository: await folderRepository(project.path) ?? null },
       secrets: { mode: this.secrets.mode, locked, ...(this.shared ? {} : { githubVariable: this.secrets.variable(`github-${projectId}`), jiraVariable: this.secrets.variable(`jira-${projectId}`) }) },
-      savedTokens: { github: this.savedTokens('github'), jira: this.savedTokens('jira') },
+      savedTokens: { github: await this.savedTokens('github'), jira: await this.savedTokens('jira') },
       github: github ? { ...github, ...connectionState(github, now, locked) } : null,
       jira: jira ? { ...jira, ...connectionState(jira, now, locked) } : null,
     };
@@ -108,7 +108,7 @@ export class ProjectIntegrationService {
 
   /** A pasted token, a token saved for another project, or (with neither) this project's current token checked again. */
   async connectGitHub(projectId: string, input: unknown): Promise<IntegrationsView> {
-    const parsed = GitHubConnectInput.parse(input); const project = this.active(projectId); const previous = project.integrations?.github;
+    const parsed = GitHubConnectInput.parse(input); const project = await this.active(projectId); const previous = project.integrations?.github;
     if (parsed.token && !this.shared) await this.secrets.set(`github-${projectId}`, parsed.token);
     const current = this.shared ? previous?.savedToken : `github-${projectId}`;
     const token = parsed.savedToken ? (await this.reuse('github', parsed.savedToken)).token : parsed.token ?? (current ? await this.secrets.get(current) : undefined);
@@ -121,9 +121,9 @@ export class ProjectIntegrationService {
     const savedToken = parsed.savedToken ?? (parsed.token ? this.tokenName('github', projectId, check.login) : current!);
     if (parsed.token) await this.secrets.set(savedToken, parsed.token);
     const at = this.stamp();
-    this.store.setProjectIntegrations(projectId, all => ({ ...all, github: { savedToken, repository, tokenKind: kind, ...check, connectedAt: previous?.repository === repository ? previous.connectedAt : at, checkedAt: at } }));
+    await this.store.setProjectIntegrations(projectId, all => ({ ...all, github: { savedToken, repository, tokenKind: kind, ...check, connectedAt: previous?.repository === repository ? previous.connectedAt : at, checkedAt: at } }));
     // A replaced token is replaced for every project on the account: they get its facts and lose a token problem.
-    if (parsed.token) this.spread<GitHubIntegration>('github', savedToken, projectId, other => {
+    if (parsed.token) await this.spread<GitHubIntegration>('github', savedToken, projectId, other => {
       const { expiresAt: _, problem, ...rest } = other;
       return { ...rest, tokenKind: kind, ...(check.expiresAt ? { expiresAt: check.expiresAt } : {}), ...(problem && !tokenProblem(problem) ? { problem } : {}) };
     });
@@ -131,7 +131,7 @@ export class ProjectIntegrationService {
     return this.view(projectId);
   }
   async checkGitHub(projectId: string): Promise<IntegrationsView> {
-    const saved = this.store.project(projectId).integrations?.github;
+    const saved = (await this.store.project(projectId)).integrations?.github;
     if (!saved) throw new AppError('not_connected', 'GitHub is not connected for this project', 404);
     let update: GitHubIntegration;
     try {
@@ -143,10 +143,10 @@ export class ProjectIntegrationService {
       const problem = this.problem(error); if (!problem) throw error;
       update = { ...saved, problem, checkedAt: problem.at };
     }
-    this.store.setProjectIntegrations(projectId, current => current.github ? { ...current, github: update } : current);
+    await this.store.setProjectIntegrations(projectId, current => current.github ? { ...current, github: update } : current);
     // A refused token is refused for everyone who shares it, and an accepted one clears that everywhere.
     const refused = tokenProblem(update.problem) ? update.problem : undefined;
-    if (refused || update.problem?.code !== 'not_reachable') this.spread<GitHubIntegration>('github', saved.savedToken, projectId, other => {
+    if (refused || update.problem?.code !== 'not_reachable') await this.spread<GitHubIntegration>('github', saved.savedToken, projectId, other => {
       const { problem, ...rest } = other;
       return refused ? { ...rest, problem: refused } : { ...rest, ...(problem && !tokenProblem(problem) ? { problem } : {}) };
     });
@@ -154,17 +154,17 @@ export class ProjectIntegrationService {
   }
 
   private async jiraAccess(projectId: string): Promise<{ saved: JiraIntegration; access: JiraAccess }> {
-    const saved = this.store.project(projectId).integrations?.jira;
+    const saved = (await this.store.project(projectId)).integrations?.jira;
     if (!saved) throw new AppError('not_connected', 'Jira is not connected for this project', 404);
     const token = await this.secrets.get(saved.savedToken);
     if (!token) throw this.required(saved.savedToken);
     return { saved, access: { kind: saved.kind, site: saved.site, token, ...(saved.email ? { email: saved.email } : {}), ...(saved.gateway ? { gateway: saved.gateway } : {}) } };
   }
   async connectJira(projectId: string, input: unknown): Promise<IntegrationsView> {
-    const parsed = JiraConnectInput.parse(input); const project = this.active(projectId); const previous = project.integrations?.jira;
+    const parsed = JiraConnectInput.parse(input); const project = await this.active(projectId); const previous = project.integrations?.jira;
     // A saved token brings the Jira it belongs to: site, kind, email and the recorded end date.
     const reused = parsed.savedToken ? await this.reuse('jira', parsed.savedToken) : undefined;
-    const source = reused ? this.store.project(reused.from).integrations!.jira! : undefined;
+    const source = reused ? (await this.store.project(reused.from)).integrations!.jira! : undefined;
     const kind = source?.kind ?? parsed.kind!; const site = source?.site ?? normalizeSite(parsed.site!); const email = source ? source.email : parsed.email;
     const same = previous?.site === site && previous.kind === kind && previous.email === email;
     if (parsed.token && !this.shared) await this.secrets.set(`jira-${projectId}`, parsed.token);
@@ -184,8 +184,8 @@ export class ProjectIntegrationService {
       ...(email ? { email } : {}), ...(check.gateway ? { gateway: check.gateway } : {}), ...(expiresOn ? { expiresOn } : {}),
       ...(sameSite && previous.rule ? { rule: previous.rule } : {}),
     };
-    this.store.setProjectIntegrations(projectId, all => ({ ...all, jira }));
-    if (parsed.token) this.spread<JiraIntegration>('jira', savedToken, projectId, other => {
+    await this.store.setProjectIntegrations(projectId, all => ({ ...all, jira }));
+    if (parsed.token) await this.spread<JiraIntegration>('jira', savedToken, projectId, other => {
       const { expiresOn: _, gateway: __, problem, ...rest } = other;
       return { ...rest, account: check.account, ...(check.gateway ? { gateway: check.gateway } : {}), ...(expiresOn ? { expiresOn } : {}), ...(problem && !tokenProblem(problem) ? { problem } : {}) };
     });
@@ -193,7 +193,7 @@ export class ProjectIntegrationService {
     return this.view(projectId);
   }
   async checkJira(projectId: string): Promise<IntegrationsView> {
-    const saved = this.store.project(projectId).integrations?.jira;
+    const saved = (await this.store.project(projectId)).integrations?.jira;
     if (!saved) throw new AppError('not_connected', 'Jira is not connected for this project', 404);
     let update: JiraIntegration;
     try {
@@ -206,9 +206,9 @@ export class ProjectIntegrationService {
       const problem = this.problem(error); if (!problem) throw error;
       update = { ...saved, problem, checkedAt: problem.at };
     }
-    this.store.setProjectIntegrations(projectId, current => current.jira ? { ...current, jira: update } : current);
+    await this.store.setProjectIntegrations(projectId, current => current.jira ? { ...current, jira: update } : current);
     const refused = tokenProblem(update.problem) ? update.problem : undefined;
-    if (refused || update.problem?.code !== 'not_reachable') this.spread<JiraIntegration>('jira', saved.savedToken, projectId, other => {
+    if (refused || update.problem?.code !== 'not_reachable') await this.spread<JiraIntegration>('jira', saved.savedToken, projectId, other => {
       const { problem, ...rest } = other;
       return refused ? { ...rest, problem: refused } : { ...rest, ...(problem && !tokenProblem(problem) ? { problem } : {}) };
     });
@@ -260,7 +260,7 @@ export class ProjectIntegrationService {
   /** Saves a rule only after Jira accepted its search, so a saved rule is one that runs. */
   async saveJiraRule(projectId: string, input: unknown): Promise<{ integrations: IntegrationsView; matches: JiraMatches }> {
     const { rule, matches } = await this.previewJiraRule(projectId, input);
-    this.store.setProjectIntegrations(projectId, current => {
+    await this.store.setProjectIntegrations(projectId, current => {
       if (!current.jira) throw new AppError('not_connected', 'Jira is not connected for this project', 404);
       return { ...current, jira: { ...current.jira, rule } };
     });
@@ -268,7 +268,7 @@ export class ProjectIntegrationService {
   }
   /** Forgets the pick-up rule and keeps the connection, so no tickets come from Jira until a rule is saved again. */
   async removeJiraRule(projectId: string): Promise<IntegrationsView> {
-    this.store.setProjectIntegrations(projectId, current => {
+    await this.store.setProjectIntegrations(projectId, current => {
       if (!current.jira) throw new AppError('not_connected', 'Jira is not connected for this project', 404);
       const { rule: _, ...jira } = current.jira; return { ...current, jira };
     });
@@ -298,8 +298,8 @@ export class ProjectIntegrationService {
   }
   /** Removes this project's connection. The token itself stays while another project still uses it. */
   async disconnect(projectId: string, kind: Kind): Promise<IntegrationsView> {
-    const savedToken = this.store.project(projectId).integrations?.[kind]?.savedToken;
-    this.store.setProjectIntegrations(projectId, current => { const { [kind]: _, ...rest } = current; return rest; });
+    const savedToken = (await this.store.project(projectId)).integrations?.[kind]?.savedToken;
+    await this.store.setProjectIntegrations(projectId, current => { const { [kind]: _, ...rest } = current; return rest; });
     await this.release(kind, savedToken);
     return this.view(projectId);
   }

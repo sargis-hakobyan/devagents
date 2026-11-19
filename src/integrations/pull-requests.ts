@@ -20,7 +20,7 @@ export type PullRequestOptions = {
   remoteUrl?: (repository: string) => string;
 };
 /** Submits a fix round as a normal task. Supplied by the task service, so this module does not depend on orchestration. */
-export type RoundSubmitter = (input: { projectId: string; request: string; mode: 'autonomous'; teamId?: string }, key: string, followUp: TaskFollowUp) => Task;
+export type RoundSubmitter = (input: { projectId: string; request: string; mode: 'autonomous'; teamId?: string }, key: string, followUp: TaskFollowUp) => Promise<Task>;
 export const RoundInput = z.strictObject({ checks: z.array(z.string().min(1).max(200)).max(20).default([]), comments: z.array(z.string().min(1).max(200)).max(20).default([]), /** Resolve the conflict with the target branch. A round does this alone, before anything else is fixed. */ conflict: z.boolean().default(false) })
   .refine(v => v.conflict ? v.checks.length + v.comments.length === 0 : v.checks.length + v.comments.length > 0, 'Choose at least one failed check or comment, or the conflict alone');
 export type ProjectPullRequests = { connected: boolean; repository?: string; settings: PullRequestSettings };
@@ -77,16 +77,16 @@ export class PullRequestService {
     this.remoteUrl = options.remoteUrl ?? (repository => `https://github.com/${repository}.git`);
   }
 
-  project(projectId: string): ProjectPullRequests {
-    const { github, pullRequests } = this.store.project(projectId).integrations ?? {};
+  async project(projectId: string): Promise<ProjectPullRequests> {
+    const { github, pullRequests } = (await this.store.project(projectId)).integrations ?? {};
     return { connected: Boolean(github), ...(github ? { repository: github.repository } : {}), settings: pullRequests ?? NO_PULL_REQUESTS };
   }
-  save(projectId: string, input: unknown): ProjectPullRequests {
-    const settings = PullRequestSettings.parse(input); const project = this.store.project(projectId);
+  async save(projectId: string, input: unknown): Promise<ProjectPullRequests> {
+    const settings = PullRequestSettings.parse(input); const project = await this.store.project(projectId);
     if (project.archivedAt) throw new AppError('project_archived', 'This project is archived. Restore it before changing it.', 409);
     if (settings.publish === 'off' && (settings.fixChecks !== 'off' || settings.fixComments !== 'off' || settings.merge !== 'off')) throw new AppError('invalid_settings', 'Fixing and merging need Publish to be turned on.', 422);
     if (settings.publish !== 'off' && !project.integrations?.github) throw new AppError('not_connected', 'Connect GitHub for this project before turning on pull requests.', 422);
-    this.store.setProjectIntegrations(projectId, current => ({ ...current, pullRequests: settings }));
+    await this.store.setProjectIntegrations(projectId, current => ({ ...current, pullRequests: settings }));
     return this.project(projectId);
   }
   /** Branch names of the connected repository, for choosing the target. */
@@ -100,32 +100,32 @@ export class PullRequestService {
   }
 
   /** Called when a task is submitted: the task keeps the choices its project had at that moment. */
-  freeze(taskId: string, projectId: string): void {
-    const { connected, settings } = this.project(projectId);
+  async freeze(taskId: string, projectId: string): Promise<void> {
+    const { connected, settings } = await this.project(projectId);
     // A fix round adds to an existing pull request and never opens one of its own.
-    if (this.store.task(taskId).followUp) return;
-    if (!connected || settings.publish === 'off' || this.store.lastEvidence(taskId, PR_SETTINGS)) return;
-    this.store.record(taskId, PR_SETTINGS, settings);
+    if ((await this.store.task(taskId)).followUp) return;
+    if (!connected || settings.publish === 'off' || await this.store.lastEvidence(taskId, PR_SETTINGS)) return;
+    await this.store.record(taskId, PR_SETTINGS, settings);
   }
-  private frozen(taskId: string): PullRequestSettings | undefined {
-    const saved = this.store.lastEvidence(taskId, PR_SETTINGS);
+  private async frozen(taskId: string): Promise<PullRequestSettings | undefined> {
+    const saved = await this.store.lastEvidence(taskId, PR_SETTINGS);
     const parsed = saved && PullRequestSettings.safeParse(saved.data);
     return parsed && parsed.success ? parsed.data : undefined;
   }
-  view(taskId: string): TaskPullRequestView {
-    const task = this.store.task(taskId);
+  async view(taskId: string): Promise<TaskPullRequestView> {
+    const task = await this.store.task(taskId);
     if (task.followUp) return { mode: 'off', canPublish: false, publishing: false, roundOf: { taskId: task.followUp.taskId, number: task.followUp.number, round: task.followUp.round } };
-    const { connected, settings } = this.project(task.projectId);
-    const frozen = this.frozen(taskId); const opened = this.store.lastEvidence(taskId, PR_OPENED); const failed = this.store.lastEvidence(taskId, PR_FAILED);
+    const { connected, settings } = await this.project(task.projectId);
+    const frozen = await this.frozen(taskId); const opened = await this.store.lastEvidence(taskId, PR_OPENED); const failed = await this.store.lastEvidence(taskId, PR_FAILED);
     // A click is the user's own decision, so it is offered whenever the project publishes at all, also for a task started before that was turned on.
     const offered = connected && ((frozen?.publish ?? 'off') !== 'off' || settings.publish !== 'off');
     return {
       mode: frozen?.publish ?? 'off', publishing: this.running.has(taskId),
       canPublish: offered && !opened && task.state === 'completed' && Boolean(task.outcome?.commit && task.workspace?.branch),
       ...(opened ? { pullRequest: opened.data as TaskPullRequest } : {}),
-      ...(opened ? { github: this.snapshot(taskId, opened.data as TaskPullRequest) } : {}),
-      ...(opened ? { rounds: this.rounds(taskId), canFix: this.canFix(taskId) } : {}),
-      ...(opened ? this.mergeView(taskId) : {}),
+      ...(opened ? { github: await this.snapshot(taskId, opened.data as TaskPullRequest) } : {}),
+      ...(opened ? { rounds: await this.rounds(taskId), canFix: await this.canFix(taskId) } : {}),
+      ...(opened ? await this.mergeView(taskId) : {}),
       ...(failed && (!opened || failed.sequence > opened.sequence) ? { failure: failed.data as PublishFailure } : {}),
     };
   }
@@ -134,11 +134,11 @@ export class PullRequestService {
   publish(taskId: string, trigger: Trigger): Promise<TaskPullRequest> {
     let running = this.running.get(taskId);
     if (!running) {
-      running = this.run(taskId, trigger).catch(error => {
+      running = this.run(taskId, trigger).catch(async error => {
         const known = error instanceof AppError;
         // Only messages written here are kept: Git and GitHub output can quote addresses and account details.
         const message = known ? error.message : 'The pull request could not be opened. Nothing else was changed.';
-        this.store.record(taskId, PR_FAILED, { message, at: this.now().toISOString(), trigger } satisfies PublishFailure);
+        await this.store.record(taskId, PR_FAILED, { message, at: this.now().toISOString(), trigger } satisfies PublishFailure);
         throw known ? error : new AppError('publish_failed', message, 502);
       }).finally(() => this.running.delete(taskId));
       this.running.set(taskId, running);
@@ -149,38 +149,42 @@ export class PullRequestService {
   async publishDue(): Promise<void> {
     if (this.sweeping) return; this.sweeping = true;
     try {
-      for (const id of this.store.completedAwaiting(PR_SETTINGS, [PR_OPENED, PR_FAILED])) {
-        if (this.frozen(id)?.publish === 'auto') await this.publish(id, 'setting').catch(() => {});
+      for (const id of await this.store.completedAwaiting(PR_SETTINGS, [PR_OPENED, PR_FAILED])) {
+        if ((await this.frozen(id))?.publish === 'auto') await this.publish(id, 'setting').catch(() => {});
       }
     } finally { this.sweeping = false; }
   }
 
   /** The stored state of a pull request; created the first time it is asked for. */
-  private snapshot(taskId: string, opened: TaskPullRequest): PullRequestSnapshot {
-    const saved = this.store.pullRequest(taskId);
+  private async snapshot(taskId: string, opened: TaskPullRequest): Promise<PullRequestSnapshot> {
+    const saved = await this.store.pullRequest(taskId);
     if (saved) return saved;
     const first = { number: opened.number, base: opened.base, state: 'open' as const, draft: opened.draft, headSha: opened.commit, mergeable: 'unknown' as const, checks: [], comments: [] };
     const snapshot = { ...first, status: pullRequestStatus(first) };
-    this.store.savePullRequest(taskId, snapshot);
+    await this.store.savePullRequest(taskId, snapshot);
     return snapshot;
   }
   /** Reads the open pull requests that were last read more than a minute ago. */
   async syncDue(): Promise<void> {
     if (this.syncing) return; this.syncing = true;
     try {
-      const due = this.store.openPullRequests().filter(id => { const s = this.store.pullRequest(id); return !s?.attemptedAt || this.now().getTime() - Date.parse(s.attemptedAt) >= SYNC_EVERY_MS; });
+      const due: string[] = [];
+      for (const id of await this.store.openPullRequests()) {
+        const snapshot = await this.store.pullRequest(id);
+        if (!snapshot?.attemptedAt || this.now().getTime() - Date.parse(snapshot.attemptedAt) >= SYNC_EVERY_MS) due.push(id);
+      }
       for (const id of due.slice(0, 20)) await this.sync(id).catch(() => {});
       // Rounds are looked at on every pass, not once a minute: a finished round is pushed without waiting for the next read.
-      for (const id of this.store.openPullRequests()) await this.advance(id).catch(() => {});
+      for (const id of await this.store.openPullRequests()) await this.advance(id).catch(() => {});
     } finally { this.syncing = false; }
   }
   /** One read of a pull request: its state, the checks on its latest commit and its unresolved review comments. A failed read keeps what the last one found. */
   async sync(taskId: string): Promise<PullRequestSnapshot> {
-    const opened = this.store.lastEvidence(taskId, PR_OPENED)?.data as TaskPullRequest | undefined;
+    const opened = (await this.store.lastEvidence(taskId, PR_OPENED))?.data as TaskPullRequest | undefined;
     if (!opened) throw new AppError('not_published', 'This task has no pull request.', 404);
-    const previous = this.snapshot(taskId, opened); const at = this.now().toISOString();
+    const previous = await this.snapshot(taskId, opened); const at = this.now().toISOString();
     try {
-      const { token } = await this.access(this.store.task(taskId).projectId); const repo = `/repos/${opened.repository}`;
+      const { token } = await this.access((await this.store.task(taskId)).projectId); const repo = `/repos/${opened.repository}`;
       const pull = await this.github(token, 'GET', `${repo}/pulls/${opened.number}`);
       if (pull.status !== 200) throw this.refused(pull.status, `read pull request #${opened.number}`);
       const pr = record(pull.json); const headSha = text(record(pr.head).sha, 64) || previous.headSha;
@@ -202,12 +206,12 @@ export class PullRequestService {
       const nodeId = text(pr.node_id, 200);
       const read = { number: opened.number, base: text(record(pr.base).ref, 200) || previous.base, state, draft: pr.draft === true, headSha, mergeable, checks, comments, syncedAt: at, attemptedAt: at, ...(nodeId ? { nodeId } : {}), ...(previous.attention && state === 'open' ? { attention: previous.attention } : {}) };
       const snapshot = { ...read, status: pullRequestStatus(read) };
-      this.store.savePullRequest(taskId, snapshot);
+      await this.store.savePullRequest(taskId, snapshot);
       return snapshot;
     } catch (error) {
       const { error: _, ...kept } = previous;
       const snapshot = { ...kept, attemptedAt: at, error: error instanceof AppError ? error.message : 'GitHub could not be read.' };
-      this.store.savePullRequest(taskId, snapshot);
+      await this.store.savePullRequest(taskId, snapshot);
       return snapshot;
     }
   }
@@ -253,27 +257,27 @@ export class PullRequestService {
    */
   async startCommit(task: Task): Promise<string | undefined> {
     if (task.followUp) return task.followUp.baseSha;
-    const project = this.store.project(task.projectId);
+    const project = await this.store.project(task.projectId);
     if (!project.integrations?.github) return undefined;
     const { repository, token } = await this.access(task.projectId);
-    let branch = (this.frozen(task.id) ?? this.project(task.projectId).settings).targetBranch;
+    let branch = (await this.frozen(task.id) ?? (await this.project(task.projectId)).settings).targetBranch;
     if (!branch) {
       const repo = await this.github(token, 'GET', `/repos/${repository}`);
       branch = repo.status === 200 ? text(record(repo.json).default_branch, 200) : '';
       if (!branch) throw new AppError('fetch_failed', `GitHub did not name the default branch of ${repository}, so the task has nothing to start from.`, 502);
     }
     const commit = await this.fetchBranch(project.path, repository, token, branch);
-    this.store.record(task.id, TASK_START, { source: 'github', repository, branch, commit });
+    await this.store.record(task.id, TASK_START, { source: 'github', repository, branch, commit });
     return commit;
   }
 
   // ---- Merge ----
-  private mergeView(taskId: string): Pick<TaskPullRequestView, 'canMerge' | 'mergeFailure' | 'localBehind'> {
-    const github = this.store.pullRequest(taskId); const frozen = this.frozen(taskId); const { connected, settings } = this.project(this.store.task(taskId).projectId);
+  private async mergeView(taskId: string): Promise<Pick<TaskPullRequestView, 'canMerge' | 'mergeFailure' | 'localBehind'>> {
+    const github = await this.store.pullRequest(taskId); const frozen = await this.frozen(taskId); const { connected, settings } = await this.project((await this.store.task(taskId)).projectId);
     const offered = connected && ((frozen?.merge ?? 'off') !== 'off' || settings.merge !== 'off');
-    const busy = this.rounds(taskId).some(r => r.state === 'working' || r.state === 'needs-you' || r.state === 'held');
-    const failed = this.store.lastEvidence(taskId, PR_MERGE_FAILED)?.data as { commit?: string; message?: string } | undefined;
-    const merged = this.store.lastEvidence(taskId, PR_MERGED)?.data as { localBehind?: boolean } | undefined;
+    const busy = (await this.rounds(taskId)).some(r => r.state === 'working' || r.state === 'needs-you' || r.state === 'held');
+    const failed = (await this.store.lastEvidence(taskId, PR_MERGE_FAILED))?.data as { commit?: string; message?: string } | undefined;
+    const merged = (await this.store.lastEvidence(taskId, PR_MERGED))?.data as { localBehind?: boolean } | undefined;
     return {
       canMerge: offered && !busy && github?.state === 'open' && github.status.code === 'ready',
       ...(failed?.message && github?.state === 'open' && failed.commit === github.headSha ? { mergeFailure: failed.message } : {}),
@@ -286,11 +290,11 @@ export class PullRequestService {
    * protection decides as usual. DevAgents opens no drafts; one that someone turned into a draft is marked ready first.
    */
   async merge(taskId: string, trigger: Trigger): Promise<void> {
-    const task = this.store.task(taskId); const opened = this.store.lastEvidence(taskId, PR_OPENED)?.data as TaskPullRequest | undefined; const github = this.store.pullRequest(taskId);
+    const task = await this.store.task(taskId); const opened = (await this.store.lastEvidence(taskId, PR_OPENED))?.data as TaskPullRequest | undefined; const github = await this.store.pullRequest(taskId);
     if (!opened || !github || github.state !== 'open') throw new AppError('not_mergeable', 'Only an open pull request can be merged.', 409);
-    if (trigger === 'user' && !this.mergeView(taskId).canMerge) throw new AppError('not_mergeable', `This pull request cannot be merged now: ${github.status.text}.`, 409);
+    if (trigger === 'user' && !(await this.mergeView(taskId)).canMerge) throw new AppError('not_mergeable', `This pull request cannot be merged now: ${github.status.text}.`, 409);
     if (github.status.code !== 'ready') throw new AppError('not_mergeable', `This pull request cannot be merged now: ${github.status.text}.`, 409);
-    const settings = this.frozen(taskId) ?? this.project(task.projectId).settings; const method = settings.mergeMethod;
+    const settings = await this.frozen(taskId) ?? (await this.project(task.projectId)).settings; const method = settings.mergeMethod;
     try {
       const { token } = await this.access(task.projectId);
       if (github.draft) {
@@ -303,14 +307,14 @@ export class PullRequestService {
         if (merged.status === 409) throw new AppError('not_mergeable', 'The pull request changed on GitHub since it was last read. It is read again within a minute.', 409);
         throw this.refused(merged.status, `merge pull request #${opened.number}`);
       }
-      const sha = text(record(merged.json).sha, 64); const project = this.store.project(task.projectId);
+      const sha = text(record(merged.json).sha, 64); const project = await this.store.project(task.projectId);
       // The user's checkout is never changed; say so when its target branch does not hold the merge.
       const local = /^[a-f0-9]{40}$/.test(sha) && await git(project.path, ['merge-base', '--is-ancestor', sha, `refs/heads/${github.base}`]).then(() => true, () => false);
-      this.store.record(taskId, PR_MERGED, { number: opened.number, base: github.base, method, commit: sha, trigger, at: this.now().toISOString(), localBehind: !local });
+      await this.store.record(taskId, PR_MERGED, { number: opened.number, base: github.base, method, commit: sha, trigger, at: this.now().toISOString(), localBehind: !local });
       await this.sync(taskId).catch(() => {});
     } catch (error) {
       const message = error instanceof AppError ? error.message : 'The pull request could not be merged.';
-      this.store.record(taskId, PR_MERGE_FAILED, { commit: github.headSha, message, trigger, at: this.now().toISOString() });
+      await this.store.record(taskId, PR_MERGE_FAILED, { commit: github.headSha, message, trigger, at: this.now().toISOString() });
       throw error instanceof AppError ? error : new AppError('merge_failed', message, 502);
     }
   }
@@ -319,13 +323,13 @@ export class PullRequestService {
   private submitRound?: RoundSubmitter;
   attachRounds(submit: RoundSubmitter): void { this.submitRound = submit; }
   /** `head` is the pull request's commit the round was started for; older records only have `baseSha`, which was the same commit. */
-  private roundRecords(taskId: string): { round: number; taskId: string; checks: string[]; comments: string[]; trigger: Trigger; baseSha: string; head: string; conflict?: boolean; at: string }[] {
-    return this.store.evidenceOf(taskId, [PR_ROUND]).map(e => { const d = e.data as { round: number; taskId: string; checks: string[]; comments: string[]; trigger: Trigger; baseSha: string; head?: string; conflict?: boolean }; return { ...d, head: d.head ?? d.baseSha, at: e.at }; });
+  private async roundRecords(taskId: string): Promise<{ round: number; taskId: string; checks: string[]; comments: string[]; trigger: Trigger; baseSha: string; head: string; conflict?: boolean; at: string }[]> {
+    return (await this.store.evidenceOf(taskId, [PR_ROUND])).map(e => { const d = e.data as { round: number; taskId: string; checks: string[]; comments: string[]; trigger: Trigger; baseSha: string; head?: string; conflict?: boolean }; return { ...d, head: d.head ?? d.baseSha, at: e.at }; });
   }
-  private rounds(taskId: string): PullRequestRound[] {
-    const evidence = this.store.evidenceOf(taskId, [PR_ROUND_PUSHED, PR_ROUND_FAILED, PR_ROUND_HELD]); const last = (kind: string, round: number) => evidence.filter(e => e.kind === kind && (e.data as { round?: number }).round === round).at(-1)?.data as { commit?: string; message?: string } | undefined;
-    return this.roundRecords(taskId).map(r => {
-      const task = this.store.task(r.taskId); const pushed = last(PR_ROUND_PUSHED, r.round); const failed = last(PR_ROUND_FAILED, r.round); const held = last(PR_ROUND_HELD, r.round);
+  private async rounds(taskId: string): Promise<PullRequestRound[]> {
+    const evidence = await this.store.evidenceOf(taskId, [PR_ROUND_PUSHED, PR_ROUND_FAILED, PR_ROUND_HELD]); const last = (kind: string, round: number) => evidence.filter(e => e.kind === kind && (e.data as { round?: number }).round === round).at(-1)?.data as { commit?: string; message?: string } | undefined;
+    return (await Promise.all((await this.roundRecords(taskId)).map(async r => {
+      const task = await this.store.task(r.taskId); const pushed = last(PR_ROUND_PUSHED, r.round); const failed = last(PR_ROUND_FAILED, r.round); const held = last(PR_ROUND_HELD, r.round);
       const base = { round: r.round, taskId: r.taskId, checks: r.checks, comments: r.comments.length, ...(r.conflict ? { conflict: true } : {}), trigger: r.trigger, startedAt: r.at };
       if (pushed) return { ...base, state: 'pushed' as const, detail: 'Pushed to the pull request', ...(pushed.commit ? { commit: pushed.commit } : {}) };
       if (failed) return { ...base, state: 'failed' as const, detail: failed.message ?? 'The round could not be pushed.' };
@@ -333,11 +337,11 @@ export class PullRequestService {
       if (task.state === 'failed' || task.state === 'cancelled') return { ...base, state: 'failed' as const, detail: task.state === 'cancelled' ? 'The round was cancelled.' : 'The round failed before it produced a commit.' };
       if (['awaiting_mode', 'awaiting_plan_approval', 'awaiting_external_approval'].includes(task.state)) return { ...base, state: 'needs-you' as const, detail: 'The round waits for your decision.' };
       return { ...base, state: 'working' as const, detail: task.state === 'completed' ? 'Reviewed. Pushing to the pull request.' : `The team is working on it (${task.state.replace(/_/g, ' ')}).` };
-    });
+    })));
   }
-  private canFix(taskId: string): { checks: boolean; comments: boolean; conflict: boolean } {
-    const frozen = this.frozen(taskId); const { connected, settings } = this.project(this.store.task(taskId).projectId);
-    const github = this.store.pullRequest(taskId); const busy = this.rounds(taskId).some(r => r.state === 'working' || r.state === 'needs-you' || r.state === 'held');
+  private async canFix(taskId: string): Promise<{ checks: boolean; comments: boolean; conflict: boolean }> {
+    const frozen = await this.frozen(taskId); const { connected, settings } = await this.project((await this.store.task(taskId)).projectId);
+    const github = await this.store.pullRequest(taskId); const busy = (await this.rounds(taskId)).some(r => r.state === 'working' || r.state === 'needs-you' || r.state === 'held');
     const ready = connected && Boolean(this.submitRound) && github?.state === 'open' && Boolean(github.syncedAt) && !busy;
     // As with publishing, a click is the user's own decision and is offered whenever the project fixes that kind at all.
     const fixes = (frozen?.fixChecks ?? 'off') !== 'off' || settings.fixChecks !== 'off';
@@ -350,15 +354,15 @@ export class PullRequestService {
    * What GitHub reported is handed over as quoted material, never as instructions.
    */
   async startRound(taskId: string, input: unknown, trigger: Trigger): Promise<PullRequestRound> {
-    const chosen = RoundInput.parse(input); const task = this.store.task(taskId);
-    const opened = this.store.lastEvidence(taskId, PR_OPENED)?.data as TaskPullRequest | undefined; const github = this.store.pullRequest(taskId);
+    const chosen = RoundInput.parse(input); const task = await this.store.task(taskId);
+    const opened = (await this.store.lastEvidence(taskId, PR_OPENED))?.data as TaskPullRequest | undefined; const github = await this.store.pullRequest(taskId);
     if (!opened || !github || github.state !== 'open' || !this.submitRound) throw new AppError('not_fixable', 'A fix round needs an open pull request.', 409);
-    const able = this.canFix(taskId);
+    const able = await this.canFix(taskId);
     if (trigger === 'user' && ((chosen.checks.length > 0 && !able.checks) || (chosen.comments.length > 0 && !able.comments) || (chosen.conflict && !able.conflict))) throw new AppError('not_fixable', 'A fix round cannot be started now: one is already open, or this project does not fix that.', 409);
-    if (this.rounds(taskId).some(r => r.state === 'working' || r.state === 'needs-you' || r.state === 'held')) throw new AppError('round_open', 'A fix round for this pull request is already open.', 409);
+    if ((await this.rounds(taskId)).some(r => r.state === 'working' || r.state === 'needs-you' || r.state === 'held')) throw new AppError('round_open', 'A fix round for this pull request is already open.', 409);
     const checks = github.checks.filter(c => c.status === 'failed' && chosen.checks.includes(c.name)); const comments = github.comments.filter(c => chosen.comments.includes(c.id));
     if (checks.length !== chosen.checks.length || comments.length !== chosen.comments.length) throw new AppError('not_fixable', 'The chosen checks or comments are no longer open on GitHub. Reload and choose again.', 409);
-    const project = this.store.project(task.projectId); const { token } = await this.access(task.projectId);
+    const project = await this.store.project(task.projectId); const { token } = await this.access(task.projectId);
     // The round starts from what is on GitHub now, which may include commits pushed by someone else.
     if (!await git(project.path, ['cat-file', '-e', `${github.headSha}^{commit}`]).then(() => true, () => false)) {
       const url = this.remoteUrl(opened.repository);
@@ -383,7 +387,7 @@ export class PullRequestService {
       parts.push(`Failed check "${check.name}"${check.summary ? `: ${check.summary}` : ''}${log ? `\n${quote(log)}` : '\nGitHub gave no log for this check. Reproduce the failure with the project\'s own commands.'}`);
     }
     for (const comment of comments) parts.push(`Review comment by @${comment.author}${comment.path ? ` on ${comment.path}${comment.line ? ` line ${comment.line}` : ''}` : ''}:\n${quote(comment.body)}`);
-    const round = this.roundRecords(taskId).length + 2;
+    const round = (await this.roundRecords(taskId)).length + 2;
     const request = conflicted ? [
       `Resolve the conflict of pull request #${opened.number} with ${github.base} (${firstLine(task.request).slice(0, 120)})`,
       `This is round ${round} of the pull request from ${opened.branch} into ${github.base}. ${github.base} changed since the pull request was written. Your worktree already holds a merge of both; in the files below Git could not combine the two sides and left conflict markers (<<<<<<<, =======, >>>>>>>).`,
@@ -396,9 +400,9 @@ export class PullRequestService {
       ...parts,
     ].join('\n\n').slice(0, 19000);
     const followUp: TaskFollowUp = { taskId, number: opened.number, round, baseSha: start, checks: checks.map(c => c.name), comments: comments.map(c => c.id), trigger, ...(conflicted ? { conflict: conflicted } : {}) };
-    const created = this.submitRound({ projectId: task.projectId, request, mode: 'autonomous', ...(task.team ? { teamId: task.team.id } : {}) }, `pull-request-round:${taskId}:${round}:${github.headSha}`, followUp);
-    this.store.record(taskId, PR_ROUND, { round, taskId: created.id, checks: followUp.checks, comments: followUp.comments, trigger, baseSha: start, head: github.headSha, ...(conflicted ? { conflict: true } : {}) });
-    return this.rounds(taskId).at(-1)!;
+    const created = await this.submitRound({ projectId: task.projectId, request, mode: 'autonomous', ...(task.team ? { teamId: task.team.id } : {}) }, `pull-request-round:${taskId}:${round}:${github.headSha}`, followUp);
+    await this.store.record(taskId, PR_ROUND, { round, taskId: created.id, checks: followUp.checks, comments: followUp.comments, trigger, baseSha: start, head: github.headSha, ...(conflicted ? { conflict: true } : {}) });
+    return (await this.rounds(taskId)).at(-1)!;
   }
   /** The end of a failed check's output: annotations where GitHub has them, and the tail of the job log. Best effort; an unreadable log is left out. */
   private async checkLog(token: string, repository: string, check: PullRequestCheck): Promise<string> {
@@ -422,13 +426,13 @@ export class PullRequestService {
   }
   /** Pushes a round that finished and passed its own review. A round that touches a workflow file waits for a click. */
   private async pushRound(taskId: string, record_: { round: number; taskId: string }, confirmed: boolean): Promise<void> {
-    const round = this.store.task(record_.taskId); const opened = this.store.lastEvidence(taskId, PR_OPENED)!.data as TaskPullRequest;
-    const commit = round.outcome?.commit; const base = round.followUp?.baseSha; const project = this.store.project(round.projectId);
-    const note = (kind: string, data: Record<string, unknown>) => this.store.record(taskId, kind, { round: record_.round, taskId: record_.taskId, at: this.now().toISOString(), ...data });
+    const round = await this.store.task(record_.taskId); const opened = (await this.store.lastEvidence(taskId, PR_OPENED))!.data as TaskPullRequest;
+    const commit = round.outcome?.commit; const base = round.followUp?.baseSha; const project = await this.store.project(round.projectId);
+    const note = async (kind: string, data: Record<string, unknown>) => await this.store.record(taskId, kind, { round: record_.round, taskId: record_.taskId, at: this.now().toISOString(), ...data });
     if (round.state !== 'completed' || !commit || !base) return;
     try {
       const files = (await git(project.path, ['diff', '--name-only', '-z', base, commit, '--'], false)).split('\0').filter(Boolean);
-      if (!confirmed && files.some(file => file.startsWith('.github/workflows/'))) { note(PR_ROUND_HELD, { commit, message: 'This round changes a workflow file. A changed workflow runs with the repository\'s secrets, so it is pushed only when you say so.' }); return; }
+      if (!confirmed && files.some(file => file.startsWith('.github/workflows/'))) { await note(PR_ROUND_HELD, { commit, message: 'This round changes a workflow file. A changed workflow runs with the repository\'s secrets, so it is pushed only when you say so.' }); return; }
       // A conflict round must leave no marker behind; a result that still has one is never pushed.
       const conflict = round.followUp?.conflict ?? [];
       if (conflict.length && await git(project.path, ['grep', '-l', '-E', '^(<<<<<<<|>>>>>>>)( |$)', commit, '--', ...conflict]).then(found => Boolean(found), () => false)) throw new AppError('push_failed', `Round ${record_.round} left conflict markers in the files, so it was not pushed.`, 409);
@@ -436,13 +440,13 @@ export class PullRequestService {
       // No force: if someone pushed in the meantime GitHub refuses, and the next round starts from their commit.
       try { await remoteGit(project.path, ['push', '--no-verify', url, `${commit}:refs/heads/${opened.branch}`], url, token); }
       catch { throw new AppError('push_failed', `GitHub did not accept the push of round ${record_.round}. Someone may have pushed to ${opened.branch} in the meantime; a new round starts from their commit.`, 502); }
-      note(PR_ROUND_PUSHED, { commit });
+      await note(PR_ROUND_PUSHED, { commit });
       await this.sync(taskId).catch(() => {});
-    } catch (error) { note(PR_ROUND_FAILED, { message: error instanceof AppError ? error.message : `Round ${record_.round} could not be pushed.` }); }
+    } catch (error) { await note(PR_ROUND_FAILED, { message: error instanceof AppError ? error.message : `Round ${record_.round} could not be pushed.` }); }
   }
   /** Pushes a round that was held for a changed workflow file. */
   async releaseRound(taskId: string): Promise<void> {
-    const held = this.rounds(taskId).find(r => r.state === 'held');
+    const held = (await this.rounds(taskId)).find(r => r.state === 'held');
     if (!held) throw new AppError('not_held', 'No round of this pull request waits to be pushed.', 409);
     await this.pushRound(taskId, held, true);
   }
@@ -450,32 +454,32 @@ export class PullRequestService {
   private async advance(taskId: string): Promise<void> {
     await this.act(taskId);
     // Record whether the pull request now waits for the user, so the board can lift it into its band.
-    const github = this.store.pullRequest(taskId);
+    const github = await this.store.pullRequest(taskId);
     if (!github) return;
-    const attention = github.state === 'open' ? this.attention(taskId, github) : undefined;
-    if (attention !== github.attention) { const { attention: _, ...rest } = github; this.store.savePullRequest(taskId, { ...rest, ...(attention ? { attention } : {}) }); }
+    const attention = github.state === 'open' ? await this.attention(taskId, github) : undefined;
+    if (attention !== github.attention) { const { attention: _, ...rest } = github; await this.store.savePullRequest(taskId, { ...rest, ...(attention ? { attention } : {}) }); }
   }
-  private attention(taskId: string, github: PullRequestSnapshot): string | undefined {
+  private async attention(taskId: string, github: PullRequestSnapshot): Promise<string | undefined> {
     // A task from before the project published has no choices of its own; what it waits for is then judged by the project's current ones.
-    const rounds = this.rounds(taskId); const settings = this.frozen(taskId) ?? this.project(this.store.task(taskId).projectId).settings;
+    const rounds = await this.rounds(taskId); const settings = await this.frozen(taskId) ?? (await this.project((await this.store.task(taskId)).projectId)).settings;
     if (rounds.some(r => r.state === 'held')) return 'a fix changes a workflow file';
     if (rounds.some(r => r.state === 'needs-you')) return 'a fix round waits for you';
     if (rounds.some(r => r.state === 'working') || !github.syncedAt) return;
-    const failed = this.store.lastEvidence(taskId, PR_MERGE_FAILED)?.data as { commit?: string } | undefined;
+    const failed = (await this.store.lastEvidence(taskId, PR_MERGE_FAILED))?.data as { commit?: string } | undefined;
     if (github.status.code === 'ready') return settings.merge === 'ask' ? 'ready to merge' : settings.merge === 'auto' && failed?.commit === github.headSha ? 'GitHub refused the merge' : undefined;
     const fixing = (github.status.code === 'conflict' && settings.fixChecks === 'auto') || (github.status.code === 'checks-failed' && settings.fixChecks === 'auto') || (github.status.code === 'comments-open' && settings.fixComments === 'auto');
-    const records = this.roundRecords(taskId);
+    const records = await this.roundRecords(taskId);
     if (fixing && records.filter(r => r.trigger === 'setting').length >= settings.maxFixRounds) return 'round limit reached';
     if (fixing && records.some(r => r.head === github.headSha)) return 'the last fix round stopped';
     return;
   }
   private async act(taskId: string): Promise<void> {
-    const rounds = this.rounds(taskId); const open = rounds.find(r => r.state === 'working');
-    if (open) { if (this.store.task(open.taskId).state === 'completed') await this.pushRound(taskId, open, false); return; }
-    const github = this.store.pullRequest(taskId); const settings = this.frozen(taskId);
+    const rounds = await this.rounds(taskId); const open = rounds.find(r => r.state === 'working');
+    if (open) { if ((await this.store.task(open.taskId)).state === 'completed') await this.pushRound(taskId, open, false); return; }
+    const github = await this.store.pullRequest(taskId); const settings = await this.frozen(taskId);
     if (!github || github.state !== 'open' || !github.syncedAt || github.error || !settings || !this.submitRound || rounds.some(r => r.state === 'needs-you' || r.state === 'held')) return;
     // One automatic round per commit: a round that failed or changed nothing is not repeated for the same state of the pull request.
-    const records = this.roundRecords(taskId);
+    const records = await this.roundRecords(taskId);
     if (records.filter(r => r.trigger === 'setting').length >= settings.maxFixRounds || records.some(r => r.head === github.headSha)) return;
     // A conflict comes first: checks and comments are judged again on the merged result.
     if (github.mergeable === 'conflict') { if (settings.fixChecks === 'auto') await this.startRound(taskId, { conflict: true }, 'setting'); return; }
@@ -484,11 +488,11 @@ export class PullRequestService {
     const comments = settings.fixComments === 'auto' ? github.comments.filter(c => c.counts).map(c => c.id) : [];
     if (checks.length + comments.length > 0) { await this.startRound(taskId, { checks: checks.slice(0, 20), comments: comments.slice(0, 20) }, 'setting'); return; }
     // Nothing left to fix: merge where the project merges on its own. One attempt per commit; a refusal waits for a click.
-    if (settings.merge === 'auto' && github.status.code === 'ready' && (this.store.lastEvidence(taskId, PR_MERGE_FAILED)?.data as { commit?: string } | undefined)?.commit !== github.headSha) await this.merge(taskId, 'setting').catch(() => {});
+    if (settings.merge === 'auto' && github.status.code === 'ready' && ((await this.store.lastEvidence(taskId, PR_MERGE_FAILED))?.data as { commit?: string } | undefined)?.commit !== github.headSha) await this.merge(taskId, 'setting').catch(() => {});
   }
 
   private async access(projectId: string): Promise<{ repository: string; token: string; canPush: boolean | null }> {
-    const github = this.store.project(projectId).integrations?.github;
+    const github = (await this.store.project(projectId)).integrations?.github;
     if (!github) throw new AppError('not_connected', 'GitHub is not connected for this project.', 422);
     const token = await this.secrets.get(github.savedToken);
     if (!token) throw new AppError('token_required', 'The GitHub token of this project is missing. Connect GitHub again on the project page.', 422);
@@ -504,17 +508,17 @@ export class PullRequestService {
   }
 
   private async run(taskId: string, trigger: Trigger): Promise<TaskPullRequest> {
-    const task = this.store.task(taskId);
-    const already = this.store.lastEvidence(taskId, PR_OPENED);
+    const task = await this.store.task(taskId);
+    const already = await this.store.lastEvidence(taskId, PR_OPENED);
     if (already) return already.data as TaskPullRequest;
-    if (trigger === 'user' && !this.view(taskId).canPublish) throw new AppError('not_publishable', 'Only a completed task of a project that publishes pull requests can be published.', 409);
+    if (trigger === 'user' && !(await this.view(taskId)).canPublish) throw new AppError('not_publishable', 'Only a completed task of a project that publishes pull requests can be published.', 409);
     const commit = task.outcome?.commit; const branch = task.workspace?.branch;
     if (task.state !== 'completed' || !commit || !branch) throw new AppError('not_publishable', 'Only a completed task with a commit can be published.', 409);
     if (!isTaskBranch(branch, task.id)) throw new AppError('not_publishable', 'This task\'s branch is not one DevAgents created, so it is not pushed.', 409);
-    const project = this.store.project(task.projectId);
+    const project = await this.store.project(task.projectId);
     const { repository, token, canPush } = await this.access(task.projectId);
     if (canPush === false) throw new AppError('not_permitted', `The GitHub token of this project cannot push to ${repository}.`, 422);
-    const settings = this.frozen(taskId) ?? this.project(task.projectId).settings;
+    const settings = await this.frozen(taskId) ?? (await this.project(task.projectId)).settings;
     let base = settings.targetBranch;
     if (!base) {
       const repo = await this.github(token, 'GET', `/repos/${repository}`);
@@ -526,8 +530,8 @@ export class PullRequestService {
 
     await this.push(project.path, repository, token, branch, commit, taskId);
     const pullRequest = await this.open(task, repository, token, branch, base, commit, trigger);
-    this.store.record(taskId, PR_OPENED, pullRequest);
-    this.snapshot(taskId, pullRequest);
+    await this.store.record(taskId, PR_OPENED, pullRequest);
+    await this.snapshot(taskId, pullRequest);
     return pullRequest;
   }
   private async push(cwd: string, repository: string, token: string, branch: string, commit: string, taskId: string): Promise<void> {
@@ -539,7 +543,7 @@ export class PullRequestService {
     if (remoteCommit) throw new AppError('branch_taken', `${repository} already has a branch named ${branch} with other commits. It was not changed.`, 409);
     try { await remoteGit(cwd, ['push', '--no-verify', url, `${commit}:${ref}`], url, token); }
     catch { throw new AppError('push_failed', `GitHub did not accept the push of ${branch} to ${repository}. The token needs write access to contents.`, 502); }
-    this.store.record(taskId, PR_PUSHED, { repository, branch, commit, at: this.now().toISOString() });
+    await this.store.record(taskId, PR_PUSHED, { repository, branch, commit, at: this.now().toISOString() });
   }
   private async open(task: Task, repository: string, token: string, branch: string, base: string, commit: string, trigger: Trigger): Promise<TaskPullRequest> {
     const owner = repository.split('/')[0]!;

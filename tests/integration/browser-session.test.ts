@@ -15,7 +15,7 @@ async function uiFixture() {
   await writeFile(join(uiRoot, 'assets', 'app.js'), 'console.log("ui")');
   await writeFile(join(f.root, 'secret.txt'), 'outside');
   let now = Date.parse('2026-10-30T10:00:00Z'); const sessions = new BrowserSessions(() => now);
-  const server = createApi(f.service, 'cli-token', { sessions, uiRoot, status: async () => ({ ok: true }) });
+  const server = await createApi(f.service, 'cli-token', { sessions, uiRoot, status: async () => ({ ok: true }) });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as AddressInfo).port; const url = `http://127.0.0.1:${port}`;
   const bearer = { authorization: 'Bearer cli-token' };
@@ -117,7 +117,7 @@ test('browser sessions are bound to the loopback host and same origin, and state
 
 test('a published public port replaces the listening port in the Host allowlist and in sign-in links', async () => {
   const f = await fixture(); const sessions = new BrowserSessions();
-  const server = createApi(f.service, 'cli-token', { sessions, publicPort: 4310 });
+  const server = await createApi(f.service, 'cli-token', { sessions, publicPort: 4310 });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as AddressInfo).port;
   try {
@@ -141,8 +141,8 @@ test('U3 defaults and diff stay authenticated, mutations keep CSRF/origin checks
   const { FakeEngine, FixtureValidator } = await import('../fixtures/fake-engine.js');
   const runner = new TaskRunner(f.service, new FakeEngine(), new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Browser diff', mode: 'autonomous' }, 'browser-diff');
-    await runner.idle(); assert.equal(f.store.task(task.id).state, 'completed');
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Browser diff', mode: 'autonomous' }, 'browser-diff');
+    await runner.idle(); assert.equal((await f.store.task(task.id)).state, 'completed');
     const { cookie } = await f.cookieFor();
     const { csrfToken } = await (await fetch(`${f.url}/ui/session`, { headers: { cookie } })).json() as { csrfToken: string };
     const headers = { cookie, origin: f.url, 'content-type': 'application/json', 'x-csrf-token': csrfToken };
@@ -161,8 +161,8 @@ test('U3 defaults and diff stay authenticated, mutations keep CSRF/origin checks
       assert.equal((await fetch(`${f.url}${path}`, { method: 'POST', headers: { ...headers, origin: 'http://attacker.invalid' }, body: '{}' })).status, 403, path);
     }
     f.service.attachRunner({ enqueue() {}, cancel() {} });
-    let committing = f.service.submit({ projectId: 'fixture', request: 'Committing boundary', mode: 'autonomous' }, 'committing');
-    for (const state of ['ready', 'running', 'validating', 'reviewing', 'committing'] as const) committing = f.store.transition(committing.id, committing.version, state, 'test', 'Fixture transition');
+    let committing = await f.service.submit({ projectId: 'fixture', request: 'Committing boundary', mode: 'autonomous' }, 'committing');
+    for (const state of ['ready', 'running', 'validating', 'reviewing', 'committing'] as const) committing = await f.store.transition(committing.id, committing.version, state, 'test', 'Fixture transition');
     const refused = await fetch(`${f.url}/tasks/${committing.id}/cancel`, { method: 'POST', headers, body: '{}' });
     assert.equal(refused.status, 409); assert.equal((await refused.json() as { error: string }).error, 'commit_in_progress');
     assert.equal((await fetch(`${f.url}/tasks/${committing.id}/diff`, { headers })).status, 409);

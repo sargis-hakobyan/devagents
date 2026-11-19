@@ -1,13 +1,33 @@
 # Setup
 
-## Two private workspaces on one server
+## PostgreSQL for local development
 
-The local Docker example runs a shared login gateway and two owner runtimes on one machine. Start it from the repository root:
+Run `./devagents start` to start DevAgents and PostgreSQL 17 together. Compose generates the database login once and keeps PostgreSQL on its internal network. The local browser uses the usual one-time link and the provider vault uses the OS keychain.
+
+When upgrading, finish active work and stop the old service first. Retain the existing data and repository volumes. First startup reads any legacy SQLite task, account and workflow files, commits the imported rows to PostgreSQL and then recovers the scheduler. An interrupted workflow import resumes on the next startup. Existing files stay in place. Keep the old image and a stopped-volume copy if you need to roll back before accepting new work. After cutover, PostgreSQL holds tasks, teams, approvals, history and login accounts. Git worktrees, vaults and volume identity files still live on disk.
+
+All application tables live in `public`. For a native service, run `psql -X -d devagents -f infra/postgres/install.sql` as the database administrator. Give the standalone service login membership in `devagents_runtime` and `devagents_accounts`. Use an ordinary login subject to row-level security. Set `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` and `DEVAGENTS_POSTGRES_PASSWORD_FILE` before running `npm run dev`.
+
+For a local Compose volume that already used the earlier PostgreSQL layout, finish active work, save a pre-upgrade database copy, then run:
 
 ```sh
-docker compose -f examples/compose.workspaces.yaml build gateway
-docker compose -f examples/compose.workspaces.yaml up -d --no-build
+docker compose stop devagents
+docker compose up -d --wait postgres
+docker compose exec -T postgres psql -X -U postgres -d devagents -f /opt/devagents-db/install.sql -f /opt/devagents-db/local-role.sql
+./devagents start
 ```
+
+### Prisma client and migrations
+
+`npm ci` generates the Prisma 7 client from `prisma/schema.prisma`. After editing that file, run `npm run db:generate`. The client opens connections with the existing service login and workspace settings. `DATABASE_URL` is the administrator connection used by migration commands.
+
+Compose and the legacy installer load the same reviewed SQL baseline that Prisma Migrate uses. For an existing installation created by that installer, run `npm run db:baseline` once with the maintenance connection to record the installed `0001_shared_public` migration. Run `npm run db:deploy` to apply pending migrations. An empty native database can run `npm run db:deploy` directly, followed by service login provisioning. Installations with former per-workspace schemas must first follow the consolidation procedure to preserve their data.
+
+Keep database-specific changes, including row policies, triggers, grants and functions, in reviewed SQL migration files under `infra/postgres/migrations/`. Test migrations against PostgreSQL before deployment.
+
+## Two private workspaces on one server
+
+The shared Docker example runs a login gateway, two private runtimes and one PostgreSQL server. Prepare the database secret files and start the example using the commands under **Shared task storage in PostgreSQL** below.
 
 Open **http://127.0.0.1:4312/ui/** in separate browser profiles for the two fixture accounts: `alice` / `demo-alice` and `bob` / `demo-bob`. The example binds to loopback and stores fixture data in dedicated Docker volumes. Each person can register their own `/projects/example` repository through **Projects → Register repository**. To try provider setup, first unlock the selected workspace using the host OS keychain:
 
@@ -24,9 +44,9 @@ Each runtime resumes its own persisted queue when restarted. Workspaces have ind
 
 ## Shared task storage in PostgreSQL
 
-The optional Compose overlay runs one PostgreSQL 17 server for both private runtimes. PostgreSQL stores workflow checkpoints, redacted Activity events and evidence, plus submissions, claims and results for new tasks. Keep the private runtime volumes for Git repositories, the execution journal, approvals, teams, connections and projects. On first PostgreSQL startup, existing workflow snapshots are imported before recovery. The history journal backfills earlier events with their original sequence numbers.
+The gateway and all workers share one database and the same tables in `public`. Workers share one service login. The gateway uses a separate service login to read password hashes. Each worker sets its configured workspace UUID on every database connection. Row-level security scopes its reads and writes. Database credentials belong to the trusted services. Agent sandboxes and browser clients have no direct SQL access.
 
-For the two-user Docker example, prepare the three database passwords **once** on the operator host. The enclosing directory is accessible only to its owner. Inside it, each file needs to be readable by its designated container UID. Compose mounts individual secret files into the relevant containers.
+Prepare the three database credential files once on the operator host. The enclosing directory is accessible only to its owner. Inside it, each file needs to be readable by its designated container UID. Compose mounts individual secret files into the relevant containers.
 
 ```sh
 export DEVAGENTS_DB_SECRETS_DIR="$PWD/.devagents/postgres-secrets"
@@ -34,31 +54,34 @@ export DEVAGENTS_DB_SECRETS_DIR="$PWD/.devagents/postgres-secrets"
   set -eu
   umask 077
   mkdir -p "$PWD/.devagents"
-  mkdir -m 700 "$DEVAGENTS_DB_SECRETS_DIR"
-  for name in postgres-admin alice-db bob-db; do
+  mkdir -p -m 700 "$DEVAGENTS_DB_SECRETS_DIR"
+  for name in postgres-admin workspace-db gateway-db; do
+    [ ! -e "$DEVAGENTS_DB_SECRETS_DIR/$name" ] || continue
     openssl rand -hex 32 > "$DEVAGENTS_DB_SECRETS_DIR/$name"
     chmod 444 "$DEVAGENTS_DB_SECRETS_DIR/$name"
   done
 )
 ```
 
-Reuse the same directory on subsequent starts. Adding the overlay recreates the runtime containers, so finish active work first. Rebuild the shared image, then start the services and unlock their vaults as described above.
+Reuse the same directory on subsequent starts. Finish active work before upgrading existing containers. Rebuild the shared image, then start the services and unlock their vaults as described above.
 
 ```sh
 docker compose -f examples/compose.workspaces.yaml build gateway
-docker compose -f examples/compose.workspaces.yaml -f examples/compose.postgres.yaml up -d --no-build --wait
+docker compose -f examples/compose.workspaces.yaml up -d --no-build --wait
 ```
 
-The database initializes the schema and example login roles on first use of its persistent volume. Each role is named for its workspace UUID. The server grants access through the `devagents_worker` group and enforces a row policy matching the authenticated database login. The database administrator password stays in the PostgreSQL service. For another installation, apply [the schema](../infra/postgres/tasks.sql) as the database administrator, provision a distinct unprivileged login per owner, and mount that owner's password under `/run/secrets` in its runtime. Set `DEVAGENTS_POSTGRES_HOST`, `DEVAGENTS_POSTGRES_PASSWORD_FILE`, and optionally `DEVAGENTS_POSTGRES_DATABASE` (default `devagents`).
+A new database volume installs the tables and service grants on first startup. Adding a workspace requires a runtime with its own UUID, socket, repository and vault. It uses the existing worker database credential.
 
-For an **existing PostgreSQL volume**, apply the history migration as the database administrator after provisioning workspace logins and before starting the updated runtimes. The example's initialization scripts run automatically only on a new PostgreSQL volume. Finish active execution, stop the workspace runtimes, and retain the workspace volumes and a restore-tested database copy for rollback. With the existing Compose environment and project name:
+For an existing PostgreSQL volume, finish active work, retain a pre-upgrade database copy and stop the old services. Use the original Compose project and volumes. Create the new `workspace-db` credential with the command above and run:
 
 ```sh
-docker compose -f examples/compose.workspaces.yaml -f examples/compose.postgres.yaml exec -T postgres \
-  psql -v ON_ERROR_STOP=1 -U postgres -d devagents < infra/postgres/30-history.sql
+docker compose -f examples/compose.workspaces.yaml stop gateway alice bob
+docker compose -f examples/compose.workspaces.yaml up -d --wait postgres
+docker compose -f examples/compose.workspaces.yaml exec -T postgres psql -X -U postgres -d devagents -f /opt/devagents-db/install.sql -f /opt/devagents-db/shared-roles.sql
+docker compose -f examples/compose.workspaces.yaml up -d --build --wait
 ```
 
-Apply the same [migration](../infra/postgres/30-history.sql) when adding a workspace database login. It creates the append-only history table and provisions a private schema for each workspace's Mastra tables. Restart the runtimes with the overlay and unlock them as usual. Once checkpoint migration completes, rollback requires restoring the pre-upgrade runtime and database together.
+The installer copies data from the former workspace, gateway and archive schemas, including volume bindings, checkpoint IDs and history cursors. It removes the old application schemas in the same transaction. Conflicting records or unexpected dependencies roll back the upgrade. A successful installation can be run again. For rollback after accepting new work, restore a consistent set of database and workspace volumes with its matching application version.
 
 ## Shared-server login foundation
 
@@ -153,7 +176,7 @@ Terminal users can finish team and task setup with the existing `teams` and `tas
 ## Troubleshooting
 
 - **Docker unavailable:** start Docker and repeat the same command.
-- **Container exits during startup:** inspect `docker compose logs --tail=100 devagents`. A full Docker data disk can prevent SQLite from acquiring the service lock; older builds incorrectly reported this as "Another service owns this data directory". Check `docker system df`, reclaim unused build cache or increase Docker's disk capacity, then rerun `./devagents start`. Free host disk space does not guarantee free space inside Docker's virtual disk. Preserve the `devagents-data` volume: it holds task history and encrypted credentials.
+- **Container exits during startup:** inspect `docker compose logs --tail=100 devagents`. Check the PostgreSQL container health and available disk space. Check `docker system df`, reclaim unused build cache or increase Docker's disk capacity, then rerun `./devagents start`. Free host disk space does not guarantee free space inside Docker's virtual disk. Preserve the data, PostgreSQL and database login volumes together.
 - **Vault locked:** unlock your OS keychain and rerun `./devagents start`. The service may remain up for inspection; provider sign-in stays disabled until the vault is unlocked.
 - **Lost browser session:** run `./devagents setup --browser` for a fresh one-time link. Links expire after ten minutes and are consumed once.
 - **Lost sign-in response:** inspect the current sign-in state before starting another attempt. No login or model request is automatically replayed.
@@ -185,7 +208,7 @@ Both modes retain cancellation, resource limits, independent review, local-only 
 
 ## Large projects and execution budgets
 
-Independent tasks can run concurrently in native and Docker installations. After a Docker restart, queued compute waits for the launcher to unlock both credential vaults; mode and approval waits can still be persisted. The default remains one task. Use **Settings → Parallel tasks** or `npm run cli -- config task-concurrency 2` (native) to admit two tasks without restarting. In Docker, run `docker compose exec devagents node dist/cli/main.js config task-concurrency 2`. Omit the number to view the current value. Saved changes persist in the data database and override the YAML/environment task limit; increasing capacity allows queued work to start within the next scheduler tick, while lowering it leaves active tasks running and delays new starts until below the limit. Before any setting is saved, `DEVAGENTS_MAX_CONCURRENT_TASKS=2` in the launcher's `.env` sets the startup default (restart required). `DEVAGENTS_MAX_CONCURRENT_OPERATIONS=2` bounds engine calls, validation and preparation operations across all tasks. Native YAML uses `maxConcurrentTasks` (1–8) and `maxConcurrentOperations` (1–16). For startup defaults, environment values take precedence over YAML. Existing `concurrency` still limits work-item waves inside each task. Approval waits release task capacity, and each task retains its own branch, worktree, repair budget and cancellation. Increase limits only within the machine's CPU, memory and disk capacity.
+Independent tasks can run concurrently in native and Docker installations. After a Docker restart, queued compute waits for the launcher to unlock both credential vaults; mode and approval waits can still be persisted. The default remains one task. Use **Settings → Parallel tasks** or `npm run cli -- config task-concurrency 2` (native) to admit two tasks without restarting. In Docker, run `docker compose exec devagents node dist/cli/main.js config task-concurrency 2`. Omit the number to view the current value. Saved changes persist in the data database and override the YAML/environment task limit; increasing capacity allows queued work to start within the next scheduler tick, while lowering it leaves active tasks running and delays new starts until below the limit. Before any setting is saved, `DEVAGENTS_MAX_CONCURRENT_TASKS=2` in the launcher's `.env` sets the startup default (restart required). `DEVAGENTS_MAX_CONCURRENT_OPERATIONS=2` bounds engine calls, validation and preparation operations across all tasks. Native YAML uses `maxConcurrentTasks` (1–8) and `maxConcurrentOperations` (1–16). For startup defaults, environment values take precedence over YAML. Use **Settings → Parallel subtasks per task** to save a per-task limit of 1–8 (default 2). Saved values override YAML `concurrency` across restarts and apply when a task begins execution; running tasks keep their captured limit. The scheduler integrates each reviewed result serially and refills eligible slots without waiting for unrelated workers. Dependencies start only after their required changes are integrated; per-agent and shared operation limits still apply. Approval waits release task capacity, and each task retains its own branch, worktree, repair budget and cancellation. Increase limits only within the machine's CPU, memory and disk capacity.
 
 Docker defaults to 4 GiB RAM and 4 CPUs shared by DevAgents, agents and project commands. Configure `DEVAGENTS_MEMORY`, `DEVAGENTS_CPUS` and `DEVAGENTS_PIDS` in `.env`, then restart with `./devagents start`. Allocate enough memory to Docker itself too. These limits govern project installs/builds/tests, not cloud model inference.
 

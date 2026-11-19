@@ -16,7 +16,7 @@ export async function originalCheckoutStatus(cwd: string, options: {
       if (!(error instanceof AppError) || error.code !== 'git_timeout') throw error;
       if (options.signal?.aborted) throw new AppError('cancelled', 'Original checkout scan cancelled');
       if (attempt === 2) throw new AppError('git_timeout', `Original checkout status scan timed out after 2 attempts (${timeoutMs / 1000} seconds each) in ${cwd}. Check repository or Docker filesystem responsiveness. The checkout check was not bypassed.`);
-      options.onRetry?.(`Original checkout status scan timed out after ${timeoutMs / 1000} seconds; retrying once (attempt 2 of 2).`);
+      await options.onRetry?.(`Original checkout status scan timed out after ${timeoutMs / 1000} seconds; retrying once (attempt 2 of 2).`);
     }
   }
   throw new Error('Unreachable status scan state');

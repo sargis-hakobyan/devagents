@@ -1,12 +1,25 @@
 # Decision log
 
-## Persist shared workflow checkpoints and Activity history in PostgreSQL
+## Select standard on-demand Lambda for hosted task execution — 2026-11-19
+
+The initial self-service design uses SQS to invoke standard Lambda directly for bounded task stages. PostgreSQL records owner-scoped workspaces, admissions and workflow checkpoints. Registration creates a dashboard without provisioning a worker. Enforce two active top-level tasks per user across invocations. This choice prioritizes on-demand execution while usage is uncertain. Hosting remains proposed pending sandbox, isolation and recovery verification. [Deployment proposal](MULTI_USER_DEPLOYMENT_PROPOSAL.md)
+
+## Prisma for application persistence
+
+Use asynchronous Prisma repositories for application records, PostgreSQL-specific SQL for lock acquisition, dispatch and reporting, and Mastra’s PostgreSQL adapter for workflow state. All three share the same database and application schema. Workspace identity is fixed when each runtime opens its connections. The migration baseline includes the database policies and constraints, and existing installations can adopt it without replaying the DDL.
+
+## PostgreSQL in local and shared deployments
+
+Use self-managed PostgreSQL 17 for standalone and shared installations. All workspaces share one database, the `public` schema and one set of tables. Scope domain keys, foreign keys, counters, checkpoints and service locks to the workspace. All workers use one service login with a trusted workspace ID on their connections. Keep login credentials behind the account-store interface, and the service lease on a dedicated PostgreSQL connection. SQLite is a read-only source during the first upgrade. Git and provider vaults stay on their existing private volumes.
+
+
+## Earlier checkpoint layout (superseded)
 
 Use the Mastra PostgreSQL workflow adapter with a private schema per workspace login. This lets Mastra own atomic checkpoint updates and gives the database an owner boundary for both parent and child runs. Import legacy snapshots once under the existing exclusive service lock. Bind the workspace volume to the selected checkpoint store before accepting work. Approval still uses the version-checked task transition and uncertain work remains subject to the existing recovery checks.
 
 Keep redacted events and evidence in the local execution transaction and use those append-only rows as the journal for PostgreSQL history delivery. Key each central row by workspace, stream and original sequence. Database roles can insert and read their own rows. Synchronize before serving Activity pages and after terminal cleanup so an outage or restart can catch up without replaying a task. Local mode continues to use LibSQL checkpoints and SQLite history.
 
-## Gate shared execution on a durable PostgreSQL claim
+## Initial shared execution migration
 
 The shared-runtime migration starts at the task boundary. Keep the existing SQLite transaction that freezes task input, team and retry identity. In PostgreSQL mode it also creates a durable local handoff and holds scheduler admission. Publish the prepared snapshot to one shared PostgreSQL table. A claim bound to both workspace and task opens the gate. Archive the terminal task and bounded diff under that claim. Reconciliation can repeat after a crash without creating a second execution. A dedicated unprivileged SQL login and forced row-level security constrain each workspace connection. Local mode still uses its own SQLite dispatch path.
 
@@ -184,7 +197,7 @@ Keep source, tests, reproducible compatibility/smoke scripts, current product/im
 
 - Readiness reuses the role-selection rules of plan validation: a reviewer must be a different eligible member from an implementer, and its own write grants do not disqualify it because review always runs read-only. A dedicated read-only reviewer is not a product requirement.
 - Template copies are complete. Per-member instructions share the registry's 64 KB limit and a team is bounded at 192,000 bytes of instructions in total, refused with the total stated; nothing is truncated silently.
-- The editor keeps raw scope text while typing, drops readiness responses that belong to an older draft, and disables only editable controls on archived teams. The review report is preserved as `CODEX_REVIEW_U2.md`; the fixes are recorded in `CLAUDE_REVIEW_U2_FIXES.md`.
+- The editor keeps raw scope text while typing, drops readiness responses that belong to an older draft, and disables only editable controls on archived teams.
 
 ## U2 follow-up and implementation ownership — 2026-10-30
 
@@ -712,3 +725,10 @@ Failed task headers and Result now describe why execution stopped and what to do
 ## Include bot code-review comments in repair rounds — 2026-11-19
 
 The owner requested fixes for bot review comments as well as human feedback. The GitHub review-thread query now reads the author’s `__typename`; `Bot` authors count alongside repository owners, members and collaborators, including when `authorAssociation` is `NONE`. This uses GitHub’s identity type rather than guessing from login names. Existing comment repair settings, validation/review gates, round limits and workflow-file push approval apply unchanged. Unresolved bot threads also block merging. General PR conversation comments and review summaries remain outside the current review-thread reader. Existing open PRs are reclassified on the next successful poll; no historical evidence is rewritten.
+
+
+## Rolling subtask scheduling and an editable limit — 2026-11-19
+
+Replace fixed work-item waves with bounded rolling admission. A reviewed item is integrated serially as soon as it completes; eligible work then refills the free slot while unrelated workers continue. Only integrated dependencies count as complete. Snapshot creation and integration share one coordinator, avoiding concurrent writes to the integration worktree. Failure aborts and drains outstanding workers; per-agent limits, disk admission, global operation limits and the final combined gates remain enforced.
+
+Settings exposes **Parallel subtasks per task**, alongside **Parallel tasks**, using the existing components and version-checked save pattern. Values 1–8 persist in schema 11; default 2 remains. The limit is captured at execution start and recorded in evidence, so edits affect subsequent executions without changing running tasks. This extends the existing Settings design boards. User-facing text describes eligible subtasks and available capacity rather than waves.

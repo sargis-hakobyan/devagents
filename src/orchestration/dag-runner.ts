@@ -12,7 +12,7 @@ import type { TaskService } from './service.js';
 import { ImplementationOutput, ReviewOutput } from './outputs.js';
 import type { TaskWorkflows } from './workflows.js';
 import { admittedWorkers } from '../workspace/disk-space.js';
-import { readyWave, AgentSlots } from './dag-scheduler.js';
+import { readyItems, AgentSlots } from './dag-scheduler.js';
 import { WorkspaceManager, git } from '../workspace/git.js';
 import { originalCheckoutStatus } from '../workspace/status.js';
 import { commitSubject } from '../workspace/branches.js';
@@ -30,8 +30,8 @@ type Context = { cwd: string; workItemId: string };
 type Hooks = {
   ledger: LimitationLedger;
   service: TaskService; preflight(agent: AgentDefinition): Promise<void>; validator: Validator; task: Task; agents: AgentDefinition[]; signal: AbortSignal;
-  active(): Task;
-  move(state: Task['state'], reason: string, patch?: Partial<Pick<Task, 'outcome'>>): Task;
+  active(): Promise<Task>;
+  move(state: Task['state'], reason: string, patch?: Partial<Pick<Task, 'outcome'>>): Promise<Task>;
   provider(agent: AgentDefinition): AppConfig['providers'][number];
   invoke(phase: EnginePhase, agent: AgentDefinition, prompt: string, schema: z.ZodType, signal: AbortSignal, context: Context): Promise<unknown>;
   workflows: TaskWorkflows;
@@ -44,15 +44,16 @@ type Hooks = {
 export async function runDag(h: Hooks): Promise<void> {
   const { service, task, agents, signal } = h;
   const rules = taskRules(task);
-  const plan = task.plan!; const workspace = task.workspace!; const project = service.store.project(task.projectId);
+  const concurrency = service.config.concurrency;
+  const plan = task.plan!; const workspace = task.workspace!; const project = await service.store.project(task.projectId);
   if (!plan.integration) throw new AppError('invalid_plan', 'Multi-item execution requires integration instructions');
-  const record = (kind: string, data: unknown) => service.store.record(task.id, kind, data);
+  const record = async (kind: string, data: unknown) => await service.store.record(task.id, kind, data);
   const sourceStatus = (scanSignal: AbortSignal, workItemId?: string) => originalCheckoutStatus(project.path, {
     signal: scanSignal,
-    onRetry: reason => record('repository-scan', { state: 'retrying', attempt: 2, reason, ...(workItemId ? { workItemId } : {}) }),
+    onRetry: async reason => await record('repository-scan', { state: 'retrying', attempt: 2, reason, ...(workItemId ? { workItemId } : {}) }),
   });
   const originalStatus = await sourceStatus(signal);
-  const state = (itemId: string, state: string, data: Record<string, unknown> = {}) => record('work-item', { itemId, state, ...data });
+  const state = async (itemId: string, state: string, data: Record<string, unknown> = {}) => await record('work-item', { itemId, state, ...data });
   const developers = new Map(plan.items.map(item => {
     const agent = item.assignedAgent ? selectImplementer(agents, item) : undefined;
     if (!agent || !item.ownedPaths) throw new AppError('missing_agent', `No scoped developer for ${item.id}`);
@@ -70,8 +71,8 @@ export async function runDag(h: Hooks): Promise<void> {
   const readOnlyReviewer = { ...reviewer, permissions: { ...reviewer.permissions, writePaths: [], allowCommands: !rules } };
   for (const agent of [...new Map([...developers.values(), integrator, reviewer].map(a => [a.id, a])).values()]) await h.preflight(agent);
   await assertIntegrationConfig(workspace.path);
-  h.active(); h.move('running', 'Scheduling approved work items in isolated worktrees');
-  for (const item of plan.items) state(item.id, 'pending', { agentId: item.assignedAgent, dependsOn: item.dependsOn, branch: item.branch, ownedPaths: item.ownedPaths });
+  await h.active(); await h.move('running', 'Scheduling approved work items in isolated worktrees');
+  for (const item of plan.items) await state(item.id, 'pending', { agentId: item.assignedAgent, dependsOn: item.dependsOn, branch: item.branch, ownedPaths: item.ownedPaths });
   const slots = new AgentSlots(); let repairCycles = 0;
   const repair = () => { repairCycles++; h.onRepair(); };
   const invoke = (phase: EnginePhase, agent: AgentDefinition, prompt: string, schema: z.ZodType, workerSignal: AbortSignal, context: Context) =>
@@ -87,7 +88,7 @@ export async function runDag(h: Hooks): Promise<void> {
     await prepare(context.cwd, context.workItemId === '@integration' ? plan.integration!.validation : plan.items.find(i => i.id === context.workItemId)!.validation, workerSignal, context.workItemId);
     const before = rules ? await hiddenFiles(context.cwd) : undefined;
     const output = await invoke('implementation', agent, `${prompt}\n${implementationLimitationInstructions}`, ImplementationOutput, workerSignal, context) as z.infer<typeof ImplementationOutput>;
-    h.active(); if (before) assertHiddenUnchanged(before, await hiddenFiles(context.cwd), context.workItemId === '@integration' ? 'Integration repair' : `Work item ${context.workItemId}`);
+    await h.active(); if (before) assertHiddenUnchanged(before, await hiddenFiles(context.cwd), context.workItemId === '@integration' ? 'Integration repair' : `Work item ${context.workItemId}`);
     return output;
   };
   const validate = async (currentWorkspace: Workspace, commands: Item['validation'], workerSignal: AbortSignal, itemId: string): Promise<ValidationResult[]> => {
@@ -96,13 +97,13 @@ export async function runDag(h: Hooks): Promise<void> {
     await prepare(cwd, commands, workerSignal, itemId);
     return validateWithSetup({ commands, rules,
       digest: async () => (await changes(currentWorkspace, agent)).digest,
-      execute: command => {
-        h.active(); if (workerSignal.aborted) throw new AppError('cancelled', 'Work item cancelled');
+      execute: async command => {
+        await h.active(); if (workerSignal.aborted) throw new AppError('cancelled', 'Work item cancelled');
         return h.validator.execute(cwd, command, workerSignal, service.config.validationTimeoutMs, rules);
       },
-      record: result => { record('validation', { workItemId: itemId, ...result }); },
-      started: (command, validationId) => { record('validation-started', { ...command, validationId, workItemId: itemId, timeoutMs: service.config.validationTimeoutMs }); },
-      failed: (command, validationId, error) => { record('validation-failed', { ...command, validationId, workItemId: itemId, error }); },
+      record: async result => { await record('validation', { workItemId: itemId, ...result }); },
+      started: async (command, validationId) => { await record('validation-started', { ...command, validationId, workItemId: itemId, timeoutMs: service.config.validationTimeoutMs }); },
+      failed: async (command, validationId, error) => { await record('validation-failed', { ...command, validationId, workItemId: itemId, error }); },
       recover: feedback => prepare(cwd, commands, workerSignal, itemId, feedback),
     });
   };
@@ -116,7 +117,7 @@ export async function runDag(h: Hooks): Promise<void> {
       originalGitStatusUnchanged: currentSourceStatus === originalStatus,
       originalGitStatusCleanBeforeAndNow: originalStatus === '' && currentSourceStatus === '',
     };
-    record('review-context', { workItemId: itemId, stage: combined ? 'combined' : 'item', workspaceEvidence });
+    await record('review-context', { workItemId: itemId, stage: combined ? 'combined' : 'item', workspaceEvidence });
     const stage = combined
       ? 'FINAL COMBINED GATE: assess the complete request, all user acceptance criteria, the full diff and combined validation. Approval permits the final task commit. Missing combined validation or any actionable defect must block approval.'
       : 'ITEM INTEGRATION GATE: assess only this item\'s deliverable, owned changes and declared item validation. Approval permits integration of this item, not task completion. Task-wide tests and acceptance checks run at the mandatory final combined gate after all items are integrated. Do not demand combined validation at this item gate or ask the implementer to access the original checkout. Report defects in this item; defer checks explicitly reserved for the combined gate.';
@@ -127,100 +128,121 @@ export async function runDag(h: Hooks): Promise<void> {
   };
   const executeItem = async (item: Item, baseSha: string, workerSignal: AbortSignal) => {
     const developer = developers.get(item.id)!; let localRepairs = 0; let worker: Workspace | undefined;
-    const check = () => { h.active(); if (workerSignal.aborted) throw new AppError('cancelled', 'Work item cancelled'); };
+    const check = async () => { await h.active(); if (workerSignal.aborted) throw new AppError('cancelled', 'Work item cancelled'); };
     try {
-      check(); state(item.id, 'creating', { baseSha });
-      record('worktree-intent', { owner: task.id, workItemId: item.id, branch: item.branch, baseSha });
+      await check(); await state(item.id, 'creating', { baseSha });
+      await record('worktree-intent', { owner: task.id, workItemId: item.id, branch: item.branch, baseSha });
       const ownedWorker = await new WorkspaceManager(service.dataDir).createItem(project, task.id, task.workspace!.branch, item.id, baseSha);
       worker = ownedWorker;
-      state(item.id, 'running', { workspace: worker });
+      await state(item.id, 'running', { workspace: worker });
       let feedback = '';
       let completed!: { item: Item; workspace: Workspace; commit: string };
       await h.workflows.repeat(task.id, `item:${item.id}`, async () => {
-        check();
+        await check();
         await implement(developer, `Implement only this work item. Dependency results are already present in this worktree. Do not commit or modify Git metadata.${rules ? ' Do not modify ignored files.' : ' Generated files and setup scripts are permitted. Prepare any new dependencies or generated prerequisites before returning; keep source changes visible to review.'}\nRequest: ${task.request}\nUser acceptance criteria: ${JSON.stringify(task.acceptanceCriteria)}\nWork item: ${JSON.stringify(item)}\n${feedback}`, workerSignal, { cwd: ownedWorker.path, workItemId: item.id });
         const before = await changes(ownedWorker, developer);
         if (!before.files.length) throw new AppError('no_changes', `Work item ${item.id} produced no changes. DevAgents requires a code change for each work item. This item stopped before automated validation and independent review; the task could not complete.`);
-        check(); state(item.id, 'validating');
+        await check(); await state(item.id, 'validating');
         const evidence = await validate(ownedWorker, item.validation, workerSignal, item.id);
         const after = await changes(ownedWorker, developer);
         if (validationFailed(evidence)) feedback = `${describeValidationFailure(evidence)}. Repair failed validation:\n${validationEvidence(evidence)}`;
         else {
-          check(); state(item.id, 'reviewing');
+          await check(); await state(item.id, 'reviewing');
           const assessment = await review(after, evidence, ownedWorker.path, item.id, item, workerSignal);
           if (assessment.approved && !assessment.findings.length) {
-            check(); const checked = await changes(ownedWorker, developer);
+            await check(); const checked = await changes(ownedWorker, developer);
             if (checked.digest !== after.digest) throw new AppError('review_mutated_files', 'Files changed during work item review');
-            state(item.id, 'checkpointing', { files: checked.files });
-            record('item-commit-intent', { workItemId: item.id, workspace: worker, digest: checked.digest });
+            await state(item.id, 'checkpointing', { files: checked.files });
+            await record('item-commit-intent', { workItemId: item.id, workspace: worker, digest: checked.digest });
             const commit = await commitOwned(ownedWorker, checked.files, `DevAgents work item ${item.id} (combined review pending)`);
-            record('item-commit-created', { workItemId: item.id, commit });
-            check(); state(item.id, 'reviewed', { commit, repairCycles: localRepairs });
+            await record('item-commit-created', { workItemId: item.id, commit });
+            await check(); await state(item.id, 'reviewed', { commit, repairCycles: localRepairs });
             completed = { item, workspace: ownedWorker, commit };
             return true;
           }
           feedback = `Repair independent review findings:\n${JSON.stringify(assessment.findings)}`;
         }
-        check();
+        await check();
         if (localRepairs >= service.config.maxRepairCycles) throw new AppError('repair_limit', `Work item ${item.id} exhausted its repair budget. ${feedback.slice(0, 2000)}`);
-        localRepairs++; repair(); state(item.id, 'repairing', { repairCycles: localRepairs });
+        localRepairs++; repair(); await state(item.id, 'repairing', { repairCycles: localRepairs });
         return false;
       });
       return completed;
     } catch (error) {
       // Distinguish why a worker stopped: its own failure, a user cancellation, a service shutdown,
-      // or a sibling's failure draining the wave.
+      // or a sibling's failure draining active workers.
       const cause = !workerSignal.aborted ? 'failed' : h.stopping() ? 'interrupted' : signal.aborted ? 'cancelled' : 'aborted';
-      state(item.id, cause, { error: error instanceof Error ? error.message : String(error), repairCycles: localRepairs, ...(cause === 'aborted' ? { reason: 'A sibling work item failed; this worker was drained' } : cause === 'interrupted' ? { reason: 'Service shutdown interrupted this worker' } : {}) });
+      await state(item.id, cause, { error: error instanceof Error ? error.message : String(error), repairCycles: localRepairs, ...(cause === 'aborted' ? { reason: 'A sibling work item failed; this worker was drained' } : cause === 'interrupted' ? { reason: 'Service shutdown interrupted this worker' } : {}) });
       throw error;
     }
   };
   const done = new Set<string>(); const started = new Set<string>(); let integrationRepairs = 0;
+  const pending = new Map<string, Promise<Awaited<ReturnType<typeof executeItem>> | undefined>>();
+  const abort = new AbortController(); const cancel = () => abort.abort();
+  signal.addEventListener('abort', cancel, { once: true });
+  if (signal.aborted) abort.abort();
+  let failure: unknown;
+  const checkScheduling = async () => {
+    if (failure) throw failure;
+    await h.active();
+    if (abort.signal.aborted) throw new AppError('cancelled', 'Work item scheduling stopped');
+  };
+  await record('work-item-scheduling', { concurrency, strategy: 'rolling' });
   try {
-    await h.workflows.repeat(task.id, 'dependency-waves', async () => {
-      h.active();
-      const nodes = readyWave(plan.items.map(item => ({ ...item, agentId: developers.get(item.id)!.id, agentConcurrency: developers.get(item.id)!.concurrency })), done, service.config.concurrency);
-      const admitted = await admittedWorkers(service.dataDir, nodes.length, service.config.minFreeDiskBytes);
-      if (admitted < nodes.length) {
-        record('storage-admission', { requestedWorkers: nodes.length, admittedWorkers: admitted, message: 'Reduced parallelism to keep one preparation allowance per new checkout' });
-        nodes.splice(admitted);
-      }
-      const baseSha = await integrationSnapshot(workspace, integrator);
-      record('dependency-checkpoint', { baseSha, completed: [...done] });
-      const abort = new AbortController(); const cancel = () => abort.abort(); signal.addEventListener('abort', cancel, { once: true });
-      if (signal.aborted) abort.abort();
-      let failure: unknown;
-      const results = await h.workflows.parallel(task.id, nodes.length, async index => {
-        const node = nodes[index]!;
-        started.add(node.id);
-        return executeItem(plan.items.find(i => i.id === node.id)!, baseSha, abort.signal).catch(error => {
-          failure ??= error; abort.abort(); throw failure;
+    await h.workflows.repeat(task.id, 'dependency-scheduling', async () => {
+      await checkScheduling();
+      const nodes = readyItems(plan.items.map(item => ({ ...item, agentId: developers.get(item.id)!.id, agentConcurrency: developers.get(item.id)!.concurrency })), done, concurrency, new Set(pending.keys()));
+      if (nodes.length) {
+        // Reserve headroom for outstanding workers as well as newly admitted checkouts.
+        const capacity = await admittedWorkers(service.dataDir, nodes.length + pending.size, service.config.minFreeDiskBytes).catch(error => {
+          if (pending.size && error instanceof AppError && error.code === 'disk_space_low') return 0;
+          throw error;
         });
-      }).finally(() => signal.removeEventListener('abort', cancel));
-      h.active();
-      for (const completed of results) {
-        state(completed.item.id, 'integrating');
-        record('integration-intent', { workItemId: completed.item.id, commit: completed.commit });
+        const admitted = Math.max(0, capacity - pending.size);
+        if (admitted < nodes.length) {
+          await record('storage-admission', { requestedWorkers: nodes.length, admittedWorkers: admitted, message: 'Reduced parallelism to retain preparation headroom for outstanding workers' });
+          nodes.splice(admitted);
+        }
+      }
+      if (nodes.length) {
+        // This coordinator alone snapshots and integrates the shared worktree.
+        const baseSha = await integrationSnapshot(workspace, integrator);
+        await record('dependency-checkpoint', { baseSha, completed: [...done] });
+        await checkScheduling();
+        for (const node of nodes) {
+          started.add(node.id);
+          pending.set(node.id, h.workflows.worker(task.id, node.id, () => executeItem(plan.items.find(i => i.id === node.id)!, baseSha, abort.signal).catch(error => {
+            failure ??= error; abort.abort(); throw error;
+          })).catch(error => {
+            failure ??= error; abort.abort(); return undefined;
+          }));
+        }
+      }
+      const completed = await Promise.race(pending.values());
+      await checkScheduling();
+      if (completed) {
+        await state(completed.item.id, 'integrating');
+        await record('integration-intent', { workItemId: completed.item.id, commit: completed.commit });
         const conflicts = await integrateItem(workspace, completed.workspace, completed.commit, integrator);
         if (conflicts.length) {
-          record('integration-conflict', { workItemId: completed.item.id, files: conflicts, agentId: integrator.id });
+          await record('integration-conflict', { workItemId: completed.item.id, files: conflicts, agentId: integrator.id });
           // Read both sides from the unmerged index now: staging the repair later discards them, and a
           // bare "=======" is only a leftover divider when neither side had that many underlines.
           const baselines = await conflictBaselines(workspace.path, conflicts);
           let resolved = false;
           await h.workflows.repeat(task.id, `conflict:${completed.item.id}`, async () => {
-            h.active();
+            await checkScheduling();
             if (integrationRepairs >= service.config.maxRepairCycles) throw new AppError('integration_conflict', 'Integration conflict exhausted the repair budget; inspect task evidence and any recovery snapshots.');
             integrationRepairs++; repair();
             for (const file of conflicts) await new PolicyEngine().file(integrator, workspace.path, file, 'write');
-            await implement(integrator, `Resolve this explicit integration conflict. Preserve all work-item requirements. Edit project files only; do not use Git or commit.${rules ? ' Do not touch ignored files.' : ''} Remove conflict markers.\nUser request: ${task.request}\nPlan: ${JSON.stringify(plan)}\nConflicting files: ${JSON.stringify(conflicts)}`, signal, { cwd: workspace.path, workItemId: '@integration' });
+            await implement(integrator, `Resolve this explicit integration conflict. Preserve all work-item requirements. Edit project files only; do not use Git or commit.${rules ? ' Do not touch ignored files.' : ''} Remove conflict markers.\nUser request: ${task.request}\nPlan: ${JSON.stringify(plan)}\nConflicting files: ${JSON.stringify(conflicts)}`, abort.signal, { cwd: workspace.path, workItemId: '@integration' });
             await changes(workspace, integrator);
             resolved = true;
             for (const file of conflicts) {
               const path = await new PolicyEngine().file(integrator, workspace.path, file, 'write');
               const text = await readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error; });
               const problem = unresolvedMarkers(text, baselines.get(file) ?? 0);
-              if (problem) { resolved = false; record('integration-unresolved', { workItemId: completed.item.id, file, problem, repairCycles: integrationRepairs }); }
+              if (problem) { resolved = false; await record('integration-unresolved', { workItemId: completed.item.id, file, problem, repairCycles: integrationRepairs }); }
             }
             if (resolved) {
               await assertIntegrationConfig(workspace.path);
@@ -228,19 +250,21 @@ export async function runDag(h: Hooks): Promise<void> {
               // Content was checked above; staging alone proves nothing, so also confirm Git sees no unmerged entry.
               const unmerged = (await git(workspace.path, ['diff', '--name-only', '--diff-filter=U', '-z'], false)).split('\0').filter(Boolean);
               if (unmerged.length) throw new AppError('integration_conflict', `Unmerged entries remain after repair: ${unmerged.join(', ')}`);
-              record('integration-resolved', { workItemId: completed.item.id, files: conflicts, repairCycles: integrationRepairs });
+              await record('integration-resolved', { workItemId: completed.item.id, files: conflicts, repairCycles: integrationRepairs });
             }
             return resolved;
           });
         }
         await changes(workspace, integrator);
-        done.add(completed.item.id); state(completed.item.id, 'completed', { commit: completed.commit });
+        await checkScheduling();
+        pending.delete(completed.item.id);
+        done.add(completed.item.id); await state(completed.item.id, 'completed', { commit: completed.commit });
       }
       return done.size === plan.items.length;
     });
     const commands = [...new Map([...plan.items.flatMap(i => i.validation), ...plan.integration.validation].map(c => [JSON.stringify(c), c])).values()];
     await h.workflows.repeat(task.id, 'combined-validation-review', async () => {
-      h.active(); h.move('validating', 'Validating combined work-item results');
+      await h.active(); await h.move('validating', 'Validating combined work-item results');
       const before = await changes(workspace, integrator);
       if (!before.files.length) throw new AppError('no_changes', 'Combined task has no changes. The combined work has no code changes relative to the starting commit. DevAgents stopped before combined validation and independent review; no final task commit was created.');
       const evidence = await validate(workspace, commands, signal, '@integration');
@@ -249,30 +273,34 @@ export async function runDag(h: Hooks): Promise<void> {
       const qualityFeedback = validationFailed(evidence) ? '' : await h.quality(after, evidence, integrator);
       if (validationFailed(evidence) || qualityFeedback) feedback = qualityFeedback || `${describeValidationFailure(evidence)}. Combined validation failed:\n${validationEvidence(evidence)}`;
       else {
-        h.active(); h.move('reviewing', 'Independent combined review');
+        await h.active(); await h.move('reviewing', 'Independent combined review');
         const assessment = await review(after, evidence, workspace.path, '@integration', plan, signal);
         if (assessment.approved && !assessment.findings.length) {
-          h.active(); const checked = await changes(workspace, integrator);
+          await h.active(); const checked = await changes(workspace, integrator);
           if (checked.digest !== after.digest) throw new AppError('review_mutated_files', 'Files changed during combined review');
-          h.active(); h.move('committing', 'Finalizing reviewed combined local commit');
-          record('commit-intent', { branch: workspace.branch, digest: checked.digest, files: checked.files });
+          await h.active(); await h.move('committing', 'Finalizing reviewed combined local commit');
+          await record('commit-intent', { branch: workspace.branch, digest: checked.digest, files: checked.files });
           const commit = await commitChanges(project, workspace, checked.files, commitSubject(task.request));
-          record('commit-created', { commit, branch: workspace.branch });
+          await record('commit-created', { commit, branch: workspace.branch });
           const reported = ledger.snapshot();
-          h.move('completed', `DAG execution, combined validation and review passed; local commit created${describeLimitations(reported)}`, { outcome: { commit, files: checked.files, summary: plan.summary, repairCycles, ...reported } });
+          await h.move('completed', `DAG execution, combined validation and review passed; local commit created${describeLimitations(reported)}`, { outcome: { commit, files: checked.files, summary: plan.summary, repairCycles, ...reported } });
           return true;
         }
         feedback = `Combined review requested repairs:\n${JSON.stringify(assessment.findings)}`;
       }
-      h.active();
+      await h.active();
       if (integrationRepairs >= service.config.maxRepairCycles) throw new AppError('repair_limit', `Combined integration repair budget exhausted. ${feedback.slice(0, 2000)}`);
-      integrationRepairs++; repair(); h.move('repairing', 'Bounded integration repair requested', { outcome: { repairCycles } });
-      h.move('running', 'Integration agent repairing combined result');
+      integrationRepairs++; repair(); await h.move('repairing', 'Bounded integration repair requested', { outcome: { repairCycles } });
+      await h.move('running', 'Integration agent repairing combined result');
       await implement(integrator, `Repair the combined result within the plan's owned paths. Do not commit or modify Git metadata.${rules ? ' Do not modify ignored files.' : ' Generated files and setup scripts are permitted. Prepare any new dependencies or generated prerequisites before returning; keep source changes visible to review.'}\nRequest: ${task.request}\nPlan: ${JSON.stringify(plan)}\n${feedback}`, signal, { cwd: workspace.path, workItemId: '@integration' });
       return false;
     });
   } catch (error) {
-    for (const item of plan.items) if (!done.has(item.id) && !started.has(item.id)) state(item.id, signal.aborted && !h.stopping() ? 'cancelled' : 'blocked', { reason: h.stopping() ? 'Service shutdown stopped the task before this item started' : 'Task stopped before dependencies completed' });
+    for (const item of plan.items) if (!done.has(item.id) && !started.has(item.id)) await state(item.id, signal.aborted && !h.stopping() ? 'cancelled' : 'blocked', { reason: h.stopping() ? 'Service shutdown stopped the task before this item started' : 'Task stopped before dependencies completed' });
     throw error;
+  } finally {
+    abort.abort();
+    await Promise.allSettled(pending.values());
+    signal.removeEventListener('abort', cancel);
   }
 }

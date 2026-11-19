@@ -63,12 +63,12 @@ test('every planning, implementation, QA and review run of a task is told about 
   try {
     await skill(f.project, 'house-style', '---\nname: house-style\ndescription: Use for every code change in this project.\n---\nFollow the house style.\n');
     commit(f.project, 'Add a skill');
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'skills');
-    runner.enqueue(task.id); await runner.idle();
-    assert.equal(f.store.task(task.id).state, 'completed', JSON.stringify(f.store.task(task.id).outcome));
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'skills');
+    await runner.enqueue(task.id); await runner.idle();
+    assert.equal((await f.store.task(task.id)).state, 'completed', JSON.stringify((await f.store.task(task.id)).outcome));
     const told = engine.calls.filter(c => c.phase !== 'setup');
     assert.deepEqual([...new Set(told.map(c => c.phase))].sort(), ['implementation', 'planning', 'qa', 'review']);
-    const evidence = f.store.evidence(task.id);
+    const evidence = await f.store.evidence(task.id);
     assert.deepEqual(evidence.filter(e => e.kind === 'project-skills').map(e => e.data), [{ skills: ['house-style'] }], 'what was found is recorded once per task');
     assert.deepEqual(evidence.filter(e => e.kind === 'skills-used').map(e => (e.data as { skills: string[] }).skills), [['house-style']], 'reported names the project does not have are dropped');
     for (const call of told) assert.match(call.prompt, /Project skills\. This project keeps trusted guidance[\s\S]*- house-style: Use for every code change in this project\./, `${call.phase} prompt lists the skill`);

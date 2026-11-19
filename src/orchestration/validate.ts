@@ -12,9 +12,9 @@ export async function validateWithSetup(options: {
   rules: boolean;
   digest(): Promise<string>;
   execute(command: ValidationCommand): Promise<ValidationResult>;
-  record(result: ValidationResult): void;
-  started?(command: ValidationCommand, validationId: string): void;
-  failed?(command: ValidationCommand, validationId: string, error: string): void;
+  record(result: ValidationResult): void | Promise<void>;
+  started?(command: ValidationCommand, validationId: string): void | Promise<void>;
+  failed?(command: ValidationCommand, validationId: string, error: string): void | Promise<void>;
   recover(feedback: string): Promise<void>;
 }): Promise<ValidationResult[]> {
   for (let attempt = 0; ; attempt++) {
@@ -23,11 +23,11 @@ export async function validateWithSetup(options: {
     let environmentError: Error | undefined;
     for (const command of options.commands) {
       const validationId = randomUUID();
-      options.started?.(command, validationId);
+      await options.started?.(command, validationId);
       let result: ValidationResult;
       try { result = await options.execute(command); }
-      catch (error) { options.failed?.(command, validationId, error instanceof Error ? error.message : String(error)); throw error; }
-      evidence.push(result); options.record({ ...result, validationId });
+      catch (error) { await options.failed?.(command, validationId, error instanceof Error ? error.message : String(error)); throw error; }
+      evidence.push(result); await options.record({ ...result, validationId });
       if (result.timedOut) throw new AppError('validation_timeout', `Validation timed out: ${[command.executable, ...command.args].join(' ')}. Partial output is saved in Activity. Diagnose the stalled command before retrying; no code-repair attempt was used.`);
       try { assertValidationEnvironment(result); }
       catch (error) { environmentError = error as Error; break; }

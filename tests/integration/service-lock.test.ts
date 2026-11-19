@@ -2,9 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
-import { DatabaseSync } from 'node:sqlite';
-import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { PgSession } from '../../src/persistence/pg-session.js';
 import { fixture } from '../helpers.js';
 import { lockService } from '../../src/persistence/service-lock.js';
 
@@ -13,31 +11,35 @@ test('one service owns a data directory and its lock releases after a crash', as
   const child = fork('tests/fixtures/lock-holder.ts', [f.dataDir], { execArgv: ['--import', 'tsx'], stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
   try {
     await once(child, 'message', { signal: AbortSignal.timeout(10000) });
-    assert.throws(() => lockService(f.dataDir), /Another service owns/);
+    await assert.rejects(async () => await lockService(f.dataDir), /Another service owns/);
     const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited;
-    const release = lockService(f.dataDir); release();
+    const release = await lockService(f.dataDir); await release();
   } finally { child.kill('SIGKILL'); await f.cleanup(); }
 });
 
-test('a full disk is reported as a storage failure rather than another service', async t => {
+test('connection failures preserve their diagnostic', async t => {
   const f = await fixture();
   try {
-    const sqliteFull = Object.assign(new Error('database or disk is full'), { code: 'ERR_SQLITE_ERROR', errcode: 13 });
-    const exec = t.mock.method(DatabaseSync.prototype, 'exec', () => { throw sqliteFull; });
-    try {
-      assert.throws(() => lockService(f.dataDir), {
-        code: 'disk_space_low', status: 507, message: /data disk is full/,
-      });
-    } finally { exec.mock.restore(); }
-    // The failed attempt must close its database so a later attempt can succeed.
-    const release = lockService(f.dataDir); release();
+    const query = t.mock.method(PgSession.prototype, 'prepare', () => { throw Error('connection closed'); });
+    try { await assert.rejects(async () => await lockService(f.dataDir), /connection closed/); }
+    finally { query.mock.restore(); }
+    await (await lockService(f.dataDir))();
   } finally { await f.cleanup(); }
 });
 
-test('a damaged lock database preserves its diagnostic rather than claiming contention', async () => {
+test('a runtime whose database lease disconnects exits before its replacement can recover work', async () => {
   const f = await fixture();
+  const { join } = await import('node:path');
+  const child = fork('tests/fixtures/lock-holder.ts', [f.dataDir], { execArgv: ['--import', 'tsx'], stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
   try {
-    await writeFile(join(f.dataDir, 'service-lock.db'), 'invalid SQLite database\n'.repeat(100));
-    assert.throws(() => lockService(f.dataDir), { code: 'ERR_SQLITE_ERROR', message: /not a database/ });
-  } finally { await f.cleanup(); }
+    await once(child, 'message', { signal: AbortSignal.timeout(10000) });
+    const exited = once(child, 'exit', { signal: AbortSignal.timeout(10000) });
+    const inspector = await PgSession.open(join(f.dataDir, 'devagents.db'));
+    try {
+      assert.equal((await inspector.prepare('SELECT pg_terminate_backend(pid) AS killed FROM pg_stat_activity WHERE application_name=$1')
+        .get('devagents-lock:' + inspector.workspaceId))?.killed, true);
+    } finally { await inspector.close(); }
+    assert.equal((await exited)[1], 'SIGKILL');
+    await (await lockService(f.dataDir))();
+  } finally { child.kill('SIGKILL'); await f.cleanup(); }
 });

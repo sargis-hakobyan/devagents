@@ -97,10 +97,10 @@ export class WorkspaceManager {
         return !(await git(path, ['status', '--porcelain=v1', '--untracked-files=all', '--ignored', '--ignore-submodules=none'], false, 32 * 1024 * 1024));
       };
       if (!await verify()) continue;
-      beforeRemoval(workspace);
+      await beforeRemoval(workspace);
       if (!await verify()) continue;
       await git(project.path, ['worktree', 'remove', path]);
-      record(workspace);
+      await record(workspace);
     }
   }
   /** A fresh task branch from local main, independent of the user's checked-out branch and working files. */

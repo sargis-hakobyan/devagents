@@ -20,16 +20,16 @@ test('no source changes retains a clear failure explanation without claiming val
   };
   const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Verify existing behavior', mode: 'autonomous' }, 'no-changes');
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Verify existing behavior', mode: 'autonomous' }, 'no-changes');
     await runner.idle();
-    const done = f.store.task(task.id);
+    const done = await f.store.task(task.id);
     assert.equal(done.state, 'failed');
     assert.match(done.outcome!.error!, /requires a code change/);
     assert.match(done.outcome!.error!, /before automated validation and independent review/);
     assert.equal(done.outcome?.commit, undefined);
     assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation']);
-    assert.equal(f.store.evidence(task.id).some(e => e.kind === 'validation' || e.kind === 'commit-created'), false);
-    const implementation = f.store.evidence(task.id).find(e => e.kind === 'run-completed' && (e.data as { phase: string }).phase === 'implementation');
+    assert.equal((await f.store.evidence(task.id)).some(e => e.kind === 'validation' || e.kind === 'commit-created'), false);
+    const implementation = (await f.store.evidence(task.id)).find(e => e.kind === 'run-completed' && (e.data as { phase: string }).phase === 'implementation');
     assert.match(JSON.stringify(implementation), /already exists/);
   } finally { await runner.stop(); await f.cleanup(); }
 });
@@ -42,10 +42,10 @@ test('autonomous task starts from main and completes without touching a dirty fe
     await git(f.project, ['switch', '-c', 'user-feature']);
     await git(f.project, ['commit', '--allow-empty', '-qm', 'Unrelated feature commit']);
     await writeFile(join(f.project, 'README.md'), 'Dirty user work');
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', acceptanceCriteria: ['Keep the public interface stable'], mode: 'autonomous' }, 'm2');
-    runner.enqueue(task.id); runner.enqueue(task.id);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', acceptanceCriteria: ['Keep the public interface stable'], mode: 'autonomous' }, 'm2');
+    await runner.enqueue(task.id); await runner.enqueue(task.id);
     await runner.idle();
-    const done = f.store.task(task.id);
+    const done = await f.store.task(task.id);
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     assert.match(done.outcome!.commit!, /^[a-f0-9]{40}$/);
     assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'qa', 'review']);
@@ -58,9 +58,9 @@ test('autonomous task starts from main and completes without touching a dirty fe
     assert.equal(done.workspace!.baseSha, main);
     assert.notEqual(done.workspace!.originalHead, main);
     assert.equal(await git(done.workspace!.path, ['status', '--porcelain']), '');
-    assert.ok(f.store.evidence(task.id).some(e => e.kind === 'validation' && (e.data as { exitCode: number }).exitCode === 0));
-    assert.equal(f.store.evidence(task.id).filter(e => e.kind === 'commit-created').length, 1);
-    const starts = f.store.usageEvidence(task.id).filter(e => e.kind === 'run-started');
+    assert.ok((await f.store.evidence(task.id)).some(e => e.kind === 'validation' && (e.data as { exitCode: number }).exitCode === 0));
+    assert.equal((await f.store.evidence(task.id)).filter(e => e.kind === 'commit-created').length, 1);
+    const starts = (await f.store.usageEvidence(task.id)).filter(e => e.kind === 'run-started');
     assert.equal(starts.length, engine.calls.length);
     for (const [index, entry] of starts.entries()) {
       const facts = entry.data as Record<string, unknown>;
@@ -74,52 +74,52 @@ test('autonomous task starts from main and completes without touching a dirty fe
 test('mode and plan approval stop all dependent execution until explicitly resolved', async () => {
   const f = await fixture(); const engine = new FakeEngine(); const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting' }, 'approval');
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting' }, 'approval');
     await runner.idle(); assert.equal(engine.calls.length, 0);
-    f.service.mode(task.id, 'plan-approval'); await runner.idle();
-    const pending = f.store.task(task.id); assert.equal(pending.state, 'awaiting_plan_approval'); assert.equal(engine.calls.length, 1);
-    assert.throws(() => f.service.approve(task.id, 0), /Task changed/);
-    f.service.approve(task.id, pending.version); await runner.idle();
-    assert.equal(f.store.task(task.id).state, 'completed');
+    await f.service.mode(task.id, 'plan-approval'); await runner.idle();
+    const pending = await f.store.task(task.id); assert.equal(pending.state, 'awaiting_plan_approval'); assert.equal(engine.calls.length, 1);
+    await assert.rejects(async () => await f.service.approve(task.id, 0), /Task changed/);
+    await f.service.approve(task.id, pending.version); await runner.idle();
+    assert.equal((await f.store.task(task.id)).state, 'completed');
   } finally { await runner.stop(); await f.cleanup(); }
 });
 test('failed real validation triggers a bounded repair before review', async () => {
   const f = await fixture(); const engine = new FakeEngine({ failFirstTest: true }); const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'repair'); await runner.idle();
-    const done = f.store.task(task.id); assert.equal(done.state, 'completed', JSON.stringify(done.outcome)); assert.equal(done.outcome!.repairCycles, 1);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'repair'); await runner.idle();
+    const done = await f.store.task(task.id); assert.equal(done.state, 'completed', JSON.stringify(done.outcome)); assert.equal(done.outcome!.repairCycles, 1);
     assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'implementation', 'qa', 'review']);
-    assert.equal(f.store.evidence(task.id).filter(e => e.kind === 'validation').length, 2);
+    assert.equal((await f.store.evidence(task.id)).filter(e => e.kind === 'validation').length, 2);
   } finally { await runner.stop(); await f.cleanup(); }
 });
 test('review rejection exhausts the repair limit without a commit', async () => {
   const f = await fixture(); const engine = new FakeEngine({ rejectReviews: true }); const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'reject'); await runner.idle();
-    assert.equal(f.store.task(task.id).state, 'failed'); assert.match(f.store.task(task.id).outcome!.error!, /Repair budget exhausted/);
-    assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'reject'); await runner.idle();
+    assert.equal((await f.store.task(task.id)).state, 'failed'); assert.match((await f.store.task(task.id)).outcome!.error!, /Repair budget exhausted/);
+    assert.equal((await f.store.evidence(task.id)).some(e => e.kind === 'commit-created'), false);
     assert.equal(engine.calls.filter(c => c.phase === 'implementation').length, 1 + f.service.config.maxRepairCycles);
   } finally { await runner.stop(); await f.cleanup(); }
 });
 test('a reviewer mutation invalidates approval before commit', async () => {
   const f = await fixture(); const engine = new FakeEngine({ mutateReview: true }); const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'tamper'); await runner.idle();
-    assert.equal(f.store.task(task.id).state, 'failed'); assert.match(f.store.task(task.id).outcome!.error!, /Files changed during review/);
-    assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'tamper'); await runner.idle();
+    assert.equal((await f.store.task(task.id)).state, 'failed'); assert.match((await f.store.task(task.id)).outcome!.error!, /Files changed during review/);
+    assert.equal((await f.store.evidence(task.id)).some(e => e.kind === 'commit-created'), false);
   } finally { await runner.stop(); await f.cleanup(); }
 });
 test('cancellation stops a running engine and releases the serial worker slot', async () => {
   const f = await fixture(); const engine = new FakeEngine({ waitForCancel: true }); const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'cancel');
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'cancel');
     const deadline = Date.now() + 10000;
     while (!engine.calls.some(c => c.phase === 'implementation')) { if (Date.now() > deadline) throw new Error('Worker did not start'); await new Promise(r => setTimeout(r, 10)); }
-    f.service.cancel(task.id); assert.equal(runner.busy, true); await runner.idle(); assert.equal(runner.busy, false);
-    assert.equal(f.store.task(task.id).state, 'cancelled'); assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
+    await f.service.cancel(task.id); assert.equal(await runner.busy(), true); await runner.idle(); assert.equal(await runner.busy(), false);
+    assert.equal((await f.store.task(task.id)).state, 'cancelled'); assert.equal((await f.store.evidence(task.id)).some(e => e.kind === 'commit-created'), false);
     engine.options.waitForCancel = false;
-    const next = f.service.submit({ projectId: 'fixture', request: 'Next greeting', mode: 'autonomous' }, 'after-cancel'); await runner.idle();
-    assert.equal(f.store.task(next.id).state, 'completed');
+    const next = await f.service.submit({ projectId: 'fixture', request: 'Next greeting', mode: 'autonomous' }, 'after-cancel'); await runner.idle();
+    assert.equal((await f.store.task(next.id)).state, 'completed');
   } finally { await runner.stop(); await f.cleanup(); }
 });
 
@@ -128,9 +128,9 @@ test('review context cannot bypass a role read scope', async () => {
   const agents = await f.service.agents('fixture');
   f.service.agents = async () => agents.map(a => a.capabilities.includes('review') ? { ...a, permissions: { ...a.permissions, readPaths: ['project:/docs/**'] } } : a);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'review-scope'); await runner.idle();
-    assert.equal(f.store.task(task.id).state, 'failed');
-    assert.match(f.store.task(task.id).outcome!.error!, /cannot read/);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'review-scope'); await runner.idle();
+    assert.equal((await f.store.task(task.id)).state, 'failed');
+    assert.match((await f.store.task(task.id)).outcome!.error!, /cannot read/);
     assert.equal(engine.calls.some(c => c.phase === 'review'), false);
   } finally { await runner.stop(); await f.cleanup(); }
 });
@@ -138,13 +138,13 @@ test('review context cannot bypass a role read scope', async () => {
 test('cancellation at commit finalization returns conflict and preserves accurate outcome', async () => {
   const f = await fixture(); const runner = new TaskRunner(f.service, new FakeEngine(), new FixtureValidator()); f.service.attachRunner(runner);
   const record = f.store.record.bind(f.store); let checked = false;
-  f.store.record = (id, kind, data) => {
-    if (kind === 'commit-intent') { checked = true; assert.throws(() => f.service.cancel(id), /commit is being finalized/); }
+  f.store.record = async (id, kind, data) => {
+    if (kind === 'commit-intent') { checked = true; await assert.rejects(async () => await f.service.cancel(id), /commit is being finalized/); }
     return record(id, kind, data);
   };
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'commit-race'); await runner.idle();
-    assert.equal(checked, true); assert.equal(f.store.task(task.id).state, 'completed'); assert.ok(f.store.task(task.id).outcome!.commit);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'commit-race'); await runner.idle();
+    assert.equal(checked, true); assert.equal((await f.store.task(task.id)).state, 'completed'); assert.ok((await f.store.task(task.id)).outcome!.commit);
   } finally { await runner.stop(); await f.cleanup(); }
 });
 
@@ -152,12 +152,12 @@ test('approval with outstanding findings cannot bypass repair or create a commit
   const f = await fixture(); const engine = new FakeEngine({ contradictoryReview: true });
   const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'contradictory-review');
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'contradictory-review');
     await runner.idle();
-    const done = f.store.task(task.id);
+    const done = await f.store.task(task.id);
     assert.equal(done.state, 'failed'); assert.match(done.outcome!.error!, /Repair budget exhausted/);
     assert.equal(done.outcome!.repairCycles, f.service.config.maxRepairCycles);
-    assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
+    assert.equal((await f.store.evidence(task.id)).some(e => e.kind === 'commit-created'), false);
   } finally { await runner.stop(); await f.cleanup(); }
 });
 
@@ -176,12 +176,12 @@ test('invalid or excessive model path ownership fails before implementation desp
     };
     const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
     try {
-      const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'unsafe-planned-path');
+      const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'unsafe-planned-path');
       await runner.idle();
-      assert.equal(f.store.task(task.id).state, 'failed', path);
+      assert.equal((await f.store.task(task.id)).state, 'failed', path);
       assert.deepEqual(engine.calls.map(c => c.phase), ['planning']);
-      assert.equal(f.store.task(task.id).plan, undefined);
-      assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
+      assert.equal((await f.store.task(task.id)).plan, undefined);
+      assert.equal((await f.store.evidence(task.id)).some(e => e.kind === 'commit-created'), false);
     } finally { await runner.stop(); await f.cleanup(); }
   }
 });
@@ -198,9 +198,9 @@ test('model prompts keep code syntax from the request, plan, diff and review fin
   };
   const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: `Add ${code} without fixture-secret-value`, acceptanceCriteria: [`Keep ${code}`], mode: 'autonomous' }, 'prompt-syntax');
+    const task = await f.service.submit({ projectId: 'fixture', request: `Add ${code} without fixture-secret-value`, acceptanceCriteria: [`Keep ${code}`], mode: 'autonomous' }, 'prompt-syntax');
     await runner.idle();
-    const done = f.store.task(task.id);
+    const done = await f.store.task(task.id);
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     assert.equal(done.request, `Add ${code} without [REDACTED]`);
     assert.equal(done.plan!.items[0]!.description, `Type ${code}`);
@@ -212,9 +212,9 @@ test('model prompts keep code syntax from the request, plan, diff and review fin
     }
     assert.ok(repair!.prompt.includes(`Declare ${code} explicitly`), 'review findings reach the repairing implementer unchanged');
     assert.ok(review!.prompt.includes('greeting.cjs'), 'review prompt includes the diff');
-    const evidence = JSON.stringify(f.store.evidence(task.id));
+    const evidence = JSON.stringify(await f.store.evidence(task.id));
     assert.doesNotMatch(evidence, /fixture-secret-value/);
-    assert.doesNotMatch(JSON.stringify(f.store.events(task.id)), /fixture-secret-value/);
+    assert.doesNotMatch(JSON.stringify(await f.store.events(task.id)), /fixture-secret-value/);
   } finally { await runner.stop(); await f.cleanup(); }
 });
 
@@ -226,7 +226,7 @@ test('plan approval is never requested for a plan that could not execute', async
   ];
   for (const scenario of scenarios) {
     const f = await fixture(); const engine = new FakeEngine();
-    const service = scenario.platform ? new TaskService(f.store, f.service.config, f.dataDir, scenario.platform) : f.service;
+    const service = scenario.platform ? await TaskService.create(f.store, f.service.config, f.dataDir, scenario.platform) : f.service;
     if (scenario.name.startsWith('no reviewer')) {
       const agents = await service.agents('fixture');
       service.agents = async () => agents.map(a => a.id === 'code-reviewer' ? { ...a, enabled: false } : a.id === 'general-developer' ? { ...a, capabilities: [...a.capabilities, 'review'] } : a);
@@ -239,13 +239,13 @@ test('plan approval is never requested for a plan that could not execute', async
     };
     const runner = new TaskRunner(service, engine, new FixtureValidator()); service.attachRunner(runner);
     try {
-      const task = service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'plan-approval' }, `unexecutable-${scenarios.indexOf(scenario)}`);
+      const task = await service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'plan-approval' }, `unexecutable-${scenarios.indexOf(scenario)}`);
       await runner.idle();
-      const done = f.store.task(task.id);
+      const done = await f.store.task(task.id);
       assert.equal(done.state, 'failed', scenario.name);
       assert.match(done.outcome!.error!, scenario.pattern, scenario.name);
       assert.equal(done.plan, undefined, scenario.name);
-      const states = f.store.events(task.id).map(e => e.state);
+      const states = (await f.store.events(task.id)).map(e => e.state);
       assert.equal(states.includes('awaiting_plan_approval'), false, scenario.name); assert.equal(states.at(-1), 'failed', scenario.name);
       assert.deepEqual(engine.calls.map(c => c.phase), ['planning'], scenario.name);
       if (scenario.platform === 'linux') assert.match(engine.calls[0]!.prompt, /Linux Codex runtime, ownedPaths must use directory subtree grants/);
@@ -276,8 +276,8 @@ test('implementation cannot create, modify or hide files that review and the com
     };
     const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
     try {
-      const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'hidden-files');
-      await runner.idle(); const done = f.store.task(task.id);
+      const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'hidden-files');
+      await runner.idle(); const done = await f.store.task(task.id);
       if (scenario.expect === 'completed') {
         assert.equal(done.state, 'completed', `${scenario.name}: ${JSON.stringify(done.outcome)}`);
       } else {
@@ -285,7 +285,7 @@ test('implementation cannot create, modify or hide files that review and the com
         assert.match(done.outcome!.error!, scenario.expect, scenario.name);
         assert.match(done.outcome!.error!, /review and the commit would not include/, scenario.name);
         assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation'], scenario.name);
-        assert.equal(f.store.evidence(task.id).some(e => e.kind === 'validation' || e.kind === 'commit-created'), false, scenario.name);
+        assert.equal((await f.store.evidence(task.id)).some(e => e.kind === 'validation' || e.kind === 'commit-created'), false, scenario.name);
       }
     } finally { await runner.stop(); await f.cleanup(); }
   }
@@ -296,31 +296,31 @@ test('service shutdown records interrupted execution as failed with a shutdown r
   const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   let reopened: Store | undefined;
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'shutdown');
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'shutdown');
     const deadline = Date.now() + 10000;
     while (!engine.calls.some(c => c.phase === 'implementation')) { if (Date.now() > deadline) throw new Error('Worker did not start'); await new Promise(r => setTimeout(r, 10)); }
     await runner.stop();
-    const done = f.store.task(task.id);
+    const done = await f.store.task(task.id);
     assert.equal(done.state, 'failed'); assert.match(done.outcome!.error!, /Service shutdown interrupted execution/);
-    const last = f.store.events(task.id).at(-1)!;
+    const last = (await f.store.events(task.id)).at(-1)!;
     assert.equal(last.state, 'failed'); assert.equal(last.actor, 'orchestrator'); assert.match(last.reason, /Service shutdown interrupted execution/);
-    assert.equal(f.store.events(task.id).some(e => e.state === 'cancelled'), false);
-    reopened = new Store(join(f.dataDir, 'test.db'));
-    assert.deepEqual(reopened.recover(), []); assert.equal(reopened.task(task.id).state, 'failed');
-  } finally { reopened?.close(); await runner.stop(); await f.cleanup(); }
+    assert.equal((await f.store.events(task.id)).some(e => e.state === 'cancelled'), false);
+    reopened = await Store.open(join(f.dataDir, 'test.db'));
+    assert.deepEqual(await reopened.recover(), []); assert.equal((await reopened.task(task.id)).state, 'failed');
+  } finally { await reopened?.close(); await runner.stop(); await f.cleanup(); }
 });
 
 test('a rejection without findings is malformed review output and does not consume a repair cycle', async () => {
   const f = await fixture(); const engine = new FakeEngine({ emptyRejection: true });
   const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'empty-rejection'); await runner.idle();
-    const done = f.store.task(task.id); assert.equal(done.state, 'failed');
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'empty-rejection'); await runner.idle();
+    const done = await f.store.task(task.id); assert.equal(done.state, 'failed');
     assert.match(done.outcome!.error!, /at least one actionable finding/);
     assert.equal(done.outcome!.repairCycles, 0);
     assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'qa', 'review']);
-    assert.ok(f.store.evidence(task.id).some(e => e.kind === 'run-failed' && /actionable finding/.test(String((e.data as { error: string }).error))));
-    assert.equal(f.store.evidence(task.id).some(e => e.kind === 'commit-created'), false);
+    assert.ok((await f.store.evidence(task.id)).some(e => e.kind === 'run-failed' && /actionable finding/.test(String((e.data as { error: string }).error))));
+    assert.equal((await f.store.evidence(task.id)).some(e => e.kind === 'commit-created'), false);
   } finally { await runner.stop(); await f.cleanup(); }
 });
 
@@ -328,9 +328,9 @@ test('validation output beyond the evidence limit is truncated, recorded, and re
   const f = await fixture(); const engine = new FakeEngine({ noisyFirstTest: true });
   const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'noisy'); await runner.idle();
-    const done = f.store.task(task.id); assert.equal(done.state, 'completed', JSON.stringify(done.outcome)); assert.equal(done.outcome!.repairCycles, 1);
-    const validations = f.store.evidence(task.id).filter(e => e.kind === 'validation').map(e => e.data as { exitCode: number; truncated?: boolean; output: string });
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'noisy'); await runner.idle();
+    const done = await f.store.task(task.id); assert.equal(done.state, 'completed', JSON.stringify(done.outcome)); assert.equal(done.outcome!.repairCycles, 1);
+    const validations = (await f.store.evidence(task.id)).filter(e => e.kind === 'validation').map(e => e.data as { exitCode: number; truncated?: boolean; output: string });
     assert.equal(validations.length, 2);
     assert.equal(validations[0]!.exitCode, 0); assert.equal(validations[0]!.truncated, true);
     assert.match(validations[0]!.output, /BEGIN-NOISE/); assert.match(validations[0]!.output, /bytes truncated/); assert.match(validations[0]!.output, /END-NOISE/);
@@ -345,9 +345,9 @@ test('a check that cannot run in this environment is reported with the result an
   const engine = new FakeEngine({ limitations: ['Visual check could not run: no browser in this sandbox'], manualChecks: ['Confirm the greeting renders at 390 px'] });
   const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting with a visual check', mode: 'autonomous' }, 'limitations');
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting with a visual check', mode: 'autonomous' }, 'limitations');
     await runner.idle();
-    const done = f.store.task(task.id);
+    const done = await f.store.task(task.id);
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     assert.equal(done.outcome!.repairCycles, 0, 'an environment limitation is not a repair reason');
     assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation', 'qa', 'review']);
@@ -355,12 +355,12 @@ test('a check that cannot run in this environment is reported with the result an
     assert.deepEqual(done.plan!.manualChecks, ['Confirm the greeting renders at 390 px']);
     assert.match(engine.calls[1]!.prompt, /try once at most, then report it in limitations/);
     assert.match(engine.calls.find(c => c.phase === 'review')!.prompt, /are not findings/); assert.match(engine.calls.find(c => c.phase === 'review')!.prompt, /Recorded limitations so far: \{"limitations":\["Confirm the greeting renders at 390 px","Visual check could not run/);
-    assert.match(f.store.events(task.id).at(-1)!.reason, /2 checks not run in this environment/);
-    assert.equal(f.store.summaries({ limit: 5 }).tasks[0]!.limitations, 2);
+    assert.match((await f.store.events(task.id)).at(-1)!.reason, /2 checks not run in this environment/);
+    assert.equal((await f.store.summaries({ limit: 5 })).tasks[0]!.limitations, 2);
     // A real validation failure still repairs, exactly as before.
     const failing = new FakeEngine({ failFirstTest: true, limitations: ['No browser'] }); const second = new TaskRunner(f.service, failing, new FixtureValidator()); f.service.attachRunner(second);
-    const repaired = f.service.submit({ projectId: 'fixture', request: 'Greeting with a failing first test', mode: 'autonomous' }, 'limitations-repair');
-    await second.idle(); const result = f.store.task(repaired.id);
+    const repaired = await f.service.submit({ projectId: 'fixture', request: 'Greeting with a failing first test', mode: 'autonomous' }, 'limitations-repair');
+    await second.idle(); const result = await f.store.task(repaired.id);
     assert.equal(result.state, 'completed', JSON.stringify(result.outcome)); assert.equal(result.outcome!.repairCycles, 1); assert.deepEqual(result.outcome!.limitations, ['No browser']);
     await second.stop();
   } finally { await runner.stop(); await f.cleanup(); }
@@ -368,13 +368,13 @@ test('a check that cannot run in this environment is reported with the result an
 
 test('reports from an earlier attempt and from a rejecting review survive repairs, and display prose is redacted like evidence (review F1, F3)', async () => {
   const f = await fixture();
-  const service = new TaskService(f.store, Config.parse({ schemaVersion: 1, maxRepairCycles: 3 }), f.dataDir);
+  const service = await TaskService.create(f.store, Config.parse({ schemaVersion: 1, maxRepairCycles: 3 }), f.dataDir);
   const engine = new FakeEngine({ failFirstTest: true, limitationsOnce: true, limitations: ['Browser screenshots could not be taken: no Chromium here; password=SYNTHETIC_ONLY_VALUE'], firstReviewRejects: true, reviewLimitations: ['Reviewer could not open the staging site: no network'], manualChecks: ['Check the layout at 390 px with token: SYNTHETIC_TOKEN_123'] });
   const runner = new TaskRunner(service, engine, new FixtureValidator()); service.attachRunner(runner);
   try {
-    const task = service.submit({ projectId: 'fixture', request: 'Greeting with reports that must survive repair', mode: 'autonomous' }, 'limitations-survive');
+    const task = await service.submit({ projectId: 'fixture', request: 'Greeting with reports that must survive repair', mode: 'autonomous' }, 'limitations-survive');
     await runner.idle();
-    const done = f.store.task(task.id);
+    const done = await f.store.task(task.id);
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     assert.equal(done.outcome!.repairCycles, 2, 'one real test failure and one rejecting review were repaired');
     assert.equal(engine.calls.filter(c => c.phase === 'implementation').length, 3); assert.equal(engine.calls.filter(c => c.phase === 'review').length, 2);
@@ -384,9 +384,9 @@ test('reports from an earlier attempt and from a rejecting review survive repair
     assert.doesNotMatch(JSON.stringify(done), /SYNTHETIC_ONLY_VALUE|SYNTHETIC_TOKEN_123/);
     const finalReview = engine.calls.filter(c => c.phase === 'review').at(-1)!;
     assert.match(finalReview.prompt, /Recorded limitations so far: \{"limitations":\["Check the layout at 390 px with token: \[REDACTED\]","Browser screenshots could not be taken: no Chromium here; password=\[REDACTED\]","Reviewer could not open the staging site: no network"\]/);
-    const reports = f.store.evidence(task.id).filter(e => e.kind === 'limitations').map(e => e.data as { phase: string; attempt: number });
+    const reports = (await f.store.evidence(task.id)).filter(e => e.kind === 'limitations').map(e => e.data as { phase: string; attempt: number });
     assert.deepEqual(reports.map(r => [r.phase, r.attempt]), [['implementation', 0], ['review', 0]]);
-    assert.match(f.store.events(task.id).at(-1)!.reason, /3 checks not run in this environment/);
+    assert.match((await f.store.events(task.id)).at(-1)!.reason, /3 checks not run in this environment/);
   } finally { await runner.stop(); await f.cleanup(); }
 });
 
@@ -403,8 +403,8 @@ test('immediate review, repair feedback and displayed summaries cannot bypass pr
   };
   const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'all-prose');
-    await runner.idle(); const done = f.store.task(task.id);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'all-prose');
+    await runner.idle(); const done = await f.store.task(task.id);
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     assert.doesNotMatch(JSON.stringify(done), /SYNTHETIC_/);
     for (const call of engine.calls) assert.doesNotMatch(call.prompt, /SYNTHETIC_/);
@@ -425,11 +425,11 @@ test('initial setup and its recovery report before implementation and survive ta
   };
   const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'setup-reports');
-    await runner.idle(); const done = f.store.task(task.id);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'setup-reports');
+    await runner.idle(); const done = await f.store.task(task.id);
     assert.equal(done.state, 'failed'); assert.equal(done.outcome!.limitationCount, 2);
     assert.deepEqual(done.outcome!.limitations, ['Optional setup check 1: no browser; password=[REDACTED]', 'Optional setup check 2: no browser; password=[REDACTED]']);
-    const reports = f.store.evidence(task.id).filter(e => e.kind === 'limitations').map(e => e.data as { phase: string; attempt: number; runId: string });
+    const reports = (await f.store.evidence(task.id)).filter(e => e.kind === 'limitations').map(e => e.data as { phase: string; attempt: number; runId: string });
     assert.deepEqual(reports.map(r => [r.phase, r.attempt]), [['setup', 0], ['setup', 1]]);
     assert.equal(new Set(reports.map(r => r.runId)).size, 2);
     for (const call of engine.calls) assert.doesNotMatch(call.prompt, /SYNTHETIC_SETUP/);
@@ -447,13 +447,13 @@ test('cancellation preserves accepted reports after validation drains without co
   } };
   const runner = new TaskRunner(f.service, engine, validator); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'cancel-reports');
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'cancel-reports');
     await Promise.race([validating, runner.idle().then(() => { throw new Error('Task stopped before validation began'); })]);
-    f.service.cancel(task.id); await runner.idle();
-    const done = f.store.task(task.id);
+    await f.service.cancel(task.id); await runner.idle();
+    const done = await f.store.task(task.id);
     assert.equal(done.state, 'cancelled'); assert.deepEqual(done.outcome!.limitations, ['No browser']);
     assert.equal(done.outcome!.limitationCount, 1); assert.equal(done.outcome!.commit, undefined);
-    assert.equal(f.store.summaries().tasks[0]!.limitations, 1);
+    assert.equal((await f.store.summaries()).tasks[0]!.limitations, 1);
   } finally { await runner.stop(); await f.cleanup(); }
 });
 
@@ -469,14 +469,14 @@ test('completion and list counts include reports beyond the display cap without 
   };
   const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'display-cap');
-    await runner.idle(); const done = f.store.task(task.id);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'display-cap');
+    await runner.idle(); const done = await f.store.task(task.id);
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     assert.equal(done.outcome!.limitations!.length, 20);
     assert.equal(done.outcome!.limitationCount, 30); assert.equal(done.outcome!.limitationsOmitted, 10);
     assert.equal(done.outcome!.limitationOverflow, 0);
-    assert.equal(f.store.summaries().tasks[0]!.limitations, 30);
-    assert.match(f.store.events(task.id).at(-1)!.reason, /30 checks not run in this environment/);
+    assert.equal((await f.store.summaries()).tasks[0]!.limitations, 30);
+    assert.match((await f.store.events(task.id)).at(-1)!.reason, /30 checks not run in this environment/);
     assert.doesNotMatch(done.outcome!.limitations!.join('\n'), /omitted/);
   } finally { await runner.stop(); await f.cleanup(); }
 });

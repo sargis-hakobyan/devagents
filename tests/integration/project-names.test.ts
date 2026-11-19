@@ -8,7 +8,7 @@ import { fixture, validPlan } from '../helpers.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 async function serve() {
-  const f = await fixture(); const server = createApi(f.service, 'test-token');
+  const f = await fixture(); const server = await createApi(f.service, 'test-token');
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const root = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (path: string, method = 'GET', body?: unknown, key?: string) => {
@@ -101,26 +101,25 @@ test('an archived project keeps its name until restore, where a taken name asks 
 });
 
 test('opening an older database turns hand-written project IDs into UUIDs and keeps them as names', async () => {
-  const { DatabaseSync } = await import('node:sqlite'); const { Store } = await import('../../src/persistence/store.js');
-  const f = await fixture(); const path = join(f.dataDir, 'test.db');
+  const { legacyWorkspace } = await import('../fixtures/legacy-workspace.js'); const { Store } = await import('../../src/persistence/store.js');
+  const f = await fixture(); const path = join(f.dataDir, 'old-projects.db');
   try {
     // The fixture registers the readable ID "fixture" in process, as earlier versions did for everyone.
-    const task = f.service.submit({ projectId: 'fixture', request: 'Planned before the upgrade', mode: 'plan-approval' }, 'upgrade-1');
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Planned before the upgrade', mode: 'plan-approval' }, 'upgrade-1');
     await f.service.proposePlan(task.id, validPlan());
-    f.store.close();
-    const raw = new DatabaseSync(path); raw.exec('PRAGMA user_version=6'); raw.close();
+    await legacyWorkspace(f.store.legacyPath, path, 6);
 
-    const upgraded = new Store(path, []);
+    const upgraded = await Store.open(path, []);
     try {
-      const [project] = upgraded.projects();
+      const [project] = await upgraded.projects();
       assert.match(project!.id, UUID); assert.equal(project!.name, 'fixture', 'the old ID is now the name');
-      const moved = upgraded.task(task.id);
+      const moved = await upgraded.task(task.id);
       assert.equal(moved.projectId, project!.id); assert.equal(moved.plan!.items[0]!.projectId, project!.id, 'the stored plan follows its project');
-      assert.equal(upgraded.summaries({ projectId: project!.id }).tasks.length, 1);
-      assert.equal(upgraded.events(task.id, 0, 10).length > 0, true, 'history is untouched');
-    } finally { upgraded.close(); }
+      assert.equal((await upgraded.summaries({ projectId: project!.id })).tasks.length, 1);
+      assert.equal((await upgraded.events(task.id, 0, 10)).length > 0, true, 'history is untouched');
+    } finally { await upgraded.close(); }
     // A second open changes nothing.
-    const again = new Store(path, []); const id = again.projects()[0]!.id; again.close();
-    const third = new Store(path, []); assert.equal(third.projects()[0]!.id, id); third.close();
-  } finally { await (async () => { const { rm } = await import('node:fs/promises'); await rm(f.root, { recursive: true, force: true }); })(); }
+    const again = await Store.open(path, []); const id = (await again.projects())[0]!.id; await again.close();
+    const third = await Store.open(path, []); assert.equal((await third.projects())[0]!.id, id); await third.close();
+  } finally { await f.cleanup(); }
 });

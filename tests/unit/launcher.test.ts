@@ -10,9 +10,9 @@ const exec = promisify(execFile);
 test('launcher builds once, reuses unchanged images, offers browser setup without auth and rebuilds changed sources', async () => {
   const root = await mkdtemp(join(tmpdir(), 'launcher-')); const bin = join(root, 'bin'); const log = join(root, 'calls'); const image = join(root, 'image');
   try {
-    for (const dir of ['bin', 'scripts', 'src', 'ui', 'agents']) await mkdir(join(root, dir));
+    for (const dir of ['bin', 'scripts', 'src', 'ui', 'agents', 'prisma']) await mkdir(join(root, dir));
     await copyFile(resolve('devagents'), join(root, 'devagents'));
-    for (const file of ['Dockerfile', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.build.json']) await writeFile(join(root, file), 'fixture');
+    for (const file of ['Dockerfile', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.build.json', 'prisma/schema.prisma']) await writeFile(join(root, file), 'fixture');
     await writeFile(join(root, 'scripts/vault-key.sh'), '#!/bin/sh\nprintf "%064d" 0\n', { mode: 0o700 });
     await writeFile(image, 'sha256:old');
     await writeFile(join(bin, 'docker'), `#!/bin/sh

@@ -10,6 +10,7 @@ import { TaskRunner } from '../dist/orchestration/runner.js';
 import { CodexValidator } from '../dist/engines/codex/validator.js';
 import { git } from '../dist/workspace/git.js';
 
+if (process.env.DEVAGENTS_TEST_DATABASE !== '1') throw Error('Run this fixture with scripts/with-test-postgres.mjs');
 const root = await mkdtemp(join(tmpdir(), 'devagents-parallel-'));
 let store; let runner; let release; let notify;
 const barrier = new Promise(resolve => { release = resolve; });
@@ -21,9 +22,9 @@ try {
   await writeFile(join(project, 'README.md'), '# Parallel fixture\n'); await git(project, ['add', '.']);
   await git(project, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'Fixture']);
   const head = await git(project, ['rev-parse', 'HEAD']);
-  store = new Store(join(data, 'state.db'));
+  store = await Store.open(join(data, 'state.db'));
   const config = Config.parse({ schemaVersion: 1, devagentsRules: true, maxConcurrentTasks: 2, maxConcurrentOperations: 2 });
-  const service = new TaskService(store, config, data); await service.registerProject({ id: 'fixture', path: project });
+  const service = await TaskService.create(store, config, data); await service.registerProject({ id: 'fixture', path: project });
   const engine = { id: 'codex', async preflight() {}, async execute(request) {
     if (request.phase === 'planning') return { output: { summary: 'Write one isolated result', risks: [], integration: null, items: [{
       id: 'result', title: 'Result', description: 'Write result and test', acceptanceCriteria: ['The result identifies this task'],
@@ -41,19 +42,19 @@ try {
     return { output: { approved: true, summary: 'Fixture review approved', findings: [], limitations: [] } };
   } };
   runner = new TaskRunner(service, engine, new CodexValidator(data)); service.attachRunner(runner);
-  const tasks = ['A', 'B'].map(name => service.submit({ projectId: 'fixture', request: `Parallel ${name}`, mode: 'autonomous' }, name));
+  const tasks = await Promise.all(['A', 'B'].map(name => service.submit({ projectId: 'fixture', request: `Parallel ${name}`, mode: 'autonomous' }, name)));
   let timeout;
   try { await Promise.race([started, new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('Tasks did not overlap')), 30000); })]); }
   finally { clearTimeout(timeout); }
-  assert.equal(runner.scheduling.active.length, 2); release(); await runner.idle();
+  assert.equal((await runner.scheduling()).active.length, 2); release(); await runner.idle();
   for (const task of tasks) {
-    const done = store.task(task.id); assert.equal(done.state, 'completed', done.outcome?.error);
+    const done = await store.task(task.id); assert.equal(done.state, 'completed', done.outcome?.error);
     assert.equal(await git(project, ['show', `${done.workspace.branch}:result.txt`]), task.id);
-    assert.equal(store.evidence(task.id).filter(e => e.kind === 'commit-created').length, 1);
-    assert.equal(store.evidence(task.id).filter(e => e.kind === 'validation' && e.data.exitCode === 0).length, 1);
-    assert.ok(store.evidence(task.id).some(e => e.kind === 'terminal-cleanup'));
+    assert.equal((await store.evidence(task.id)).filter(e => e.kind === 'commit-created').length, 1);
+    assert.equal((await store.evidence(task.id)).filter(e => e.kind === 'validation' && e.data.exitCode === 0).length, 1);
+    assert.ok((await store.evidence(task.id)).some(e => e.kind === 'terminal-cleanup'));
     await assert.rejects(access(done.workspace.path), { code: 'ENOENT' });
   }
   assert.equal(await git(project, ['rev-parse', 'HEAD']), head); assert.equal(await git(project, ['status', '--porcelain']), '');
   console.log('PASS: two top-level tasks overlap, validate in real sandboxes, retain separate reviewed commits, and clean up without changing the original checkout.');
-} finally { release(); await runner?.stop(); store?.close(); await rm(root, { recursive: true, force: true }); }
+} finally { release(); await runner?.stop(); await store?.close(); await rm(root, { recursive: true, force: true }); }

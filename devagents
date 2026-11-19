@@ -79,7 +79,7 @@ open_link() {
   esac
 }
 # Build on first use or source changes, not every start. No host Node.js is needed.
-fingerprint=$({ cksum Dockerfile package.json package-lock.json tsconfig.json tsconfig.build.json; find src ui agents scripts -type f ! -path '*/node_modules/*' -exec cksum {} \; | LC_ALL=C sort; } | cksum)
+fingerprint=$({ cksum Dockerfile package.json package-lock.json tsconfig.json tsconfig.build.json prisma/schema.prisma; find src ui agents scripts -type f ! -path '*/node_modules/*' ! -path 'src/generated/*' -exec cksum {} \; | LC_ALL=C sort; } | cksum)
 previous=$(cat .devagents/build.fingerprint 2>/dev/null || true)
 if [ "$build" = yes ] || [ "$fingerprint" != "$previous" ] || ! docker image inspect devagents:local >/dev/null 2>&1; then
   previous_image=$(docker image inspect --format '{{.Id}}' devagents:local 2>/dev/null || true)

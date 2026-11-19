@@ -10,6 +10,7 @@ import { parse } from 'yaml';
 import { z } from 'zod';
 import { ModelCatalogService, claudeModelLister, codexModelLister } from '../engines/model-catalog.js';
 import { loadConfig, dataDirectory } from '../config.js';
+import { workspaceCheckpoints } from '../persistence/postgres-checkpoints.js';
 import { PostgresTasks } from '../persistence/postgres-tasks.js';
 import { SharedTasks } from '../orchestration/shared-tasks.js';
 import { Store } from '../persistence/store.js';
@@ -69,14 +70,19 @@ async function builtUi() {
   return findUiRoot([resolve(here, '../ui'), resolve(here, '../../dist/ui'), resolve(here, '../../ui/dist')]);
 }
 
+function accountSource(dataDir: string) {
+  const combined = join(dataDir, 'devagents.db');
+  return existsSync(combined) || existsSync(combined + '.accounts-pg-id') ? combined : join(dataDir, 'accounts.db');
+}
+
 cli.command('gateway <socketDirectory>').description('Serve the shared UI and route verified users to their private workspace sockets').action(async (directory: string) => {
   const login = loginConfig();
   if (login.mode !== 'shared') throw new AppError('invalid_config', 'The workspace gateway requires shared login');
   const dataDir = dataDirectory();
-  const release = lockService(dataDir);
+  const release = await lockService(dataDir);
   const token = await accessToken(dataDir);
-  const accounts = new LoginAccounts(join(dataDir, existsSync(join(dataDir, 'devagents.db')) ? 'devagents.db' : 'accounts.db'));
-  const provider = accounts.hasUsers() ? new PasswordLogin(accounts) : await PasswordLogin.create(accounts);
+  const accounts = await LoginAccounts.open(accountSource(dataDir));
+  const provider = await accounts.hasUsers() ? new PasswordLogin(accounts) : await PasswordLogin.create(accounts);
   const server = createWorkspaceGateway(token, {
     sharedLogin: { provider, users: accounts, publicOrigin: login.publicOrigin },
     sessions: new BrowserSessions(undefined, sessionLimits(process.env, { idleMs: 3600000, absoluteMs: 43200000 }), sessionFile(dataDir, 'shared')),
@@ -85,7 +91,7 @@ cli.command('gateway <socketDirectory>').description('Serve the shared UI and ro
   const host = process.env.DEVAGENTS_HOST ?? '127.0.0.1';
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port(), host, resolve); });
   log('gateway_started', { host, port: port() });
-  const shutdown = () => { server.close(() => { accounts.close(); release(); }); server.closeIdleConnections(); };
+  const shutdown = () => { server.close(async () => { await accounts.close(); await release(); }); server.closeIdleConnections(); };
   process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown);
 });
 
@@ -99,30 +105,29 @@ cli.command('serve').description('Start the API and runner').option('--workspace
   if (privateOwner && (login.mode !== 'shared' || !await configuredVault(dataDir))) {
     throw new AppError('invalid_config', 'Owner runtimes require shared mode and their own Docker tmpfs credential mount');
   }
-  const unlock = lockService(dataDir);
+  if (privateOwner) {
+    if (process.env.DEVAGENTS_WORKSPACE_ID && process.env.DEVAGENTS_WORKSPACE_ID !== privateOwner) throw new AppError('workspace_owner_mismatch', 'Configured workspace differs from runtime owner');
+    process.env.DEVAGENTS_WORKSPACE_ID = privateOwner;
+  }
+  const database = privateOwner ? await PostgresTasks.configured(privateOwner) : undefined;
+  const unlock = await lockService(dataDir);
   // Recover database writes even when a prior process stopped on a full filesystem.
   await new DiskReserve(dataDir).release();
   const configuredSecrets = config.providers.flatMap(p => p.apiKeyEnv && process.env[p.apiKeyEnv] ? [process.env[p.apiKeyEnv]!] : []);
-  const store = new Store(join(dataDir, 'devagents.db'), [...environmentSecrets(), ...configuredSecrets]);
-  const accounts = !privateOwner && login.mode === 'shared' ? new LoginAccounts(join(dataDir, 'devagents.db')) : undefined;
+  const store = await Store.open(join(dataDir, 'devagents.db'), [...environmentSecrets(), ...configuredSecrets]);
+  const accounts = !privateOwner ? await LoginAccounts.open(join(dataDir, 'devagents.db')) : undefined;
   const sharedLogin = accounts && login.mode === 'shared' ? { provider: await PasswordLogin.create(accounts), users: accounts, publicOrigin: login.publicOrigin } : undefined;
   const sandbox = { scanLimit: config.workspaceScanLimit };
   const engines = new EngineRegistry([new CodexAdapter(dataDir, 'codex', sandbox), new ClaudeAdapter(dataDir, sandbox)]);
-  const service = new TaskService(store, config, dataDir, process.platform, engines.ids());
+  const service = await TaskService.create(store, config, dataDir, process.platform, engines.ids());
   const credentialRuntime = process.env.DEVAGENTS_CREDENTIAL_RUNTIME;
-  let database: PostgresTasks | undefined;
-  if (process.env.DEVAGENTS_POSTGRES_HOST || process.env.DEVAGENTS_POSTGRES_PASSWORD_FILE) {
-    if (!privateOwner || !process.env.DEVAGENTS_POSTGRES_HOST || !process.env.DEVAGENTS_POSTGRES_PASSWORD_FILE) {
-      throw new AppError('shared_store_config', 'PostgreSQL task storage requires a private owner runtime, database host and password file');
-    }
-    store.bindWorkspaceOwner(privateOwner);
-    database = await PostgresTasks.configured(privateOwner);
-  }
-  const sharedTasks = database ? new SharedTasks(service, database) : undefined;
+  if (privateOwner) await store.bindWorkspaceOwner(privateOwner);
+  const sharedTasks = database ? await SharedTasks.create(service, database) : undefined;
   await sharedTasks?.history.initialize();
-  const workflowStorage = await database?.checkpoints(store, dataDir);
+  const workflowStorage = database ? await database.checkpoints(store, dataDir) : await workspaceCheckpoints(store, dataDir);
+  if (!database) await workflowStorage.init();
   const runner = new TaskRunner(service, engines, new CodexValidator(dataDir, 'codex', sandbox), undefined, {
-    startPaused: true, ...(workflowStorage ? { workflowStorage } : {}),
+    startPaused: true, workflowStorage,
     admission: () => credentialRuntime && !existsSync(join(credentialRuntime, 'unlocked'))
       ? 'Waiting for credential vault unlock; finish startup in the launcher' : undefined,
   });
@@ -133,29 +138,29 @@ cli.command('serve').description('Start the API and runner').option('--workspace
   const uiRoot = privateOwner ? undefined : await builtUi();
   // Docker listens on 4310 inside the container; Compose publishes DEVAGENTS_PORT on the host loopback.
   const publicPort = z.coerce.number().int().min(1).max(65535).parse(process.env.DEVAGENTS_PUBLIC_PORT ?? port());
-  const assertSetupIdle = () => {
-    if (runner.busy || store.summaries({ states: ['planning', 'ready', 'running', 'validating', 'reviewing', 'repairing', 'committing'], limit: 1 }).tasks.length) throw new AppError('work_active', 'Finish or cancel active work before changing sign-in.', 409);
+  const assertSetupIdle = async () => {
+    if (await runner.busy() || (await store.summaries({ states: ['planning', 'ready', 'running', 'validating', 'reviewing', 'repairing', 'committing'], limit: 1 })).tasks.length) throw new AppError('work_active', 'Finish or cancel active work before changing sign-in.', 409);
   };
-  const setupAuth = new SetupAuth(codexSetupDriver(dataDir), () => assertSignInIdle(store, runner));
-  const claudeAuth = new SetupAuth(claudeSetupDriver(dataDir), () => assertSignInIdle(store, runner));
+  const setupAuth = new SetupAuth(codexSetupDriver(dataDir), async () => await assertSignInIdle(store, runner));
+  const claudeAuth = new SetupAuth(claudeSetupDriver(dataDir), async () => await assertSignInIdle(store, runner));
   const secretStore = await configuredSecretStore(dataDir);
   const integrations = new ProjectIntegrationService(store, secretStore); const trackers = new TrackerService(store, secretStore);
   // A task keeps the pull request choices of its project; finished tasks of projects that publish on their own are picked up below.
   const pullRequests = new PullRequestService(store, secretStore);
   // A task started from a ticket also takes the ticket: it is assigned to the account the connection uses.
-  service.onSubmitted(task => pullRequests.freeze(task.id, task.projectId));
-  service.onAdmitted(task => { if (!store.lastEvidence(task.id, 'ticket-assigned') && !store.lastEvidence(task.id, 'ticket-assign-failed')) void assignStartedTicket({ integrations, trackers }, task, (kind, data) => store.record(task.id, kind, data)); });
-  pullRequests.attachRounds((input, key, followUp) => service.submit(input, key, followUp));
+  service.onSubmitted(async task => await pullRequests.freeze(task.id, task.projectId));
+  service.onAdmitted(async task => { if (!await store.lastEvidence(task.id, 'ticket-assigned') && !await store.lastEvidence(task.id, 'ticket-assign-failed')) void assignStartedTicket({ integrations, trackers }, task, async (kind, data) => await store.record(task.id, kind, data)); });
+  pullRequests.attachRounds(async (input, key, followUp) => await service.submit(input, key, followUp));
   service.onStart(task => pullRequests.startCommit(task));
   // A task started from a ticket takes the ticket's pictures and short text files with it while it works.
   service.attachTicketFiles((task, directory) => downloadTicketFiles({ integrations, trackers }, task.projectId, task.ticket!, directory));
   const providerOf = (kind: string) => config.providers.find(p => p.kind === kind && !p.baseUrl);
   const models = new ModelCatalogService(store, { codex: codexModelLister(dataDir, providerOf('openai')), 'claude-code': claudeModelLister(dataDir, providerOf('anthropic')) });
-  const server = createApi(service, await accessToken(dataDir), {
+  const server = await createApi(service, await accessToken(dataDir), {
     sessions: new BrowserSessions(undefined, sessionLimits(process.env, sharedLogin ? { idleMs: 3600000, absoluteMs: 43200000 } : {}), sessionFile(dataDir, login.mode)),
     ...(sharedTasks ? { sharedTasks } : {}),
     ...(privateOwner ? { privateRuntimeOwner: privateOwner } : {}),
-    ...(sharedLogin ? { sharedLogin, workspaceOwnerId: accounts!.passwordAccount('admin')!.user.id } : {}), uiRoot, publicPort, setupAuth, claudeAuth, assertSetupIdle,
+    ...(sharedLogin ? { sharedLogin, workspaceOwnerId: (await accounts!.passwordAccount('admin'))!.user.id } : {}), uiRoot, publicPort, setupAuth, claudeAuth, assertSetupIdle,
     integrations, pullRequests, trackers, models,
     status: statusReporter({ dataDir, config, version: '0.1.0', host, port: () => publicPort, executionEnabled: true, revision: () => setupAuth.revision + claudeAuth.revision }),
   });
@@ -164,11 +169,11 @@ cli.command('serve').description('Start the API and runner').option('--workspace
   if (opts.socketDirectory) await listenPrivate(server, opts.socketDirectory);
   else await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port(), host, resolve); });
   // Only the process which owns the listening socket may reconcile this service's tasks.
-  const recovered = store.recover();
+  const recovered = await store.recover();
   await runner.recover();
   sharedTasks?.start();
   await service.diskReserve.replenish();
-  log('service_started', { host, port: port(), publicPort, recovered, projects: store.projects().length, executionEnabled: true, ui: uiRoot ? `http://127.0.0.1:${publicPort}/ui/` : 'not built' });
+  log('service_started', { host, port: port(), publicPort, recovered, projects: (await store.projects()).length, executionEnabled: true, ui: uiRoot ? `http://127.0.0.1:${publicPort}/ui/` : 'not built' });
   log('setup', { message: privateOwner ? 'Private workspace runtime ready.' : sharedLogin ? `Open ${sharedLogin.publicOrigin}/ui/ and sign in. Shared mode currently supports one administrator; private multi-user execution is not implemented yet.` : 'Register an existing checkout and authenticate Codex. Use tasks submit, show and evidence to follow work. Open the browser UI with a one-time link from: devagents ui' });
   const publishing = setInterval(() => { void pullRequests.publishDue().then(() => pullRequests.syncDue()); }, 15000); publishing.unref();
   let closing = false;
@@ -179,7 +184,7 @@ cli.command('serve').description('Start the API and runner').option('--workspace
       void Promise.all([runner.stop(), setupAuth.close(), claudeAuth.close()])
         .then(() => sharedTasks?.stop())
         .catch(() => { log('shutdown_incomplete', { message: 'Check workspace storage before restarting. Pending history is retained locally.' }); process.exitCode = 1; })
-        .finally(() => { accounts?.close(); store.close(); unlock(); });
+        .finally(async () => { await accounts?.close(); await store.close(); await unlock(); });
     });
     server.closeIdleConnections();
   };
@@ -438,18 +443,18 @@ tasks.command('compact-preview <id>').description('Preview removal of ignored de
 tasks.command('compact <id>').requiredOption('--digest <digest>', 'Digest from the compaction preview you reviewed').description('Remove only previewed regenerable dependencies; keep worktrees and history').action(async (id: string, opts: { digest: string }) => print(await request(`/tasks/${id}/compact`, 'POST', { digest: opts.digest })));
 tasks.command('cleanup <id>').description('Remove a finished task’s managed worktrees and item branches (keeps a completed task’s branch)').action(async (id: string) => print(await request(`/tasks/${id}/cleanup`, 'POST', {})));
 const auth = cli.command('auth');
-auth.command('account-id <username>').description('Print the stable ID of an existing gateway account').action((username: string) => {
+auth.command('account-id <username>').description('Print the stable ID of an existing gateway account').action(async (username: string) => {
   const dir = dataDirectory();
-  const accounts = new LoginAccounts(join(dir, existsSync(join(dir, 'devagents.db')) ? 'devagents.db' : 'accounts.db'));
+  const accounts = await LoginAccounts.open(accountSource(dir));
   try {
-    const account = accounts.passwordAccount(username);
+    const account = await accounts.passwordAccount(username);
     if (!account) throw new AppError('unknown_account', 'Unknown account');
     console.log(account.user.id);
-  } finally { accounts.close(); }
+  } finally { await accounts.close(); }
 });
-auth.command('vault-owner').description('Report the internal owner ID for host-side KMS unlock').action(() => {
+auth.command('vault-owner').description('Report the internal owner ID for host-side KMS unlock').action(async () => {
   if (loginConfig().mode !== 'shared') throw new AppError('invalid_config', 'KMS vault unlock requires shared mode');
-  console.log(sharedVaultOwner(dataDirectory()));
+  console.log(await sharedVaultOwner(dataDirectory()));
 });
 auth.command('vault-exists').description('Report whether encrypted credentials exist').action(async () => {
   const vault = await configuredVault(dataDirectory());

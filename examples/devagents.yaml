@@ -5,7 +5,7 @@ qaEnabled: false # separate agent QA is opt-in; developer validation and indepen
 devagentsRules: false # true adds role scopes, command allowlist and read-only validation
 defaultEngine: codex
 defaultProvider: openai
-# M2 runs serially; higher concurrency is reserved for M3.
+# Rolling subtasks per task; the saved Settings value takes precedence.
 concurrency: 1
 maxRepairCycles: 3
 executionTimeoutMs: 1800000

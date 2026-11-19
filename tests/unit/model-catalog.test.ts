@@ -7,15 +7,15 @@ import { Store } from '../../src/persistence/store.js';
 import { ModelCatalogService, claudeModelLister, codexModelLister } from '../../src/engines/model-catalog.js';
 
 const withStore = async (run: (store: Store, root: string) => Promise<void>) => {
-  const root = await mkdtemp(join(tmpdir(), 'model-catalog-')); const store = new Store(join(root, 'devagents.db'), []);
-  try { await run(store, root); } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+  const root = await mkdtemp(join(tmpdir(), 'model-catalog-')); const store = await Store.open(join(root, 'devagents.db'), []);
+  try { await run(store, root); } finally { await store.close(); await rm(root, { recursive: true, force: true }); }
 };
 
 test('a loaded list is saved, marks what is new since the load before, and survives a failed load', () => withStore(async store => {
   let answer: unknown = [{ id: 'model-a', name: 'Model A' }, { id: 'model-a', name: 'Duplicate' }, { id: 'default', name: 'Default' }, { id: ' ', name: 'Blank' }];
   let clock = Date.parse('2026-11-18T09:00:00Z');
   const service = new ModelCatalogService(store, { codex: async () => { if (answer instanceof Error) throw answer; return answer as { id: string; name: string }[]; } }, () => new Date(clock));
-  assert.deepEqual(service.list(), [], 'nothing is listed before the first load');
+  assert.deepEqual(await service.list(), [], 'nothing is listed before the first load');
   const first = await service.refresh('codex');
   assert.deepEqual(first, { engine: 'codex', models: [{ id: 'model-a', name: 'Model A' }], loadedAt: '2026-11-18T09:00:00.000Z', newIds: [] }, 'duplicates, blanks and the reserved default are dropped; the first load marks nothing new');
   answer = [{ id: 'model-b', name: '' }, { id: 'model-a', name: 'Model A' }]; clock += 60000;
@@ -25,7 +25,7 @@ test('a loaded list is saved, marks what is new since the load before, and survi
   await assert.rejects(service.refresh('codex'), (e: Error & { code?: string }) => e.code === 'model_list_failed' && !e.message.includes('secret-account-detail'), 'engine output never reaches the message');
   answer = [];
   await assert.rejects(service.refresh('codex'), /returned no models/);
-  assert.deepEqual(new ModelCatalogService(store, { codex: async () => [] }).list(), [second], 'the list loaded before is still saved');
+  assert.deepEqual(await new ModelCatalogService(store, { codex: async () => [] }).list(), [second], 'the list loaded before is still saved');
   assert.throws(() => service.refresh('other-engine'), /cannot list models/);
 }));
 

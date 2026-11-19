@@ -36,14 +36,14 @@ test('policy is frozen after idempotency resolution and cannot be supplied throu
   const f = await fixture(false);
   try {
     const input = { projectId: 'fixture', request: 'Project checks', mode: 'plan-approval' };
-    const first = f.service.submit(input, 'stable'); assert.equal(first.devagentsRules, false);
+    const first = await f.service.submit(input, 'stable'); assert.equal(first.devagentsRules, false);
     f.service.config.devagentsRules = true;
-    const retried = f.service.submit(input, 'stable'); assert.equal(retried.id, first.id); assert.equal(retried.devagentsRules, false);
-    assert.equal(f.service.submit(input, 'new').devagentsRules, true);
-    assert.throws(() => f.service.submit({ ...input, devagentsRules: false }, 'forged'), /Unrecognized key/);
+    const retried = await f.service.submit(input, 'stable'); assert.equal(retried.id, first.id); assert.equal(retried.devagentsRules, false);
+    assert.equal((await f.service.submit(input, 'new')).devagentsRules, true);
+    await assert.rejects(async () => await f.service.submit({ ...input, devagentsRules: false }, 'forged'), /Unrecognized key/);
     const plan = validPlan(); plan.items[0]!.validation = [{ executable: 'pnpm', args: ['run', 'check:ui'] }];
     assert.equal((await f.service.proposePlan(first.id, plan)).state, 'awaiting_plan_approval');
-    await assert.rejects(f.service.proposePlan(f.service.submit(input, 'strict').id, plan), /Validation supports/);
+    await assert.rejects(f.service.proposePlan((await f.service.submit(input, 'strict')).id, plan), /Validation supports/);
   } finally { await f.cleanup(); }
 });
 
@@ -82,11 +82,11 @@ test('default policy reaches a real sandbox for a custom command, preserves argv
   };
   const runner = new TaskRunner(f.service, engine, new CodexValidator(f.dataDir)); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'plan-approval' }, 'engine');
-    await runner.idle(); const pending = f.store.task(task.id); assert.equal(pending.state, 'awaiting_plan_approval', JSON.stringify(pending.outcome));
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'plan-approval' }, 'engine');
+    await runner.idle(); const pending = await f.store.task(task.id); assert.equal(pending.state, 'awaiting_plan_approval', JSON.stringify(pending.outcome));
     f.service.config.devagentsRules = true; // changing the default must not reinterpret approval
-    f.service.approve(task.id, pending.version); await runner.idle();
-    const done = f.store.task(task.id); assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
+    await f.service.approve(task.id, pending.version); await runner.idle();
+    const done = await f.store.task(task.id); assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     assert.equal(await readFile(join(done.workspace!.path, 'cache/generated.local'), 'utf8'), 'ok');
     assert.ok(engine.calls.every(c => c.devagentsRules === false));
     assert.match(engine.calls[0]!.prompt, /actual validation commands/);

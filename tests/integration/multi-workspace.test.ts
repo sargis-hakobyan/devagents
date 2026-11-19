@@ -26,11 +26,11 @@ async function close(server: Server) {
 test('one gateway serves two private workspaces with overlapping runs and independent provider connections', { timeout: 60000 }, async () => {
   // Short path for the OS socket length limit. All logins, credentials, repos and engines are synthetic.
   const root = await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'da-ws-'));
-  const accounts = new LoginAccounts(join(root, 'accounts.db'));
+  const accounts = await LoginAccounts.open(join(root, 'accounts.db'));
   const password = await PasswordLogin.create(accounts);
-  const alice = accounts.passwordAccount('admin')!.user;
+  const alice = (await accounts.passwordAccount('admin'))!.user;
   const salt = randomBytes(16).toString('hex');
-  const bob = accounts.bootstrapPasswordAccount('bob', 'Bob', salt, scryptSync('fixture-bob', salt, 64, { N: 32768, r: 8, p: 3, maxmem: 64 * 1024 * 1024 }).toString('hex'));
+  const bob = await accounts.bootstrapPasswordAccount('bob', 'Bob', salt, scryptSync('fixture-bob', salt, 64, { N: 32768, r: 8, p: 3, maxmem: 64 * 1024 * 1024 }).toString('hex'));
   const releases: (() => Promise<void>)[] = [];
   const arrived = new Set<string>();
   let bothArrived!: () => void;
@@ -53,7 +53,7 @@ test('one gateway serves two private workspaces with overlapping runs and indepe
           await writeFile(vault.auth, JSON.stringify({ value }), { mode: 0o600 });
           await vault.seal(); saved = true;
         },
-      }, () => assertSignInIdle(f.store, runner));
+      }, async () => await assertSignInIdle(f.store, runner));
       const used: string[] = [];
       const engine = new class extends FakeEngine {
         override async execute(req: EngineRequest) {
@@ -69,7 +69,7 @@ test('one gateway serves two private workspaces with overlapping runs and indepe
       }();
       const runner = new TaskRunner(f.service, engine, new FixtureValidator());
       f.service.attachRunner(runner);
-      const server = createApi(f.service, 'unused', { privateRuntimeOwner: userId, claudeAuth: setup });
+      const server = await createApi(f.service, 'unused', { privateRuntimeOwner: userId, claudeAuth: setup });
       await listenPrivate(server, join(root, userId));
       releases.push(async () => { await close(server); await setup.close(); await runner.stop(); await f.cleanup(); });
       return { f, used, runner, vault };
@@ -91,7 +91,7 @@ test('one gateway serves two private workspaces with overlapping runs and indepe
     }
     const A = await client('admin', 'admin'), B = await client('bob', 'fixture-bob');
     // A missing or mis-mounted socket cannot fall through to a different owner's workspace.
-    const third = accounts.bootstrapPasswordAccount('third', 'Another user', salt, accounts.passwordAccount('bob')!.hash);
+    const third = await accounts.bootstrapPasswordAccount('third', 'Another user', salt, (await accounts.passwordAccount('bob'))!.hash);
     const C = await client('third', 'fixture-bob');
     assert.equal((await C('/projects')).status, 503);
     await symlink(join(root, alice.id), join(root, third.id), 'dir');
@@ -143,7 +143,7 @@ test('one gateway serves two private workspaces with overlapping runs and indepe
     releaseWorkers();
     await close(gateway);
     for (const release of releases.reverse()) await release();
-    accounts.close();
+    await accounts.close();
     await rm(root, { recursive: true, force: true });
   }
 });

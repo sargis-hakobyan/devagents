@@ -38,7 +38,7 @@ export class WorktreeCompactor {
     const scan = await this.scan(project, taskId, workspaces, expiry, runIds);
     if (Date.now() >= expiry || scan.preview.digest !== digest) throw new AppError('compaction_preview_stale', 'Working files changed; request a new compaction preview', 409);
     // A durable intent is mandatory. Storage failure here leaves every directory untouched.
-    beforeRemoval(scan.preview);
+    await beforeRemoval(scan.preview);
     const removed: string[] = [];
     try {
       for (const root of scan.roots) {
@@ -49,10 +49,10 @@ export class WorktreeCompactor {
       }
     } catch (error) {
       // Preserve the removal error even when reporting it also fails. The durable intent remains.
-      try { record({ removed, status: 'partial' }); } catch { /* inspect the intent after storage recovery */ }
+      try { await record({ removed, status: 'partial' }); } catch { /* inspect the intent after storage recovery */ }
       throw error;
     }
-    record({ removed, status: 'completed' });
+    await record({ removed, status: 'completed' });
     return { removed, estimatedReclaimedBytes: scan.preview.reclaimableBytes, kept: scan.preview.kept };
   }
 

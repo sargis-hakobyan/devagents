@@ -10,7 +10,7 @@ type TeamResponse = TeamRecord & { readiness: TeamReadiness; revisions?: { revis
 
 test('team and default-team routes enforce revisions, validation and the browser security rules', async () => {
   const f = await fixture(); const sessions = new BrowserSessions();
-  const server = createApi(f.service, 't', { sessions });
+  const server = await createApi(f.service, 't', { sessions });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as AddressInfo).port; const url = `http://127.0.0.1:${port}`;
   const bearer = { authorization: 'Bearer t', 'content-type': 'application/json' };

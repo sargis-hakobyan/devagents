@@ -1,8 +1,7 @@
-import { loginSchema } from './login-schema.js';
+import { projectEvidence } from './evidence-projection.js';
+import { openWorkspace } from './workspace-database.js';
+import { WorkspacePersistence } from './prisma.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { AppError } from '../domain/errors.js';
 import { assertTransition } from '../domain/lifecycle.js';
@@ -18,343 +17,230 @@ import type { TaskTicket, TicketRef } from '../domain/tickets.js';
 import type { ModelCatalog } from '../domain/model-catalog.js';
 
 export class Store {
-  private readonly db: DatabaseSync;
+  private readonly db: WorkspacePersistence;
   private readonly execution = new AsyncLocalStorage<DispatchClaim>();
-  private transactionDepth = 0;
+  private get workspaceId() { return this.db.workspaceId; }
+  private byId(id: string) { return { workspace_id_id: { workspace_id: this.workspaceId, id } }; }
   /** Known secret values (environment heuristic plus configured provider keys); shared with every response and diff path. */
-  constructor(path: string, readonly secrets: readonly string[] = environmentSecrets()) {
-    if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-    this.db = new DatabaseSync(path);
-    this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
-    const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-    // Version 4 added optional QA settings. Preserve that table when the QA feature is stashed.
-    if (version > 14) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
-    if (version === 0) this.db.exec(`
-      BEGIN IMMEDIATE;
-      CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, data TEXT NOT NULL);
-      CREATE TABLE tasks (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), state TEXT NOT NULL, version INTEGER NOT NULL, data TEXT NOT NULL);
-      CREATE TABLE events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id), data TEXT NOT NULL);
-      CREATE TABLE requests (key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, task_id TEXT NOT NULL REFERENCES tasks(id));
-      CREATE TRIGGER events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;
-      CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;
-      PRAGMA user_version=1;
-      COMMIT;
-    `);
-    if (version < 2) this.db.exec(`
-      BEGIN IMMEDIATE;
-      CREATE TABLE evidence (sequence INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id), kind TEXT NOT NULL, data TEXT NOT NULL);
-      CREATE TRIGGER evidence_no_update BEFORE UPDATE ON evidence BEGIN SELECT RAISE(ABORT, 'evidence is append-only'); END;
-      CREATE TRIGGER evidence_no_delete BEFORE DELETE ON evidence BEGIN SELECT RAISE(ABORT, 'evidence is append-only'); END;
-      PRAGMA user_version=2;
-      COMMIT;
-    `);
-    // Schema 3: saved teams with immutable member revisions. Existing rows are untouched; project
-    // default teams and task team references live inside the existing JSON columns.
-    if (version < 3) this.db.exec(`
-      BEGIN IMMEDIATE;
-      CREATE TABLE teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-      CREATE TABLE team_revisions (team_id TEXT NOT NULL REFERENCES teams(id), revision INTEGER NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL, reason TEXT NOT NULL, PRIMARY KEY (team_id, revision));
-      CREATE TRIGGER team_revisions_no_update BEFORE UPDATE ON team_revisions BEGIN SELECT RAISE(ABORT, 'team revisions are immutable'); END;
-      CREATE TRIGGER team_revisions_no_delete BEFORE DELETE ON team_revisions BEGIN SELECT RAISE(ABORT, 'team revisions are immutable'); END;
-      PRAGMA user_version=3;
-      COMMIT;
-    `);
-    if (version < 5) this.db.exec(`
-      BEGIN IMMEDIATE;
-      CREATE TABLE IF NOT EXISTS dispatch_queue (
-        task_id TEXT PRIMARY KEY REFERENCES tasks(id), requested INTEGER NOT NULL,
-        handled INTEGER NOT NULL DEFAULT 0, requested_version INTEGER NOT NULL,
-        generation INTEGER NOT NULL DEFAULT 0, owner TEXT, claimed INTEGER NOT NULL DEFAULT 0,
-        queued_at TEXT NOT NULL, heartbeat_at TEXT, blocker TEXT
-      );
-      PRAGMA user_version=5;
-      COMMIT;
-    `);
-    if (version < 6) this.db.exec(`
-      BEGIN IMMEDIATE;
-      CREATE TABLE IF NOT EXISTS task_concurrency (id INTEGER PRIMARY KEY CHECK (id=1), max_concurrent_tasks INTEGER NOT NULL CHECK (max_concurrent_tasks BETWEEN 1 AND 8), version INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS model_catalogs (engine TEXT PRIMARY KEY, data TEXT NOT NULL);
-      PRAGMA user_version=6;
-      COMMIT;
-    `);
-    if (version < 7) this.migrateProjectIds();
-    // Schema 8: ticket tools added by their MCP address. Shared by projects, so they are not project rows.
-    if (version < 8) this.db.exec(`
-      BEGIN IMMEDIATE;
-      CREATE TABLE IF NOT EXISTS trackers (id TEXT PRIMARY KEY, data TEXT NOT NULL);
-      PRAGMA user_version=8;
-      COMMIT;
-    `);
-    // Schema 9: what GitHub last said about each task's pull request. Rewritten on every read, so it is not evidence.
-    if (version < 9) this.db.exec(`
-      BEGIN IMMEDIATE;
-      CREATE TABLE IF NOT EXISTS pull_requests (task_id TEXT PRIMARY KEY REFERENCES tasks(id), state TEXT NOT NULL, data TEXT NOT NULL);
-      PRAGMA user_version=9;
-      COMMIT;
-    `);
-    // Identity is independent of login credentials. Local mode does not create password accounts.
-    if (version < 10) this.db.exec(`
-      BEGIN IMMEDIATE;
-      ${loginSchema}
-      PRAGMA user_version=10;
-      COMMIT;
-    `);
-    if (version < 11) this.db.exec(`
-      BEGIN IMMEDIATE;
-      CREATE TABLE IF NOT EXISTS work_item_concurrency (id INTEGER PRIMARY KEY CHECK (id=1), concurrency INTEGER NOT NULL CHECK (concurrency BETWEEN 1 AND 8), version INTEGER NOT NULL);
-      PRAGMA user_version=11;
-      COMMIT;
-    `);
-    if (version < 12) this.db.exec(`
-      BEGIN IMMEDIATE;
-      CREATE TABLE IF NOT EXISTS workspace_owner (singleton INTEGER PRIMARY KEY CHECK (singleton=1), user_id TEXT NOT NULL);
-      PRAGMA user_version=12;
-      COMMIT;
-    `);
-    if (version < 13) this.db.exec(`
-      BEGIN IMMEDIATE;
-      CREATE TABLE IF NOT EXISTS shared_task_handoffs (
-        task_id TEXT PRIMARY KEY REFERENCES tasks(id), owner_id TEXT NOT NULL, claim_id TEXT NOT NULL,
-        phase TEXT NOT NULL CHECK (phase IN ('held','released','archived')), snapshot TEXT
-      );
-      CREATE INDEX IF NOT EXISTS requests_by_task ON requests(task_id);
-      CREATE INDEX IF NOT EXISTS handoffs_by_phase ON shared_task_handoffs(phase, task_id);
-      PRAGMA user_version=13;
-      COMMIT;
-    `);
-    if (version < 14) this.db.exec(`
-      BEGIN IMMEDIATE;
-      CREATE TABLE IF NOT EXISTS checkpoint_binding(singleton INTEGER PRIMARY KEY CHECK(singleton=1), store_id TEXT NOT NULL);
-      PRAGMA user_version=14;
-      COMMIT;
-    `);
+  private constructor(readonly legacyPath: string, readonly secrets: readonly string[]) {
+    this.db = new WorkspacePersistence(legacyPath);
+  }
+  static async open(path: string, secrets: readonly string[] = environmentSecrets()): Promise<Store> {
+    await (await openWorkspace(path)).close();
+    return new Store(path, secrets);
   }
 
-  checkpointBinding(): string | undefined {
-    return this.db.prepare('SELECT store_id FROM checkpoint_binding WHERE singleton=1').get()?.store_id as string | undefined;
+  async checkpointBinding(): Promise<string | undefined> {
+    return (await this.db.prepare('SELECT store_id FROM checkpoint_binding WHERE singleton=1').get())?.store_id as string | undefined;
   }
-  bindCheckpoints(storeId: string): void {
-    this.db.prepare('INSERT INTO checkpoint_binding VALUES (1,?) ON CONFLICT DO NOTHING').run(storeId);
-    if (this.checkpointBinding() !== storeId) throw new AppError('checkpoint_store_changed', 'Restore the PostgreSQL checkpoint store bound to this workspace');
+  async bindCheckpoints(storeId: string): Promise<void> {
+    await this.db.prepare('INSERT INTO checkpoint_binding VALUES (1,$1) ON CONFLICT DO NOTHING').run(storeId);
+    if (await this.checkpointBinding() !== storeId) throw new AppError('checkpoint_store_changed', 'Restore the PostgreSQL checkpoint store bound to this workspace');
   }
-  historyEnd(stream: 'events' | 'evidence'): number {
+  async historyEnd(stream: 'events' | 'evidence'): Promise<number> {
     const table = stream === 'events' ? 'events' : 'evidence';
-    return Number(this.db.prepare(`SELECT COALESCE(MAX(sequence),0) AS seq FROM ${table}`).get()!.seq);
+    return Number((await this.db.prepare(`SELECT COALESCE(MAX(sequence),0) AS seq FROM ${table}`).get())!.seq);
   }
-  historyBatch(stream: 'events' | 'evidence', after: number, through: number) {
+  async historyBatch(stream: 'events' | 'evidence', after: number, through: number) {
     const select = stream === 'events' ? 'NULL AS kind, data FROM events' : 'kind, data FROM evidence';
-    const rows = this.db.prepare(`SELECT sequence, task_id AS "taskId", ${select}
-      WHERE sequence>? AND sequence<=? ORDER BY sequence LIMIT 32`).iterate(after, through);
+    const rows = await this.db.prepare(`SELECT sequence, task_id AS "taskId", ${select}
+      WHERE sequence>$1 AND sequence<=$2 ORDER BY sequence LIMIT 32`).all(after, through);
     const batch: { sequence: number; taskId: string; kind: string | null; data: string }[] = [];
     let bytes = 0;
     for (const row of rows) {
       const entry = row as (typeof batch)[number];
       bytes += Buffer.byteLength(entry.data);
       if (batch.length && bytes > 1024 * 1024) break;
-      batch.push(entry);
+      batch.push({ ...entry, sequence: Number(row.sequence) });
     }
     return batch;
   }
 
-  heldForSharedClaim(id: string): boolean {
-    return Boolean(this.db.prepare("SELECT 1 FROM shared_task_handoffs WHERE task_id=? AND phase='held'").get(id));
+  async heldForSharedClaim(id: string): Promise<boolean> {
+    return Boolean(await this.db.prepare("SELECT 1 FROM shared_task_handoffs WHERE task_id=$1 AND phase='held'").get(id));
   }
-  sharedHandoff(id: string) {
-    return this.db.prepare(`SELECT h.owner_id AS ownerId,h.claim_id AS claimId,h.phase,h.snapshot,r.key AS retryKey,r.fingerprint
-      FROM shared_task_handoffs h JOIN requests r ON r.task_id=h.task_id WHERE h.task_id=?`).get(id) as
+  async sharedHandoff(id: string) {
+    return await this.db.prepare(`SELECT h.owner_id AS "ownerId",h.claim_id AS "claimId",h.phase,h.snapshot,r.key AS "retryKey",r.fingerprint
+      FROM shared_task_handoffs h JOIN requests r ON r.task_id=h.task_id WHERE h.task_id=$1`).get(id) as
       { ownerId: string; claimId: string; phase: 'held' | 'released' | 'archived'; snapshot: string | null; retryKey: string; fingerprint: string } | undefined;
   }
-  outstandingHandoffs(): string[] {
-    return this.db.prepare(`SELECT h.task_id FROM shared_task_handoffs h JOIN tasks t ON t.id=h.task_id
-      WHERE h.phase='held' OR (h.phase='released' AND t.state IN ('completed','failed','cancelled')) ORDER BY h.rowid`).all().map(row => String(row.task_id));
+  async outstandingHandoffs(): Promise<string[]> {
+    return (await this.db.prepare(`SELECT h.task_id FROM shared_task_handoffs h JOIN tasks t ON t.id=h.task_id
+      WHERE h.phase='held' OR (h.phase='released' AND t.state IN ('completed','failed','cancelled')) ORDER BY h.insertion_order`).all()).map(row => String(row.task_id));
   }
-  advanceHandoff(id: string, ownerId: string, claimId: string, from: 'held' | 'released') {
+  async advanceHandoff(id: string, ownerId: string, claimId: string, from: 'held' | 'released') {
     const next = from === 'held' ? 'released' : 'archived';
-    const changed = this.db.prepare('UPDATE shared_task_handoffs SET phase=?, snapshot=NULL WHERE task_id=? AND owner_id=? AND claim_id=? AND phase=?')
+    const changed = await this.db.prepare('UPDATE shared_task_handoffs SET phase=$1, snapshot=NULL WHERE task_id=$2 AND owner_id=$3 AND claim_id=$4 AND phase=$5')
       .run(next, id, ownerId, claimId, from);
     if (changed.changes !== 1) throw new AppError('shared_task_conflict', 'The local workspace handoff has changed', 409);
   }
 
-  workspaceOwnerId(): string | undefined {
-    return this.db.prepare('SELECT user_id FROM workspace_owner WHERE singleton=1').get()?.user_id as string | undefined;
+  async workspaceOwnerId(): Promise<string | undefined> {
+    return (await this.db.prepare('SELECT user_id FROM workspace_owner WHERE singleton=1').get())?.user_id as string | undefined;
   }
 
   /** Bind legacy workspace contents once. A later login change cannot transfer them. */
-  bindWorkspaceOwner(userId: string): void {
-    this.transaction(() => {
-      this.db.prepare('INSERT INTO workspace_owner VALUES (1, ?) ON CONFLICT(singleton) DO NOTHING').run(userId);
-      if (this.workspaceOwnerId() !== userId) throw new AppError('workspace_owner_mismatch', 'Workspace is already assigned to another user', 403);
+  async bindWorkspaceOwner(userId: string): Promise<void> {
+    await this.transaction(async () => {
+      await this.db.prepare('INSERT INTO workspace_owner VALUES (1, $1) ON CONFLICT(workspace_id,singleton) DO NOTHING').run(userId);
+      if (await this.workspaceOwnerId() !== userId) throw new AppError('workspace_owner_mismatch', 'Workspace is already assigned to another user', 403);
     });
   }
 
-  pullRequest(taskId: string): PullRequestSnapshot | undefined {
-    const row = this.db.prepare('SELECT data FROM pull_requests WHERE task_id=?').get(taskId) as { data: string } | undefined;
+  async pullRequest(taskId: string): Promise<PullRequestSnapshot | undefined> {
+    const row = await this.db.models.pullRequest.findUnique({
+      where: { workspace_id_task_id: { workspace_id: this.workspaceId, task_id: taskId } }, select: { data: true },
+    });
     return row ? JSON.parse(row.data) as PullRequestSnapshot : undefined;
   }
-  savePullRequest(taskId: string, snapshot: PullRequestSnapshot): void {
-    this.db.prepare('INSERT INTO pull_requests VALUES (?, ?, ?) ON CONFLICT(task_id) DO UPDATE SET state=excluded.state, data=excluded.data').run(taskId, snapshot.state, this.json(snapshot));
+  async savePullRequest(taskId: string, snapshot: PullRequestSnapshot): Promise<void> {
+    const key = { workspace_id: this.workspaceId, task_id: taskId };
+    const values = { state: snapshot.state, data: this.json(snapshot) };
+    await this.db.models.pullRequest.upsert({ where: { workspace_id_task_id: key }, create: { ...key, ...values }, update: values });
   }
   /** Tasks whose pull request is still open, oldest first. */
-  openPullRequests(): string[] {
-    return (this.db.prepare("SELECT task_id FROM pull_requests WHERE state='open' ORDER BY rowid").all() as { task_id: string }[]).map(r => r.task_id);
+  async openPullRequests(): Promise<string[]> {
+    const rows = await this.db.models.pullRequest.findMany({ where: { state: 'open' }, orderBy: { insertion_order: 'asc' }, select: { task_id: true } });
+    return rows.map(row => row.task_id);
   }
-  trackers(): Tracker[] {
-    return (this.db.prepare('SELECT data FROM trackers').all() as { data: string }[]).map(row => JSON.parse(row.data) as Tracker).sort((a, b) => a.name.localeCompare(b.name));
+  async trackers(): Promise<Tracker[]> {
+    return (await this.db.models.tracker.findMany({ select: { data: true } })).map(row => JSON.parse(row.data) as Tracker).sort((a, b) => a.name.localeCompare(b.name));
   }
-  tracker(id: string): Tracker {
-    const row = this.db.prepare('SELECT data FROM trackers WHERE id=?').get(id) as { data: string } | undefined;
+  async tracker(id: string): Promise<Tracker> {
+    const row = await this.db.models.tracker.findUnique({ where: this.byId(id) });
     if (!row) throw new AppError('tracker_not_found', 'No tool with this id. List them with: devagents tools list', 404);
     return JSON.parse(row.data) as Tracker;
   }
   /** Adds or replaces a tool. Its token never passes through here. */
-  saveTracker(tracker: Tracker): Tracker {
-    this.db.prepare('INSERT INTO trackers VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(tracker.id, JSON.stringify(tracker));
+  async saveTracker(tracker: Tracker): Promise<Tracker> {
+    await this.db.models.tracker.upsert({ where: this.byId(tracker.id), create: { workspace_id: this.workspaceId, id: tracker.id, data: JSON.stringify(tracker) }, update: { data: JSON.stringify(tracker) } });
     return tracker;
   }
-  removeTracker(id: string): void { this.db.prepare('DELETE FROM trackers WHERE id=?').run(id); }
-  /**
-   * Schema 7: every project ID is a UUID. A hand-written ID from an earlier version becomes the
-   * project's name, and the project's tasks follow it. Paths, branches and worktrees never used the
-   * ID, so nothing on disk moves. Append-only history keeps the text it was written with.
-   */
-  private migrateProjectIds(): void {
-    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-    // The project row and its tasks change key together; the reference is checked again once both are done.
-    this.db.exec('PRAGMA foreign_keys=OFF');
-    try {
-      this.db.exec('BEGIN IMMEDIATE');
-      try {
-        for (const row of this.db.prepare('SELECT id, data FROM projects').all() as { id: string; data: string }[]) {
-          if (uuid.test(row.id)) continue;
-          const id = randomUUID(); const project = JSON.parse(row.data) as Project;
-          this.db.prepare('UPDATE projects SET id=?, data=? WHERE id=?').run(id, JSON.stringify({ ...project, id, name: project.name ?? row.id }), row.id);
-          for (const task of this.db.prepare('SELECT id, data FROM tasks WHERE project_id=?').all(row.id) as { id: string; data: string }[]) {
-            const data = JSON.parse(task.data) as { projectId: string; plan?: { items?: { projectId?: string }[] } };
-            data.projectId = id;
-            for (const item of data.plan?.items ?? []) if (item.projectId === row.id) item.projectId = id;
-            this.db.prepare('UPDATE tasks SET project_id=?, data=? WHERE id=?').run(id, JSON.stringify(data), task.id);
-          }
-        }
-        if (this.db.prepare('PRAGMA foreign_key_check').all().length) throw new AppError('database_migration', 'Project IDs could not be converted consistently; the database was left unchanged');
-        this.db.exec('PRAGMA user_version=7; COMMIT');
-      } catch (error) { try { this.db.exec('ROLLBACK'); } catch { /* keep the original failure */ } throw error; }
-    } finally { this.db.exec('PRAGMA foreign_keys=ON'); }
+  async removeTracker(id: string): Promise<void> { await this.db.models.tracker.deleteMany({ where: { workspace_id: this.workspaceId, id } }); }
+  async taskConcurrency(): Promise<{ maxConcurrentTasks: number; version: number } | undefined> {
+    return await this.db.prepare('SELECT max_concurrent_tasks AS "maxConcurrentTasks", version FROM task_concurrency WHERE id=1').get() as { maxConcurrentTasks: number; version: number } | undefined;
   }
-  taskConcurrency(): { maxConcurrentTasks: number; version: number } | undefined {
-    return this.db.prepare('SELECT max_concurrent_tasks AS maxConcurrentTasks, version FROM task_concurrency WHERE id=1').get() as { maxConcurrentTasks: number; version: number } | undefined;
+  async setTaskConcurrency(maxConcurrentTasks: number, expectedVersion: number): Promise<void> {
+    await this.transaction(async () => {
+      if (((await this.taskConcurrency())?.version ?? 0) !== expectedVersion) throw new AppError('stale_settings', 'Task concurrency changed; reload before saving again', 409);
+      await this.db.prepare(`INSERT INTO task_concurrency VALUES (1, $1, $2) ON CONFLICT(workspace_id,id) DO UPDATE SET max_concurrent_tasks=excluded.max_concurrent_tasks, version=excluded.version`).run(maxConcurrentTasks, expectedVersion + 1);
+    });
   }
-  setTaskConcurrency(maxConcurrentTasks: number, expectedVersion: number): void {
-    this.transaction(() => {
-      if ((this.taskConcurrency()?.version ?? 0) !== expectedVersion) throw new AppError('stale_settings', 'Task concurrency changed; reload before saving again', 409);
-      this.db.prepare(`INSERT INTO task_concurrency VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET max_concurrent_tasks=excluded.max_concurrent_tasks, version=excluded.version`).run(maxConcurrentTasks, expectedVersion + 1);
+  async workItemConcurrency(): Promise<{ concurrency: number; version: number } | undefined> {
+    return await this.db.prepare('SELECT concurrency, version FROM work_item_concurrency WHERE id=1').get() as { concurrency: number; version: number } | undefined;
+  }
+  async setWorkItemConcurrency(concurrency: number, expectedVersion: number): Promise<void> {
+    await this.transaction(async () => {
+      if (((await this.workItemConcurrency())?.version ?? 0) !== expectedVersion) throw new AppError('stale_settings', 'Subtask concurrency changed; reload before saving again', 409);
+      await this.db.prepare('INSERT INTO work_item_concurrency VALUES (1, $1, $2) ON CONFLICT(workspace_id,id) DO UPDATE SET concurrency=excluded.concurrency, version=excluded.version').run(concurrency, expectedVersion + 1);
     });
   }
   /** The model list last loaded from an engine; absent until someone loads it. */
-  modelCatalog(engine: string): ModelCatalog | undefined {
-    const row = this.db.prepare('SELECT data FROM model_catalogs WHERE engine=?').get(engine) as { data: string } | undefined;
+  async modelCatalog(engine: string): Promise<ModelCatalog | undefined> {
+    const row = await this.db.models.modelCatalog.findUnique({ where: { workspace_id_engine: { workspace_id: this.workspaceId, engine } } });
     return row ? JSON.parse(row.data) as ModelCatalog : undefined;
   }
-  saveModelCatalog(catalog: ModelCatalog): void {
-    this.db.prepare('INSERT INTO model_catalogs VALUES (?, ?) ON CONFLICT(engine) DO UPDATE SET data=excluded.data').run(catalog.engine, JSON.stringify(catalog));
+  async saveModelCatalog(catalog: ModelCatalog): Promise<void> {
+    const key = { workspace_id: this.workspaceId, engine: catalog.engine };
+    const data = JSON.stringify(catalog);
+    await this.db.models.modelCatalog.upsert({ where: { workspace_id_engine: key }, create: { ...key, data }, update: { data } });
   }
-  close(): void { this.db.close(); }
-  private transaction<T>(fn: () => T): T {
-    if (this.transactionDepth) return fn();
-    this.db.exec('BEGIN IMMEDIATE'); this.transactionDepth++;
-    try { const value = fn(); this.db.exec('COMMIT'); return value; }
-    catch (error) {
-      // SQLITE_FULL can roll back automatically. A second rollback must not mask that cause.
-      try { this.db.exec('ROLLBACK'); } catch { /* preserve the original transaction failure */ }
-      throw error;
-    } finally { this.transactionDepth--; }
-  }
-  /** Called within the same transaction as submission/approval/cancellation. */
-  private requestDispatchRow(task: Task, force = false): void {
-    const previous = this.dispatch(task.id);
-    if (previous && !force && previous.requestedVersion >= task.version) return;
-    const now = new Date().toISOString();
-    this.db.prepare(`INSERT INTO dispatch_queue(task_id, requested, requested_version, queued_at)
-      VALUES (?, 1, ?, ?) ON CONFLICT(task_id) DO UPDATE SET
-      requested=requested+1, requested_version=excluded.requested_version,
-      queued_at=CASE WHEN requested=handled AND owner IS NULL THEN excluded.queued_at ELSE queued_at END`)
-      .run(task.id, task.version, now);
-  }
-  requestDispatch(id: string, force = false): void {
-    this.transaction(() => {
-      const task = this.task(id);
-      if (!['awaiting_mode', 'planning', 'awaiting_plan_approval', 'ready', 'cancelled'].includes(task.state)) return;
-      this.requestDispatchRow(task, force);
+  close() { return this.db.close(); }
+  private transaction<T>(fn: () => Promise<T>): Promise<T> { return this.db.write(fn); }
+  /** An execution update that must read its current version and write under the same lock. */
+  withCurrentTask<T>(id: string, update: (task: Task) => Promise<T>): Promise<T> {
+    return this.transaction(async () => {
+      await this.assertWriter(id);
+      return update(await this.task(id));
     });
   }
-  dispatch(id: string): DispatchRecord | undefined {
-    return this.db.prepare(`SELECT task_id AS taskId, requested, handled, requested_version AS requestedVersion,
-      generation, owner, claimed, queued_at AS queuedAt, heartbeat_at AS heartbeatAt, blocker
-      FROM dispatch_queue WHERE task_id=?`).get(id) as DispatchRecord | undefined;
+  /** Called within the same transaction as submission/approval/cancellation. */
+  private async requestDispatchRow(task: Task, force = false): Promise<void> {
+    const previous = await this.dispatch(task.id);
+    if (previous && !force && previous.requestedVersion >= task.version) return;
+    const now = new Date().toISOString();
+    await this.db.prepare(`INSERT INTO dispatch_queue(task_id, requested, requested_version, queued_at)
+      VALUES ($1, 1, $2, $3) ON CONFLICT(workspace_id,task_id) DO UPDATE SET
+      requested=dispatch_queue.requested+1, requested_version=excluded.requested_version,
+      queued_at=CASE WHEN dispatch_queue.requested=dispatch_queue.handled AND dispatch_queue.owner IS NULL THEN excluded.queued_at ELSE dispatch_queue.queued_at END`)
+      .run(task.id, task.version, now);
   }
-  pendingDispatches(): string[] {
-    return this.db.prepare(`SELECT q.task_id FROM dispatch_queue q JOIN tasks t ON t.id=q.task_id
+  async requestDispatch(id: string, force = false): Promise<void> {
+    await this.transaction(async () => {
+      const task = await this.task(id);
+      if (!['awaiting_mode', 'planning', 'awaiting_plan_approval', 'ready', 'cancelled'].includes(task.state)) return;
+      await this.requestDispatchRow(task, force);
+    });
+  }
+  async dispatch(id: string): Promise<DispatchRecord | undefined> {
+    return await this.db.prepare(`SELECT task_id AS "taskId", requested, handled, requested_version AS "requestedVersion",
+      generation, owner, claimed, queued_at AS "queuedAt", heartbeat_at AS "heartbeatAt", blocker
+      FROM dispatch_queue WHERE task_id=$1`).get(id) as DispatchRecord | undefined;
+  }
+  async pendingDispatches(): Promise<string[]> {
+    return (await this.db.prepare(`SELECT q.task_id FROM dispatch_queue q JOIN tasks t ON t.id=q.task_id
       WHERE q.requested>q.handled AND q.owner IS NULL AND q.blocker IS NULL
       AND NOT EXISTS (SELECT 1 FROM shared_task_handoffs h WHERE h.task_id=q.task_id AND h.phase='held')
       AND t.state IN ('awaiting_mode','planning','awaiting_plan_approval','ready','cancelled')
-      ORDER BY q.queued_at, q.rowid`).all().map(row => String(row.task_id));
+      ORDER BY q.queued_at, q.insertion_order`).all()).map(row => String(row.task_id));
   }
-  claimDispatch(owner: string, excluded: ReadonlySet<string> = new Set()): DispatchClaim | undefined {
-    return this.transaction(() => {
-      const taskId = this.pendingDispatches().find(id => !excluded.has(id)); if (!taskId) return;
-      const row = this.db.prepare(`UPDATE dispatch_queue SET owner=?, generation=generation+1,
-        claimed=requested, heartbeat_at=? WHERE task_id=? AND owner IS NULL AND blocker IS NULL
-        RETURNING generation, claimed`).get(owner, new Date().toISOString(), taskId)!;
-      const workspaceOwnerId = this.workspaceOwnerId();
+  async claimDispatch(owner: string, excluded: ReadonlySet<string> = new Set()): Promise<DispatchClaim | undefined> {
+    return this.transaction(async () => {
+      const taskId = (await this.pendingDispatches()).find(id => !excluded.has(id)); if (!taskId) return;
+      const row = (await this.db.prepare(`UPDATE dispatch_queue SET owner=$1, generation=generation+1,
+        claimed=requested, heartbeat_at=$2 WHERE task_id=$3 AND owner IS NULL AND blocker IS NULL
+        RETURNING generation, claimed`).get(owner, new Date().toISOString(), taskId))!;
+      const workspaceOwnerId = await this.workspaceOwnerId();
       return { taskId, owner, ...(workspaceOwnerId ? { workspaceOwnerId } : {}), generation: Number(row.generation), sequence: Number(row.claimed) };
     });
   }
-  private assertClaimWorkspace(claim: DispatchClaim): void {
-    if (claim.workspaceOwnerId !== this.workspaceOwnerId()) throw new AppError('dispatch_ownership', 'Dispatch belongs to another workspace', 409);
+  private async assertClaimWorkspace(claim: DispatchClaim): Promise<void> {
+    if (claim.workspaceOwnerId !== await this.workspaceOwnerId()) throw new AppError('dispatch_ownership', 'Dispatch belongs to another workspace', 409);
   }
-  finishDispatch(claim: DispatchClaim): void {
-    this.assertClaimWorkspace(claim);
-    const changed = this.db.prepare(`UPDATE dispatch_queue SET handled=CASE WHEN (SELECT state FROM tasks WHERE id=task_id) IN ('completed','failed','cancelled') THEN requested ELSE claimed END, owner=NULL, heartbeat_at=NULL
-      WHERE task_id=? AND owner=? AND generation=?`).run(claim.taskId, claim.owner, claim.generation).changes;
+  async finishDispatch(claim: DispatchClaim): Promise<void> {
+    await this.assertClaimWorkspace(claim);
+    const changed = (await this.db.prepare(`UPDATE dispatch_queue SET handled=CASE WHEN (SELECT state FROM tasks WHERE id=task_id) IN ('completed','failed','cancelled') THEN requested ELSE claimed END, owner=NULL, heartbeat_at=NULL
+      WHERE task_id=$1 AND owner=$2 AND generation=$3`).run(claim.taskId, claim.owner, claim.generation)).changes;
     if (!changed) throw new AppError('dispatch_ownership', 'Dispatch ownership changed', 409);
   }
 
-  withDispatch<T>(claim: DispatchClaim, work: () => T): T {
-    this.assertClaim(claim); return this.execution.run(claim, work);
+  async withDispatch<T>(claim: DispatchClaim, work: () => T): Promise<T> {
+    await this.assertClaim(claim); return this.execution.run(claim, work);
   }
-  private assertClaim(claim: DispatchClaim): void {
-    this.assertClaimWorkspace(claim);
-    const row = this.dispatch(claim.taskId);
+  private async assertClaim(claim: DispatchClaim): Promise<void> {
+    await this.assertClaimWorkspace(claim);
+    const row = await this.dispatch(claim.taskId);
     if (!row || row.owner !== claim.owner || row.generation !== claim.generation || row.claimed !== claim.sequence || row.blocker) {
       throw new AppError('dispatch_ownership', 'Execution no longer owns this task', 409);
     }
   }
-  assertExecution(id: string): void {
+  async assertExecution(id: string): Promise<void> {
     const claim = this.execution.getStore();
     if (!claim || claim.taskId !== id) throw new AppError('dispatch_ownership', 'Execution task identity does not match its claim', 409);
-    this.assertClaim(claim);
+    await this.assertClaim(claim);
   }
-  private assertWriter(id: string): void {
+  private async assertWriter(id: string): Promise<void> {
     // API/user mutations have no execution context and retain their version/auth checks.
-    if (this.execution.getStore()) this.assertExecution(id);
+    if (this.execution.getStore()) await this.assertExecution(id);
   }
-  heartbeatDispatch(claim: DispatchClaim): void {
-    this.assertClaimWorkspace(claim);
-    const changed = this.db.prepare('UPDATE dispatch_queue SET heartbeat_at=? WHERE task_id=? AND owner=? AND generation=? AND blocker IS NULL')
-      .run(new Date().toISOString(), claim.taskId, claim.owner, claim.generation).changes;
+  async heartbeatDispatch(claim: DispatchClaim): Promise<void> {
+    await this.assertClaimWorkspace(claim);
+    const changed = (await this.db.prepare('UPDATE dispatch_queue SET heartbeat_at=$1 WHERE task_id=$2 AND owner=$3 AND generation=$4 AND blocker IS NULL')
+      .run(new Date().toISOString(), claim.taskId, claim.owner, claim.generation)).changes;
     if (!changed) throw new AppError('dispatch_ownership', 'Execution no longer owns this task', 409);
   }
   /** Only startup reconciliation under the service lock may retire an orphaned claim. No TTL takeover. */
-  recoverDispatch(id: string, blocker?: string): void {
-    this.transaction(() => {
-      const task = this.task(id);
-      if (!this.dispatch(id)) this.requestDispatchRow(task);
-      this.db.prepare(`UPDATE dispatch_queue SET owner=NULL, heartbeat_at=NULL, generation=generation+1,
-        handled=CASE WHEN ? IS NOT NULL OR (SELECT state FROM tasks WHERE id=task_id) IN ('completed','failed','cancelled') THEN requested ELSE handled END,
-        blocker=? WHERE task_id=?`).run(blocker ?? null, blocker ?? null, id);
+  async recoverDispatch(id: string, blocker?: string): Promise<void> {
+    await this.transaction(async () => {
+      const task = await this.task(id);
+      if (!await this.dispatch(id)) await this.requestDispatchRow(task);
+      await this.db.prepare(`UPDATE dispatch_queue SET owner=NULL, heartbeat_at=NULL, generation=generation+1,
+        handled=CASE WHEN $1::text IS NOT NULL OR (SELECT state FROM tasks WHERE id=task_id) IN ('completed','failed','cancelled') THEN requested ELSE handled END,
+        blocker=$2 WHERE task_id=$3`).run(blocker ?? null, blocker ?? null, id);
     });
   }
-  recoveryBlockers(): { taskId: string; message: string }[] {
-    return this.db.prepare('SELECT task_id AS taskId, blocker AS message FROM dispatch_queue WHERE blocker IS NOT NULL ORDER BY queued_at').all() as { taskId: string; message: string }[];
+  async recoveryBlockers(): Promise<{ taskId: string; message: string }[]> {
+    return await this.db.prepare('SELECT task_id AS "taskId", blocker AS message FROM dispatch_queue WHERE blocker IS NOT NULL ORDER BY queued_at').all() as { taskId: string; message: string }[];
   }
 
   /** Redact display prose separately; preserve code-bearing requests, commands and plan descriptions. */
@@ -364,40 +250,42 @@ export class Store {
   private taskJson(value: Task): string { return JSON.stringify(redactValues(this.safeTask(value), this.secrets)); }
   /** Events and evidence are logs: apply the heuristic credential redaction as well. */
   private json(value: unknown): string { return JSON.stringify(redact(value, this.secrets)); }
-  registerProject(project: Project, starterTeamId?: string): Project {
-    // An archived project keeps its ID for its history but no longer holds its folder.
-    const existing = this.projects().find(p => p.id === project.id || (!p.archivedAt && p.path === project.path));
-    if (existing) {
-      if (existing.archivedAt) throw new AppError('project_archived', `The ID "${existing.id}" belongs to the archived project "${existing.name}". Restore it or choose another ID.`, 409);
-      if (existing.id === project.id && existing.path === project.path && existing.defaultMode === project.defaultMode) return existing;
-      throw new AppError('project_conflict', existing.id === project.id ? 'Project ID already registered with different settings' : `This folder is already registered as project "${existing.name}". Use it, or archive it first.`, 409);
-    }
-    this.assertNameFree(project.name ?? project.id, project.id, 'Choose another name.');
-    if (starterTeamId && !project.defaultTeamId) project = { ...project, defaultTeamId: starterTeamId };
-    this.db.prepare('INSERT INTO projects VALUES (?, ?, ?)').run(project.id, project.path, JSON.stringify(project));
-    return project;
+  async registerProject(project: Project, starterTeamId?: string): Promise<Project> {
+    return this.transaction(async () => {
+      // An archived project keeps its ID for its history but no longer holds its folder.
+      const existing = (await this.projects()).find(p => p.id === project.id || (!p.archivedAt && p.path === project.path));
+      if (existing) {
+        if (existing.archivedAt) throw new AppError('project_archived', `The ID "${existing.id}" belongs to the archived project "${existing.name}". Restore it or choose another ID.`, 409);
+        if (existing.id === project.id && existing.path === project.path && existing.defaultMode === project.defaultMode) return existing;
+        throw new AppError('project_conflict', existing.id === project.id ? 'Project ID already registered with different settings' : `This folder is already registered as project "${existing.name}". Use it, or archive it first.`, 409);
+      }
+      await this.assertNameFree(project.name ?? project.id, project.id, 'Choose another name.');
+      if (starterTeamId && !project.defaultTeamId) project = { ...project, defaultTeamId: starterTeamId };
+      await this.db.models.project.create({ data: { workspace_id: this.workspaceId, id: project.id, path: project.path, data: JSON.stringify(project) } });
+      return project;
+    });
   }
   /** Rows written before projects had names read with their ID as the name. */
   private readProject(data: string): Project { const project = JSON.parse(data) as Project; return { version: 0, ...project, name: project.name ?? project.id }; }
-  projects(): Project[] { return this.db.prepare('SELECT data FROM projects ORDER BY id').all().map(r => this.readProject(r.data as string)); }
+  async projects(): Promise<Project[]> { return (await this.db.models.project.findMany({ orderBy: { id: 'asc' }, select: { data: true } })).map(r => this.readProject(r.data as string)); }
   /** A name is unique among active projects, compared without regard to case, so it can stand in for the ID in commands. */
-  private assertNameFree(name: string, exceptId: string, hint: string): void {
-    const holder = this.projects().find(p => p.id !== exceptId && !p.archivedAt && p.name!.toLowerCase() === name.toLowerCase());
+  private async assertNameFree(name: string, exceptId: string, hint: string): Promise<void> {
+    const holder = (await this.projects()).find(p => p.id !== exceptId && !p.archivedAt && p.name!.toLowerCase() === name.toLowerCase());
     if (holder) throw new AppError('project_conflict', `An active project is already named "${holder.name}". ${hint}`, 409);
   }
-  setProjectName(projectId: string, name: string, expectedVersion: number): Project {
-    return this.transaction(() => {
-      const project = this.project(projectId);
+  async setProjectName(projectId: string, name: string, expectedVersion: number): Promise<Project> {
+    return this.transaction(async () => {
+      const project = await this.project(projectId);
       if ((project.version ?? 0) !== expectedVersion) throw new AppError('stale_project', 'Project settings changed; reload before retrying', 409);
       if (project.name === name) return project;
-      if (!project.archivedAt) this.assertNameFree(name, projectId, 'Choose another name.');
+      if (!project.archivedAt) await this.assertNameFree(name, projectId, 'Choose another name.');
       const updated: Project = { ...project, name, version: (project.version ?? 0) + 1 };
-      this.db.prepare('UPDATE projects SET data=? WHERE id=?').run(JSON.stringify(updated), projectId);
+      await this.db.models.project.update({ where: this.byId(projectId), data: { data: JSON.stringify(updated) } });
       return updated;
     });
   }
-  project(id: string): Project {
-    const row = this.db.prepare('SELECT data FROM projects WHERE id=?').get(id);
+  async project(id: string): Promise<Project> {
+    const row = await this.db.models.project.findUnique({ where: this.byId(id) });
     if (!row) throw new AppError('not_found', 'Unknown project', 404);
     return this.readProject(row.data as string);
   }
@@ -405,12 +293,12 @@ export class Store {
    * Replaces a project's integration settings; secrets never pass through here. The project version
    * is left alone so a connection check cannot make a default-team edit stale.
    */
-  setProjectIntegrations(projectId: string, change: (current: ProjectIntegrations) => ProjectIntegrations): Project {
-    return this.transaction(() => {
-      const { integrations, ...rest } = this.project(projectId);
+  async setProjectIntegrations(projectId: string, change: (current: ProjectIntegrations) => ProjectIntegrations): Promise<Project> {
+    return this.transaction(async () => {
+      const { integrations, ...rest } = await this.project(projectId);
       const next = change(integrations ?? {});
       const updated: Project = { ...rest, ...(Object.keys(next).length ? { integrations: next } : {}) };
-      this.db.prepare('UPDATE projects SET data=? WHERE id=?').run(JSON.stringify(updated), projectId);
+      await this.db.models.project.update({ where: this.byId(projectId), data: { data: JSON.stringify(updated) } });
       return updated;
     });
   }
@@ -419,132 +307,137 @@ export class Store {
    * finished and frees the folder for another registration; the row, its tasks and its ID stay.
    * Restoring takes the folder back, so it is refused while an active project is registered on it.
    */
-  setProjectArchived(projectId: string, archived: boolean, expectedVersion: number): Project {
-    return this.transaction(() => {
-      const project = this.project(projectId);
+  async setProjectArchived(projectId: string, archived: boolean, expectedVersion: number): Promise<Project> {
+    return this.transaction(async () => {
+      const project = await this.project(projectId);
       if ((project.version ?? 0) !== expectedVersion) throw new AppError('stale_project', 'Project settings changed; reload before retrying', 409);
       if (Boolean(project.archivedAt) === archived) return project;
       const { archivedAt: _, ...rest } = project;
       if (archived) {
-        const open = Number(this.db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE project_id=? AND state NOT IN ('completed','failed','cancelled')").get(projectId)!.n);
+        const open = Number((await this.db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE project_id=$1 AND state NOT IN ('completed','failed','cancelled')").get(projectId))!.n);
         if (open) throw new AppError('project_active', `Finish or cancel the ${open} open task${open === 1 ? '' : 's'} of this project before archiving it.`, 409);
       } else {
-        const holder = this.projects().find(p => p.id !== projectId && !p.archivedAt && p.path === project.path);
+        const holder = (await this.projects()).find(p => p.id !== projectId && !p.archivedAt && p.path === project.path);
         if (holder) throw new AppError('project_conflict', `Project "${holder.name}" uses this folder. Archive it first.`, 409);
-        this.assertNameFree(project.name ?? project.id, projectId, 'Rename one of them first.');
+        await this.assertNameFree(project.name ?? project.id, projectId, 'Rename one of them first.');
       }
       const updated: Project = { ...rest, ...(archived ? { archivedAt: new Date().toISOString() } : {}), version: (project.version ?? 0) + 1 };
       // The path column is unique; an archived row gives its value up so the folder can be registered again.
-      this.db.prepare('UPDATE projects SET path=?, data=? WHERE id=?').run(archived ? `archived:${projectId}` : project.path, JSON.stringify(updated), projectId);
+      await this.db.models.project.update({ where: this.byId(projectId), data: { path: archived ? `archived:${projectId}` : project.path, data: JSON.stringify(updated) } });
       return updated;
     });
   }
   /** Records where each project's folder lives on the user's computer, by the internal path it is attached at. Returns how many records changed. */
-  setProjectHostPaths(folders: Readonly<Record<string, string>>): number {
-    return this.transaction(() => {
+  async setProjectHostPaths(folders: Readonly<Record<string, string>>): Promise<number> {
+    return this.transaction(async () => {
       let changed = 0;
-      for (const project of this.projects()) {
+      for (const project of await this.projects()) {
         const hostPath = folders[project.path];
         if (!hostPath || hostPath === project.hostPath) continue;
-        this.db.prepare('UPDATE projects SET data=? WHERE id=?').run(JSON.stringify({ ...project, hostPath }), project.id); changed++;
+        await this.db.models.project.update({ where: this.byId(project.id), data: { data: JSON.stringify({ ...project, hostPath }) } }); changed++;
       }
       return changed;
     });
   }
   /** Changes a project's default team under an optimistic version check; `null` clears it. */
-  setProjectDefaultTeam(projectId: string, teamId: string | null, expectedVersion: number): Project {
-    return this.transaction(() => {
-      const project = this.project(projectId);
+  async setProjectDefaultTeam(projectId: string, teamId: string | null, expectedVersion: number): Promise<Project> {
+    return this.transaction(async () => {
+      const project = await this.project(projectId);
       if ((project.version ?? 0) !== expectedVersion) throw new AppError('stale_project', 'Project settings changed; reload before retrying', 409);
-      if (teamId !== null) { const team = this.team(teamId); if (team.archived) throw new AppError('team_archived', `Team "${team.name}" is archived and cannot be a default`, 409); }
+      if (teamId !== null) { const team = await this.team(teamId); if (team.archived) throw new AppError('team_archived', `Team "${team.name}" is archived and cannot be a default`, 409); }
       const { defaultTeamId: _, ...rest } = project;
       const updated: Project = { ...rest, ...(teamId ? { defaultTeamId: teamId } : {}), version: (project.version ?? 0) + 1 };
-      this.db.prepare('UPDATE projects SET data=? WHERE id=?').run(JSON.stringify(updated), projectId);
+      await this.db.models.project.update({ where: this.byId(projectId), data: { data: JSON.stringify(updated) } });
       return updated;
     });
   }
 
   // Teams: the row carries identity and the current revision number; every revision's content is immutable.
-  private teamRow(id: string): { id: string; name: string; archived: number; revision: number; created_at: string; updated_at: string } {
-    const row = this.db.prepare('SELECT id, name, archived, revision, created_at, updated_at FROM teams WHERE id=?').get(id);
+  private async teamRow(id: string): Promise<{ id: string; name: string; archived: number; revision: number; created_at: string; updated_at: string }> {
+    const row = await this.db.models.team.findUnique({ where: this.byId(id) });
     if (!row) throw new AppError('not_found', 'Unknown team', 404);
     return row as { id: string; name: string; archived: number; revision: number; created_at: string; updated_at: string };
   }
-  teamRevision(id: string, revision: number): TeamRecord {
-    const row = this.teamRow(id);
-    const rev = this.db.prepare('SELECT data FROM team_revisions WHERE team_id=? AND revision=?').get(id, revision);
+  async teamRevision(id: string, revision: number): Promise<TeamRecord> {
+    const row = await this.teamRow(id);
+    const rev = await this.db.models.teamRevision.findUnique({ where: { workspace_id_team_id_revision: { workspace_id: this.workspaceId, team_id: id, revision } }, select: { data: true } });
     if (!rev) throw new AppError('not_found', `Unknown revision ${revision} of team ${id}`, 404);
     const content = JSON.parse(String(rev.data)) as { name: string; description: string; members: TeamRecord['members'] };
     return { id, revision, archived: Boolean(row.archived), createdAt: row.created_at, updatedAt: row.updated_at, ...content };
   }
-  team(id: string): TeamRecord { return this.teamRevision(id, this.teamRow(id).revision); }
-  teams(filter: 'active' | 'archived' | 'all' = 'active'): TeamRecord[] {
-    const rows = this.db.prepare(`SELECT id FROM teams ${filter === 'all' ? '' : `WHERE archived=${filter === 'archived' ? 1 : 0}`} ORDER BY name, id`).all() as { id: string }[];
-    return rows.map(r => this.team(r.id));
+  async team(id: string): Promise<TeamRecord> { return this.teamRevision(id, (await this.teamRow(id)).revision); }
+  async teams(filter: 'active' | 'archived' | 'all' = 'active'): Promise<TeamRecord[]> {
+    const rows = await this.db.models.team.findMany({
+      where: filter === 'all' ? {} : { archived: Number(filter === 'archived') },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }], select: { id: true },
+    });
+    return Promise.all(rows.map(row => this.team(row.id)));
   }
-  teamRevisions(id: string): { revision: number; createdAt: string; reason: string }[] {
-    this.teamRow(id);
-    return (this.db.prepare('SELECT revision, created_at, reason FROM team_revisions WHERE team_id=? ORDER BY revision').all(id) as { revision: number; created_at: string; reason: string }[]).map(r => ({ revision: Number(r.revision), createdAt: r.created_at, reason: r.reason }));
+  async teamRevisions(id: string): Promise<{ revision: number; createdAt: string; reason: string }[]> {
+    await this.teamRow(id);
+    const revisions = await this.db.models.teamRevision.findMany({ where: { team_id: id }, orderBy: { revision: 'asc' },
+      select: { revision: true, created_at: true, reason: true } });
+    return revisions.map(row => ({ revision: row.revision, createdAt: row.created_at, reason: row.reason }));
   }
-  createTeam(input: unknown, reason = 'Team created'): TeamRecord {
+  async createTeam(input: unknown, reason = 'Team created'): Promise<TeamRecord> {
     const team = TeamInput.parse(input); const id = randomUUID(); const now = new Date().toISOString();
-    return this.transaction(() => {
-      this.db.prepare('INSERT INTO teams VALUES (?, ?, 0, 1, ?, ?)').run(id, team.name, now, now);
-      this.db.prepare('INSERT INTO team_revisions VALUES (?, 1, ?, ?, ?)').run(id, JSON.stringify(team), now, reason);
+    return this.transaction(async () => {
+      await this.db.models.team.create({ data: { workspace_id: this.workspaceId, id, name: team.name, revision: 1, created_at: now, updated_at: now } });
+      await this.db.models.teamRevision.create({ data: { workspace_id: this.workspaceId, team_id: id, revision: 1, data: JSON.stringify(team), created_at: now, reason } });
       return this.team(id);
     });
   }
   /** Bootstrap once by identity, preserving all edits and explicit project choices on every restart. */
-  ensureStarterTeam(input: unknown, usable: (team: TeamRecord) => boolean): TeamRecord {
+  async ensureStarterTeam(input: unknown, usable: (team: TeamRecord) => boolean): Promise<TeamRecord> {
     const template = TeamInput.parse(input);
-    return this.transaction(() => {
-      if (!this.db.prepare('SELECT id FROM teams WHERE id=?').get(STARTER_TEAM_ID)) {
+    return this.transaction(async () => {
+      if (!await this.db.models.team.findUnique({ where: this.byId(STARTER_TEAM_ID), select: { id: true } })) {
         const now = new Date().toISOString();
-        this.db.prepare('INSERT INTO teams VALUES (?, ?, 0, 1, ?, ?)').run(STARTER_TEAM_ID, template.name, now, now);
-        this.db.prepare('INSERT INTO team_revisions VALUES (?, 1, ?, ?, ?)').run(STARTER_TEAM_ID, JSON.stringify(template), now, 'Starter team installed');
+        await this.db.models.team.create({ data: { workspace_id: this.workspaceId, id: STARTER_TEAM_ID, name: template.name, revision: 1, created_at: now, updated_at: now } });
+        await this.db.models.teamRevision.create({ data: { workspace_id: this.workspaceId, team_id: STARTER_TEAM_ID, revision: 1, data: JSON.stringify(template), created_at: now, reason: 'Starter team installed' } });
       }
-      const team = this.team(STARTER_TEAM_ID);
-      if (usable(team)) for (const project of this.projects()) {
+      const team = await this.team(STARTER_TEAM_ID);
+      if (usable(team)) for (const project of await this.projects()) {
         // Version > 0 includes an intentional removal of a default. Never undo that choice.
         if (!project.defaultTeamId && project.version === 0) {
-          this.db.prepare('UPDATE projects SET data=? WHERE id=?').run(JSON.stringify({ ...project, defaultTeamId: team.id, version: 1 }), project.id);
+          await this.db.models.project.update({ where: this.byId(project.id), data: { data: JSON.stringify({ ...project, defaultTeamId: team.id, version: 1 }) } });
         }
       }
       return team;
     });
   }
   /** Every change is a new immutable revision; a stale `expectedRevision` is a conflict, never an overwrite. */
-  updateTeam(id: string, expectedRevision: number, input: unknown, reason = 'Team edited'): TeamRecord {
+  async updateTeam(id: string, expectedRevision: number, input: unknown, reason = 'Team edited'): Promise<TeamRecord> {
     const team = TeamInput.parse(input);
-    return this.transaction(() => {
-      const row = this.teamRow(id);
+    return this.transaction(async () => {
+      const row = await this.teamRow(id);
       if (row.revision !== expectedRevision) throw new AppError('stale_team', `Team changed to revision ${row.revision}; reload before retrying`, 409);
       if (row.archived) throw new AppError('team_archived', 'Archived teams cannot be edited; restore the team first', 409);
       const now = new Date().toISOString(); const revision = row.revision + 1;
-      this.db.prepare('INSERT INTO team_revisions VALUES (?, ?, ?, ?, ?)').run(id, revision, JSON.stringify(team), now, reason);
-      this.db.prepare('UPDATE teams SET name=?, revision=?, updated_at=? WHERE id=?').run(team.name, revision, now, id);
+      await this.db.models.teamRevision.create({ data: { workspace_id: this.workspaceId, team_id: id, revision, data: JSON.stringify(team), created_at: now, reason } });
+      await this.db.models.team.update({ where: this.byId(id), data: { name: team.name, revision, updated_at: now } });
       return this.team(id);
     });
   }
-  setTeamArchived(id: string, expectedRevision: number, archived: boolean): TeamRecord {
-    return this.transaction(() => {
-      const row = this.teamRow(id);
+  async setTeamArchived(id: string, expectedRevision: number, archived: boolean): Promise<TeamRecord> {
+    return this.transaction(async () => {
+      const row = await this.teamRow(id);
       if (row.revision !== expectedRevision) throw new AppError('stale_team', `Team changed to revision ${row.revision}; reload before retrying`, 409);
       if (Boolean(row.archived) === archived) return this.team(id);
-      const now = new Date().toISOString(); const revision = row.revision + 1; const current = this.teamRevision(id, row.revision);
-      this.db.prepare('INSERT INTO team_revisions VALUES (?, ?, ?, ?, ?)').run(id, revision, JSON.stringify({ name: current.name, description: current.description, members: current.members }), now, archived ? 'Team archived' : 'Team restored');
-      this.db.prepare('UPDATE teams SET archived=?, revision=?, updated_at=? WHERE id=?').run(archived ? 1 : 0, revision, now, id);
+      const now = new Date().toISOString(); const revision = row.revision + 1; const current = await this.teamRevision(id, row.revision);
+      await this.db.models.teamRevision.create({ data: { workspace_id: this.workspaceId, team_id: id, revision, data: JSON.stringify({ name: current.name, description: current.description, members: current.members }), created_at: now, reason: archived ? 'Team archived' : 'Team restored' } });
+      await this.db.models.team.update({ where: this.byId(id), data: { archived: Number(archived), revision, updated_at: now } });
       return this.team(id);
     });
   }
   /** An independent copy: later edits to either team never affect the other. */
-  duplicateTeam(id: string, name: string): TeamRecord {
-    const source = this.team(id);
+  async duplicateTeam(id: string, name: string): Promise<TeamRecord> {
+    const source = await this.team(id);
     return this.createTeam({ name, description: source.description, members: structuredClone(source.members) }, `Duplicated from team ${id} revision ${source.revision}`);
   }
-  tasks(): Task[] { return this.db.prepare('SELECT data FROM tasks ORDER BY rowid DESC').all().map(r => this.safeTask(JSON.parse(r.data as string) as Task)); }
-  private summarize(t: Task, sequence: number): TaskSummary {
-    t = this.safeTask(t); const pr = t.state === 'completed' ? this.pullRequest(t.id) : undefined;
+  async tasks(): Promise<Task[]> { return (await this.db.models.task.findMany({ orderBy: { insertion_order: 'desc' }, select: { data: true } })).map(r => this.safeTask(JSON.parse(r.data as string) as Task)); }
+  private async summarize(t: Task, sequence: number): Promise<TaskSummary> {
+    t = this.safeTask(t); const pr = t.state === 'completed' ? await this.pullRequest(t.id) : undefined;
     return {
       id: t.id, projectId: t.projectId, state: t.state, version: t.version, createdAt: t.createdAt, updatedAt: t.updatedAt, sequence,
       request: t.request.length > 200 ? `${t.request.slice(0, 200)}…` : t.request,
@@ -557,47 +450,55 @@ export class Store {
     };
   }
   /** The list view: no agent snapshots, plans or instructions, which grow to hundreds of kilobytes per task. Newest first, cursor by row id. */
-  summaries(options: { limit?: number; before?: number; projectId?: string; state?: TaskState; states?: TaskState[]; /** Only tasks whose pull request is open. */ openPullRequest?: boolean } = {}): { tasks: TaskSummary[]; nextBefore?: number } {
+  async summaries(options: { limit?: number; before?: number; projectId?: string; state?: TaskState; states?: TaskState[]; /** Only tasks whose pull request is open. */ openPullRequest?: boolean } = {}): Promise<{ tasks: TaskSummary[]; nextBefore?: number }> {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
     const states = options.states ?? (options.state ? [options.state] : undefined);
-    const filter = states ? JSON.stringify(states) : null;
-    const rows = this.db.prepare('SELECT rowid AS sequence, data FROM tasks WHERE (? IS NULL OR rowid < ?) AND (? IS NULL OR project_id = ?) AND (? IS NULL OR state IN (SELECT value FROM json_each(?))) AND (? = 0 OR id IN (SELECT task_id FROM pull_requests WHERE state=\'open\')) ORDER BY rowid DESC LIMIT ?')
-      .all(options.before ?? null, options.before ?? null, options.projectId ?? null, options.projectId ?? null, filter, filter, options.openPullRequest ? 1 : 0, limit + 1) as { sequence: number; data: string }[];
-    const page = rows.slice(0, limit).map(r => this.summarize(JSON.parse(r.data) as Task, Number(r.sequence)));
+    const rows = await this.db.models.task.findMany({
+      where: {
+        ...(options.before !== undefined ? { insertion_order: { lt: options.before } } : {}),
+        ...(options.projectId !== undefined ? { project_id: options.projectId } : {}),
+        ...(states ? { state: { in: states } } : {}),
+        ...(options.openPullRequest ? { pull_requests: { is: { state: 'open' } } } : {}),
+      },
+      orderBy: { insertion_order: 'desc' }, take: limit + 1, select: { insertion_order: true, data: true },
+    });
+    const page = await Promise.all(rows.slice(0, limit).map(row => this.summarize(JSON.parse(row.data) as Task, Number(row.insertion_order))));
     return rows.length > limit ? { tasks: page, nextBefore: page[page.length - 1]!.sequence } : { tasks: page };
   }
-  stateCounts(projectId?: string): Record<string, number> {
-    const counts: Record<string, number> = {};
-    for (const row of this.db.prepare('SELECT state, COUNT(*) AS n FROM tasks WHERE (? IS NULL OR project_id = ?) GROUP BY state').all(projectId ?? null, projectId ?? null) as { state: string; n: number }[]) counts[row.state] = Number(row.n);
-    return counts;
+  async stateCounts(projectId?: string): Promise<Record<string, number>> {
+    const groups = await this.db.models.task.groupBy({ by: ['state'], where: projectId === undefined ? {} : { project_id: projectId }, _count: true });
+    return Object.fromEntries(groups.map(row => [row.state, row._count]));
   }
   /** Query each category before limiting it; queued submissions must never hide execution. */
-  overview(executingIds: readonly string[] = []): { counts: Record<string, number>; attention: TaskSummary[]; active: (TaskSummary & { workItems: Record<string, unknown>[] })[]; recent: TaskSummary[] } {
-    const counts = this.stateCounts();
-    const attention = this.summaries({ states: ['awaiting_mode', 'awaiting_plan_approval'], limit: 50 }).tasks;
-    const executing = this.summaries({ states: ['running', 'validating', 'reviewing', 'committing', 'repairing'], limit: 50 }).tasks;
-    const queued = this.summaries({ states: ['planning', 'ready'], limit: 50 }).tasks;
-    const actual = executingIds.flatMap(id => {
-      const task = this.task(id); if (['completed', 'failed', 'cancelled', 'awaiting_mode', 'awaiting_plan_approval'].includes(task.state)) return [];
-      const row = this.db.prepare('SELECT rowid FROM tasks WHERE id=?').get(id)!;
-      return [this.summarize(task, Number(row.rowid))];
-    });
-    const active = [...new Map([...executing, ...queued, ...actual].map(task => [task.id, task])).values()].sort((a, b) => b.sequence - a.sequence).map(t => ({ ...t, workItems: this.workItems(t.id) }));
-    const recent = this.summaries({ states: ['completed', 'failed', 'cancelled'], limit: 8 }).tasks;
+  async overview(executingIds: readonly string[] = []): Promise<{ counts: Record<string, number>; attention: TaskSummary[]; active: (TaskSummary & { workItems: Record<string, unknown>[] })[]; recent: TaskSummary[] }> {
+    const counts = await this.stateCounts();
+    const attention = (await this.summaries({ states: ['awaiting_mode', 'awaiting_plan_approval'], limit: 50 })).tasks;
+    const executing = (await this.summaries({ states: ['running', 'validating', 'reviewing', 'committing', 'repairing'], limit: 50 })).tasks;
+    const queued = (await this.summaries({ states: ['planning', 'ready'], limit: 50 })).tasks;
+    const actual = (await Promise.all(executingIds.map(async id => {
+      const task = await this.task(id); if (['completed', 'failed', 'cancelled', 'awaiting_mode', 'awaiting_plan_approval'].includes(task.state)) return [];
+      const row = (await this.db.prepare('SELECT insertion_order FROM tasks WHERE id=$1').get(id))!;
+      return [await this.summarize(task, Number(row.insertion_order))];
+    }))).flat();
+    const active = (await Promise.all([...new Map([...executing, ...queued, ...actual].map(task => [task.id, task])).values()].sort((a, b) => b.sequence - a.sequence).map(async t => ({ ...t, workItems: await this.workItems(t.id) }))));
+    const recent = (await this.summaries({ states: ['completed', 'failed', 'cancelled'], limit: 8 })).tasks;
     return { counts, attention, active, recent };
   }
   /** Approval is historical evidence, not an inference from the task's present state. */
-  planApproval(id: string): { status: 'not-planned' | 'autonomous' | 'awaiting' | 'approved' | 'not-approved'; timestamp?: string } {
-    const task = this.task(id);
+  async planApproval(id: string): Promise<{ status: 'not-planned' | 'autonomous' | 'awaiting' | 'approved' | 'not-approved'; timestamp?: string }> {
+    const task = await this.task(id);
     if (!task.plan) return { status: 'not-planned' };
     if (task.mode === 'autonomous') return { status: 'autonomous' };
-    const row = this.db.prepare(`SELECT data FROM events WHERE task_id=? AND json_extract(data, '$.actor')='user' AND json_extract(data, '$.state')='ready' AND json_extract(data, '$.reason')='Plan explicitly approved' ORDER BY sequence DESC LIMIT 1`).get(id);
-    if (row) return { status: 'approved', timestamp: (JSON.parse(String(row.data)) as TaskEvent).timestamp };
+    const candidates = await this.db.prepare("SELECT data FROM events WHERE task_id=$1 AND data LIKE '%Plan explicitly approved%' ORDER BY sequence DESC").all(id);
+    for (const row of candidates) {
+      const event = JSON.parse(String(row.data)) as TaskEvent;
+      if (event.actor === 'user' && event.state === 'ready' && event.reason === 'Plan explicitly approved') return { status: 'approved', timestamp: event.timestamp };
+    }
     return { status: task.state === 'awaiting_plan_approval' ? 'awaiting' : 'not-approved' };
   }
-  hasTask(id: string): boolean { return Boolean(this.db.prepare('SELECT 1 FROM tasks WHERE id=?').get(id)); }
-  task(id: string): Task {
-    const row = this.db.prepare('SELECT data FROM tasks WHERE id=?').get(id);
+  async hasTask(id: string): Promise<boolean> { return Boolean(await this.db.models.task.findUnique({ where: this.byId(id), select: { id: true } })); }
+  async task(id: string): Promise<Task> {
+    const row = await this.db.models.task.findUnique({ where: this.byId(id), select: { data: true } });
     if (!row) throw new AppError('not_found', 'Unknown task', 404);
     return this.safeTask(JSON.parse(row.data as string) as Task);
   }
@@ -610,24 +511,24 @@ export class Store {
    * rows cannot distinguish explicit from defaulted modes; never infer that from mutable task data.
    */
   /** A task may only name a ticket of a source its project is connected to. */
-  private taskTicket(projectId: string, ref: TicketRef): TaskTicket {
-    const integrations = this.project(projectId).integrations; const read = ref.readAt ? { readAt: ref.readAt } : {};
+  private async taskTicket(projectId: string, ref: TicketRef): Promise<TaskTicket> {
+    const integrations = (await this.project(projectId)).integrations; const read = ref.readAt ? { readAt: ref.readAt } : {};
     if (ref.source === 'jira') {
       if (!integrations?.jira) throw new AppError('not_connected', 'Jira is not connected for this project', 422);
       const key = ref.key.toUpperCase();
       return { source: 'jira', name: 'Jira', key, url: `${integrations.jira.site}/browse/${encodeURIComponent(key)}`, ...read };
     }
     if (!integrations?.trackers?.some(c => c.trackerId === ref.source)) throw new AppError('not_connected', 'This ticket tool is not connected for this project', 422);
-    return { source: ref.source, name: this.tracker(ref.source).name, key: ref.key, ...(ref.url ? { url: ref.url } : {}), ...read };
+    return { source: ref.source, name: (await this.tracker(ref.source)).name, key: ref.key, ...(ref.url ? { url: ref.url } : {}), ...read };
   }
-  createTask(input: unknown, key: string, freeze?: (task: Task) => TaskTeam | undefined, defaultMode?: () => Task['mode'], devagentsRules = true, followUp?: Task['followUp'], sharedOwner?: string): Task {
+  async createTask(input: unknown, key: string, freeze?: (task: Task) => TaskTeam | undefined | Promise<TaskTeam | undefined>, defaultMode?: () => Task['mode'] | Promise<Task['mode']>, devagentsRules = true, followUp?: Task['followUp'], sharedOwner?: string): Promise<Task> {
     const parsed = TaskInput.parse(input);
-    if (this.project(parsed.projectId).archivedAt) throw new AppError('project_archived', 'This project is archived. Restore it before submitting work.', 409);
+    if ((await this.project(parsed.projectId)).archivedAt) throw new AppError('project_archived', 'This project is archived. Restore it before submitting work.', 409);
     const clean = redactValues(parsed, this.secrets) as typeof parsed;
     const hash = (value: typeof parsed) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
     const fingerprint = `input-v2:${hash(parsed)}`;
-    return this.transaction(() => {
-      const previous = this.db.prepare('SELECT * FROM requests WHERE key=?').get(key);
+    return this.transaction(async () => {
+      const previous = await this.db.models.submissionRequest.findUnique({ where: { workspace_id_key: { workspace_id: this.workspaceId, key } } });
       if (previous) {
         const legacy = typeof previous.fingerprint === 'string' && /^[a-f0-9]{64}$/.test(previous.fingerprint);
         const matchesLegacy = legacy && (previous.fingerprint === hash(parsed) || (parsed.mode === undefined && Mode.options.some(mode => previous.fingerprint === hash(TaskInput.parse({ ...parsed, mode })))));
@@ -635,118 +536,90 @@ export class Store {
         return this.task(previous.task_id as string);
       }
       const now = new Date().toISOString();
-      const mode = clean.mode ?? defaultMode?.();
-      const { ticket: ref, ...rest } = clean; const ticket = ref ? this.taskTicket(rest.projectId, ref) : undefined;
+      const mode = clean.mode ?? await defaultMode?.();
+      const { ticket: ref, ...rest } = clean; const ticket = ref ? await this.taskTicket(rest.projectId, ref) : undefined;
       let task: Task = { ...rest, ...(ticket ? { ticket } : {}), ...(followUp ? { followUp } : {}), ...(mode ? { mode } : {}), devagentsRules, id: randomUUID(), runId: randomUUID(), state: mode ? 'planning' : 'awaiting_mode', version: 0, createdAt: now, updatedAt: now };
-      const team = freeze?.(task);
+      const team = await freeze?.(task);
       if (team) task = { ...task, team, agents: team.members.map(m => ({ ...m, schemaVersion: 1 as const, instructionsFile: 'team', source: `team:${team.id}@${team.revision}` })) };
-      this.db.prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)').run(task.id, task.projectId, task.state, task.version, this.taskJson(task));
-      this.db.prepare('INSERT INTO requests VALUES (?, ?, ?)').run(key, fingerprint, task.id);
+      await this.db.models.task.create({ data: { workspace_id: this.workspaceId, id: task.id, project_id: task.projectId, state: task.state, version: task.version, data: this.taskJson(task) } });
+      await this.db.models.submissionRequest.create({ data: { workspace_id: this.workspaceId, key, fingerprint, task_id: task.id } });
       if (sharedOwner) {
-        if (this.workspaceOwnerId() !== sharedOwner) throw new AppError('workspace_owner_mismatch', 'Shared submission requires its workspace owner', 403);
-        this.db.prepare("INSERT INTO shared_task_handoffs VALUES (?, ?, ?, 'held', ?)").run(task.id, sharedOwner, randomUUID(), this.taskJson(task));
+        if (await this.workspaceOwnerId() !== sharedOwner) throw new AppError('workspace_owner_mismatch', 'Shared submission requires its workspace owner', 403);
+        await this.db.prepare("INSERT INTO shared_task_handoffs VALUES ($1, $2, $3, 'held', $4)").run(task.id, sharedOwner, randomUUID(), this.taskJson(task));
       }
-      this.requestDispatchRow(task);
-      this.append(task, 'user', `${mode ? 'Task submitted with autonomy mode' : 'Choose autonomous or plan-approval to continue'}${team ? ` · team "${team.name}" revision ${team.revision} frozen` : ''}${ticket ? ` · started from ${ticket.name} ticket ${ticket.key}` : ''}`);
+      await this.requestDispatchRow(task);
+      await this.append(task, 'user', `${mode ? 'Task submitted with autonomy mode' : 'Choose autonomous or plan-approval to continue'}${team ? ` · team "${team.name}" revision ${team.revision} frozen` : ''}${ticket ? ` · started from ${ticket.name} ticket ${ticket.key}` : ''}`);
       return task;
     });
   }
-  transition(id: string, expectedVersion: number, state: TaskState, actor: string, reason: string, patch: Partial<Pick<Task, 'mode' | 'plan' | 'workspace' | 'agents' | 'outcome'>> = {}): Task {
-    return this.transaction(() => {
-      this.assertWriter(id);
-      const task = this.task(id);
+  async transition(id: string, expectedVersion: number, state: TaskState, actor: string, reason: string, patch: Partial<Pick<Task, 'mode' | 'plan' | 'workspace' | 'agents' | 'outcome'>> = {}): Promise<Task> {
+    return this.transaction(async () => {
+      await this.assertWriter(id);
+      const task = await this.task(id);
       if (task.version !== expectedVersion) throw new AppError('stale_task', 'Task changed; reload before retrying', 409);
       assertTransition(task.state, state);
       const updated: Task = { ...task, ...patch, state, version: task.version + 1, updatedAt: new Date().toISOString() };
-      this.db.prepare('UPDATE tasks SET state=?, version=?, data=? WHERE id=?').run(state, updated.version, this.taskJson(updated), id);
-      if (actor === 'user' && ['planning', 'ready', 'cancelled'].includes(state)) this.requestDispatchRow(updated);
-      this.append(updated, actor, reason);
+      await this.db.models.task.update({ where: this.byId(id), data: { state, version: updated.version, data: this.taskJson(updated) } });
+      if (actor === 'user' && ['planning', 'ready', 'cancelled'].includes(state)) await this.requestDispatchRow(updated);
+      await this.append(updated, actor, reason);
       return this.task(id);
     });
   }
-  checkpoint(id: string, expectedVersion: number, patch: Partial<Pick<Task, 'workspace' | 'agents' | 'outcome'>>, reason: string): Task {
-    return this.transaction(() => {
-      this.assertWriter(id);
-      const task = this.task(id);
+  async checkpoint(id: string, expectedVersion: number, patch: Partial<Pick<Task, 'workspace' | 'agents' | 'outcome'>>, reason: string): Promise<Task> {
+    return this.transaction(async () => {
+      await this.assertWriter(id);
+      const task = await this.task(id);
       if (task.version !== expectedVersion) throw new AppError('stale_task', 'Task changed; reload before retrying', 409);
       const updated = { ...task, ...patch, version: task.version + 1, updatedAt: new Date().toISOString() };
-      this.db.prepare('UPDATE tasks SET version=?,data=? WHERE id=?').run(updated.version, this.taskJson(updated), id);
-      this.append(updated, 'orchestrator', reason);
+      await this.db.models.task.update({ where: this.byId(id), data: { version: updated.version, data: this.taskJson(updated) } });
+      await this.append(updated, 'orchestrator', reason);
       return this.task(id);
     });
   }
-  record(id: string, kind: string, data: unknown): void {
-    this.transaction(() => {
-      this.assertWriter(id); this.task(id);
-      this.db.prepare('INSERT INTO evidence (task_id,kind,data) VALUES (?,?,?)').run(id, kind, this.json({ at: new Date().toISOString(), data }));
+  async record(id: string, kind: string, data: unknown): Promise<void> {
+    await this.transaction(async () => {
+      await this.assertWriter(id); await this.task(id);
+      await this.db.models.evidence.create({ data: { workspace_id: this.workspaceId, task_id: id, kind, data: this.json({ at: new Date().toISOString(), data }) } });
     });
   }
-  evidence(id: string, after = 0, limit = 100000): { sequence: number; kind: string; at: string; data: unknown }[] {
-    this.task(id);
-    return this.db.prepare('SELECT sequence,kind,data FROM evidence WHERE task_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(id, after, limit).map(r => ({ sequence: Number(r.sequence), kind: String(r.kind), ...JSON.parse(String(r.data)) }));
+  async evidence(id: string, after = 0, limit = 100000): Promise<{ sequence: number; kind: string; at: string; data: unknown }[]> {
+    await this.task(id);
+    return (await this.db.prepare('SELECT sequence,kind,data FROM evidence WHERE task_id=$1 AND sequence>$2 ORDER BY sequence LIMIT $3').all(id, after, limit)).map(r => ({ sequence: Number(r.sequence), kind: String(r.kind), ...JSON.parse(String(r.data)) }));
   }
   /** Evidence of the given kinds in order, without loading the rest of the task's record. */
-  evidenceOf(id: string, kinds: string[]): { sequence: number; kind: string; at: string; data: unknown }[] {
-    return this.db.prepare(`SELECT sequence,kind,data FROM evidence WHERE task_id=? AND kind IN (${kinds.map(() => '?').join(',')}) ORDER BY sequence`).all(id, ...kinds).map(r => ({ sequence: Number(r.sequence), kind: String(r.kind), ...JSON.parse(String(r.data)) }));
+  async evidenceOf(id: string, kinds: string[]): Promise<{ sequence: number; kind: string; at: string; data: unknown }[]> {
+    return (await this.db.prepare(`SELECT sequence,kind,data FROM evidence WHERE task_id=$1 AND kind=ANY($2::text[]) ORDER BY sequence`).all(id, kinds)).map(r => ({ sequence: Number(r.sequence), kind: String(r.kind), ...JSON.parse(String(r.data)) }));
   }
   /** The newest evidence of one kind, without loading the task's whole record. */
-  lastEvidence(id: string, kind: string): { sequence: number; at: string; data: unknown } | undefined {
-    const row = this.db.prepare('SELECT sequence,data FROM evidence WHERE task_id=? AND kind=? ORDER BY sequence DESC LIMIT 1').get(id, kind);
+  async lastEvidence(id: string, kind: string): Promise<{ sequence: number; at: string; data: unknown } | undefined> {
+    const row = await this.db.prepare('SELECT sequence,data FROM evidence WHERE task_id=$1 AND kind=$2 ORDER BY sequence DESC LIMIT 1').get(id, kind);
     return row ? { sequence: Number(row.sequence), ...JSON.parse(String(row.data)) } : undefined;
   }
   /** Completed tasks that carry evidence of `kind` and none of `settled`: work that is still owed after completion. */
-  completedAwaiting(kind: string, settled: string[]): string[] {
-    const marks = settled.map(() => '?').join(',');
-    return this.db.prepare(`SELECT DISTINCT e.task_id FROM evidence e JOIN tasks t ON t.id=e.task_id WHERE e.kind=? AND t.state='completed' AND NOT EXISTS (SELECT 1 FROM evidence x WHERE x.task_id=e.task_id AND x.kind IN (${marks})) ORDER BY e.sequence`).all(kind, ...settled).map(r => String(r.task_id));
+  async completedAwaiting(kind: string, settled: string[]): Promise<string[]> {
+    return (await this.db.prepare(`SELECT e.task_id FROM evidence e JOIN tasks t ON t.id=e.task_id WHERE e.kind=$1 AND t.state='completed' AND NOT EXISTS (SELECT 1 FROM evidence x WHERE x.task_id=e.task_id AND x.kind=ANY($2::text[])) GROUP BY e.task_id ORDER BY min(e.sequence)`).all(kind, settled)).map(r => String(r.task_id));
   }
   /** Read every execution boundary without loading paginated tool logs or large agent outputs. */
-  executionEvidence(id: string): import('../domain/execution.js').ExecutionEvent[] {
-    this.task(id);
-    return this.db.prepare(`SELECT sequence, kind, json_extract(data, '$.at') AS at,
-      json_object('runId', json_extract(data, '$.data.runId'), 'phase', json_extract(data, '$.data.phase'),
-        'agentId', json_extract(data, '$.data.agentId'), 'workItemId', json_extract(data, '$.data.workItemId'),
-        'engine', substr(json_extract(data, '$.data.engine'), 1, 256),
-        'summary', substr(json_extract(data, '$.data.output.summary'), 1, 4000),
-        'approved', json_extract(data, '$.data.output.approved'),
-        'findings', json_extract(data, '$.data.output.findings'),
-        'error', substr(json_extract(data, '$.data.error'), 1, 4000),
-        'feedback', substr(json_extract(data, '$.data.feedback'), 1, 4000),
-        'state', json_extract(data, '$.data.state'), 'executable', json_extract(data, '$.data.executable'),
-        'args', json_extract(data, '$.data.args'), 'exitCode', json_extract(data, '$.data.exitCode'),
-        'truncated', json_extract(data, '$.data.truncated'),
-        'validationId', json_extract(data, '$.data.validationId'), 'timeoutMs', json_extract(data, '$.data.timeoutMs'),
-        'timedOut', json_extract(data, '$.data.timedOut'),
-        'commit', json_extract(data, '$.data.commit')) AS facts
-      FROM evidence WHERE task_id=? AND kind IN ('run-started','run-completed','run-failed','validation-started','validation-failed','validation','qa-result','commit-created')
-      ORDER BY sequence`).all(id).map(r => ({ sequence: Number(r.sequence), kind: String(r.kind), at: String(r.at), data: JSON.parse(String(r.facts)) }));
+  async executionEvidence(id: string): Promise<import('../domain/execution.js').ExecutionEvent[]> {
+    await this.task(id);
+    return projectEvidence(this.db, id, 'execution');
   }
   /** Select only usage facts; large model output and command logs never enter the rollup. */
-  usageEvidence(id: string): import('../domain/usage-types.js').UsageEvent[] {
-    this.task(id);
-    return this.db.prepare(`SELECT sequence, kind, json_extract(data, '$.at') AS at,
-      json_object('runId', json_extract(data, '$.data.runId'), 'phase', json_extract(data, '$.data.phase'),
-        'agentId', json_extract(data, '$.data.agentId'), 'workItemId', json_extract(data, '$.data.workItemId'),
-        'model', json_extract(data, '$.data.model'), 'auth', json_extract(data, '$.data.auth'),
-        'providerKind', json_extract(data, '$.data.providerKind'), 'kind', json_extract(data, '$.data.kind'),
-        'usage', json_extract(data, '$.data.usage'), 'data', json_extract(data, '$.data.data')) AS facts,
-      json_type(data, '$.data.usagePrice') AS price_type, json_extract(data, '$.data.usagePrice') AS price
-      FROM evidence WHERE task_id=? AND (kind IN ('run-started','run-completed','run-failed')
-        OR (kind='progress' AND json_extract(data, '$.data.kind') IN ('usage','started'))) ORDER BY sequence`).all(id).map(r => ({
-          sequence: Number(r.sequence), kind: String(r.kind), at: String(r.at),
-          data: { ...JSON.parse(String(r.facts)), ...(r.price_type ? { usagePrice: r.price ? JSON.parse(String(r.price)) : null } : {}) },
-        }));
+  async usageEvidence(id: string): Promise<import('../domain/usage-types.js').UsageEvent[]> {
+    await this.task(id);
+    return projectEvidence(this.db, id, 'usage');
   }
-  evidenceEntry(id: string, sequence: number): { sequence: number; kind: string; at: string; data: unknown } {
-    this.task(id);
-    const row = this.db.prepare('SELECT sequence,kind,data FROM evidence WHERE task_id=? AND sequence=?').get(id, sequence);
+  async evidenceEntry(id: string, sequence: number): Promise<{ sequence: number; kind: string; at: string; data: unknown }> {
+    await this.task(id);
+    const row = await this.db.prepare('SELECT sequence,kind,data FROM evidence WHERE task_id=$1 AND sequence=$2').get(id, sequence);
     if (!row) throw new AppError('not_found', 'Unknown evidence entry', 404);
     return { sequence: Number(row.sequence), kind: String(row.kind), ...JSON.parse(String(row.data)) };
   }
-  workItems(id: string): Record<string, unknown>[] {
-    const task = this.task(id);
+  async workItems(id: string): Promise<Record<string, unknown>[]> {
+    const task = await this.task(id);
     const items = new Map<string, Record<string, unknown>>((task.plan?.items ?? []).map(i => [i.id, { itemId: i.id, state: 'pending', agentId: i.assignedAgent, branch: i.branch, dependsOn: i.dependsOn, ownedPaths: i.ownedPaths }]));
     let recorded = false;
-    const evidence = this.evidence(id);
+    const evidence = await this.evidence(id);
     for (const event of evidence) {
       if (event.kind !== 'work-item') continue;
       recorded = true;
@@ -768,23 +641,29 @@ export class Store {
     }
     return [...items.values()];
   }
-  private append(task: Task, actor: string, reason: string): void {
-    this.db.prepare('INSERT INTO events (task_id,data) VALUES (?,?)').run(task.id, this.json({ taskId: task.id, runId: task.runId, actor, reason, state: task.state, timestamp: task.updatedAt }));
+  private async append(task: Task, actor: string, reason: string): Promise<void> {
+    await this.db.models.taskEvent.create({ data: { workspace_id: this.workspaceId, task_id: task.id,
+      data: this.json({ taskId: task.id, runId: task.runId, actor, reason, state: task.state, timestamp: task.updatedAt }) } });
   }
-  events(id: string, after = 0, limit = 100000): TaskEvent[] {
-    this.task(id);
-    return this.db.prepare('SELECT sequence,data FROM events WHERE task_id=? AND sequence>? ORDER BY sequence LIMIT ?').all(id, after, limit).map(r => ({ ...JSON.parse(r.data as string), sequence: Number(r.sequence) }) as TaskEvent);
+  async events(id: string, after = 0, limit = 100000): Promise<TaskEvent[]> {
+    await this.task(id);
+    const rows = await this.db.models.taskEvent.findMany({ where: { task_id: id, sequence: { gt: after } },
+      orderBy: { sequence: 'asc' }, take: limit, select: { sequence: true, data: true } });
+    return rows.map(row => ({ ...JSON.parse(row.data), sequence: Number(row.sequence) }) as TaskEvent);
   }
-  recover(): string[] {
+  async recover(): Promise<string[]> {
     // Never replay a worker or external effect after restart. Approval waits survive intact.
-    const interrupted = this.tasks().filter(t => ['running', 'validating', 'reviewing', 'committing', 'repairing'].includes(t.state)
-      || (t.state === 'planning' && (t.workspace || this.evidence(t.id).some(e => e.kind === 'worktree-intent')))
-      || (t.state === 'ready' && this.evidence(t.id).some(e => ['environment', 'run-started', 'run-failed'].includes(e.kind)
-        && (e.kind === 'environment' || (e.data as { phase?: string }).phase !== 'planning'))));
+    const interrupted: Task[] = [];
+    for (const t of await this.tasks()) {
+      if (['running', 'validating', 'reviewing', 'committing', 'repairing'].includes(t.state)
+      || (t.state === 'planning' && (t.workspace || (await this.evidence(t.id)).some(e => e.kind === 'worktree-intent')))
+      || (t.state === 'ready' && (await this.evidence(t.id)).some(e => ['environment', 'run-started', 'run-failed'].includes(e.kind)
+        && (e.kind === 'environment' || (e.data as { phase?: string }).phase !== 'planning')))) interrupted.push(t);
+    }
     for (const task of interrupted) {
       const reason = 'Process interrupted; inspect task evidence and any recovery snapshot before submitting a new task';
-      this.transition(task.id, task.version, 'failed', 'recovery', reason, { outcome: { ...task.outcome, error: reason, repairCycles: task.outcome?.repairCycles ?? 0 } });
-      this.recoverDispatch(task.id, 'Execution was interrupted; prior worker termination is unverified. Inspect retained work before cleanup or resubmission.');
+      await this.transition(task.id, task.version, 'failed', 'recovery', reason, { outcome: { ...task.outcome, error: reason, repairCycles: task.outcome?.repairCycles ?? 0 } });
+      await this.recoverDispatch(task.id, 'Execution was interrupted; prior worker termination is unverified. Inspect retained work before cleanup or resubmission.');
     }
     return interrupted.map(t => t.id);
   }

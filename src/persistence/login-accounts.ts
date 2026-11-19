@@ -1,43 +1,45 @@
-import { loginSchema } from './login-schema.js';
 import { randomUUID } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
 import type { LoginAccountStore, PasswordAccount } from '../auth/types.js';
 import type { UserDirectory, UserIdentity } from '../domain/identity.js';
+import { openWorkspace } from './workspace-database.js';
+import { prismaFor } from './prisma.js';
 
-/** Uses the existing, migrated database; owns only its login-account connection. */
+function identity(row: { id: string; name: string; role: string }): UserIdentity {
+  if (row.role !== 'admin') throw Error('Unsupported stored account role');
+  return { id: row.id, name: row.name, role: row.role };
+}
+
 export class LoginAccounts implements LoginAccountStore, UserDirectory {
-  private readonly db: DatabaseSync;
-  constructor(path: string) {
-    this.db = new DatabaseSync(path);
-    this.db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
-    this.db.exec(loginSchema);
+  private readonly client;
+  static async open(path: string): Promise<LoginAccounts> {
+    await (await openWorkspace(path, 'accounts')).close();
+    return new LoginAccounts(path);
   }
-  hasUsers(): boolean { return Boolean(this.db.prepare('SELECT 1 FROM users LIMIT 1').get()); }
-  close(): void { this.db.close(); }
+  private constructor(path: string) {
+    this.client = prismaFor(path).client;
+  }
 
-  loginUser(id: string): UserIdentity | undefined {
-    return this.db.prepare('SELECT id, name, role FROM users WHERE id=?').get(id) as UserIdentity | undefined;
+  async hasUsers() { return (await this.client.user.findFirst({ select: { id: true } })) !== null; }
+  close() { return this.client.$disconnect(); }
+
+  async loginUser(id: string): Promise<UserIdentity | undefined> {
+    const user = await this.client.user.findUnique({ where: { id } });
+    return user ? identity(user) : undefined;
   }
-  passwordAccount(username: string): PasswordAccount | undefined {
-    const row = this.db.prepare('SELECT user_id, salt, hash FROM password_accounts WHERE username=?').get(username) as { user_id: string; salt: string; hash: string } | undefined;
-    return row ? { user: this.loginUser(row.user_id)!, salt: row.salt, hash: row.hash } : undefined;
+
+  async passwordAccount(username: string): Promise<PasswordAccount | undefined> {
+    const account = await this.client.passwordAccount.findUnique({ where: { username }, include: { users: true } });
+    return account ? { user: identity(account.users), salt: account.salt, hash: account.hash } : undefined;
   }
-  bootstrapPasswordAccount(username: string, name: string, salt: string, hash: string): UserIdentity {
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      const existing = this.passwordAccount(username);
-      if (existing) {
-        this.db.exec('COMMIT');
-        return existing.user;
-      }
-      const user: UserIdentity = { id: randomUUID(), name, role: 'admin' };
-      this.db.prepare('INSERT INTO users (id, name, role) VALUES (?, ?, ?)').run(user.id, user.name, user.role);
-      this.db.prepare('INSERT INTO password_accounts (username, user_id, salt, hash) VALUES (?, ?, ?, ?)').run(username, user.id, salt, hash);
-      this.db.exec('COMMIT');
+
+  async bootstrapPasswordAccount(username: string, name: string, salt: string, hash: string): Promise<UserIdentity> {
+    return this.client.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${username}, 2))`;
+      const existing = await tx.passwordAccount.findUnique({ where: { username }, select: { users: true } });
+      if (existing) return identity(existing.users);
+      const user = { id: randomUUID(), name, role: 'admin' as const };
+      await tx.user.create({ data: { ...user, password_accounts: { create: { username, salt, hash } } } });
       return user;
-    } catch (error) {
-      if (this.db.isTransaction) this.db.exec('ROLLBACK');
-      throw error;
-    }
+    });
   }
 }

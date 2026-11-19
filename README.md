@@ -18,7 +18,7 @@ Shared mode supports password login to an owner-bound workspace and optional KMS
 
 Open **Settings → Claude connection → Set up / change Claude connection** for the [Claude setup flow](docs/SETUP.md#claude).
 
-Shared Docker runtimes can also use [self-managed PostgreSQL for task submissions, workflow checkpoints, live Activity history and results](docs/SETUP.md#shared-task-storage-in-postgresql).
+All users and workspaces share one PostgreSQL database and one application schema, `public`. Workspace IDs and row-level security keep tasks, projects, teams and workflow checkpoints private. [Database setup and upgrades](docs/SETUP.md#postgresql-for-local-development).
 
 ## Quickstart
 
@@ -84,7 +84,7 @@ Settings shows separate **Codex connection** and **Claude connection** cards sid
 - **QA is opt-in.** `qaEnabled: false` keeps separate agent QA disabled. Developer validation and independent review still run. Read the [QA contract](docs/REFERENCE.md#optional-qa-gate) before enabling it.
 - **Verification has evidence.** Unavailable optional checks are reported as limitations. A required acceptance criterion blocked at the QA gate prevents a final task commit.
 
-DevAgents defaults to one top-level task. Change the limit without a restart in **Settings → Parallel tasks**, or run `docker compose exec devagents node dist/cli/main.js config task-concurrency 2` (`npm run cli -- config task-concurrency 2` for native installations). The saved limit persists across restarts. DevAgents supports configurable parallel tasks, with bounded workers inside each task and shared operation limits. See [concurrency configuration](docs/SETUP.md#large-projects-and-execution-budgets). It remains a local, single-user application.
+DevAgents defaults to one top-level task. Change the limit without a restart in **Settings → Parallel tasks**, or run `docker compose exec devagents node dist/cli/main.js config task-concurrency 2` (`npm run cli -- config task-concurrency 2` for native installations). The saved limit persists across restarts. Set **Settings → Parallel subtasks per task** (1–8, default 2) to control work inside each task. Reviewed results are integrated one at a time, then eligible subtasks refill free slots without waiting for unrelated slow workers. This saved limit applies when a task begins execution; running tasks keep their current limit. Shared operation and agent limits still apply. See [concurrency configuration](docs/SETUP.md#large-projects-and-execution-budgets). It remains a local, single-user application.
 
 ## Documentation
 
@@ -99,7 +99,7 @@ DevAgents defaults to one top-level task. Change the limit without a restart in 
 
 ## Development
 
-Uses TypeScript, Mastra workflows, SQLite, and a Preact/Vite UI. Requires **Node.js 24.x** and **npm**.
+Uses TypeScript, Prisma Client, Mastra workflows, PostgreSQL 17, and a Preact/Vite UI. Requires **Node.js 24.x**, **npm**, and Docker for the disposable test database.
 
 ```sh
 npm ci

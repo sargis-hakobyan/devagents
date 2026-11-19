@@ -4,12 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Mastra } from '@mastra/core/mastra';
 import { createStep, createWorkflow } from '@mastra/core/workflows';
-import { LibSQLStore } from '@mastra/libsql';
+import { Store } from '../src/persistence/store.js';
+import { workspaceCheckpoints } from '../src/persistence/postgres-checkpoints.js';
 import { z } from 'zod';
 
 const directory = await mkdtemp(join(tmpdir(), 'devagents-mastra-'));
 const shape = z.object({ request: z.string() });
-function create() {
+const store = await Store.open(join(directory, 'devagents.db'));
+async function create() {
   const approval = createStep({
     id: 'approval', inputSchema: shape, outputSchema: shape,
     resumeSchema: z.object({ approved: z.boolean() }),
@@ -20,21 +22,22 @@ function create() {
     },
   });
   const workflow = createWorkflow({ id: 'spike', inputSchema: shape, outputSchema: shape }).then(approval).commit();
-  const storage = new LibSQLStore({ id: 'spike-storage', url: `file:${join(directory, 'mastra.db')}` });
+  const storage = await workspaceCheckpoints(store, directory);
+  await storage.init();
   const mastra = new Mastra({ workflows: { spike: workflow }, storage });
   return { mastra, storage };
 }
 try {
-  const first = create();
+  const first = await create();
   const run = await first.mastra.getWorkflow('spike').createRun();
   const paused = await run.start({ inputData: { request: 'Persist this approval' } });
   assert.equal(paused.status, 'suspended');
   await first.storage.close();
-  const second = create();
+  const second = await create();
   const restored = await second.mastra.getWorkflow('spike').createRun({ runId: run.runId });
   const resumed = await restored.resume({ step: 'approval', resumeData: { approved: true } });
   assert.equal(resumed.status, 'success');
   if (resumed.status === 'success') assert.deepEqual(resumed.result, { request: 'Persist this approval' });
   await second.storage.close();
   console.log('PASS: Mastra workflow suspension survives storage/runtime recreation and resumes.');
-} finally { await rm(directory, { recursive: true, force: true }); }
+} finally { await store.close(); await rm(directory, { recursive: true, force: true }); }

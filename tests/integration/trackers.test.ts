@@ -1,6 +1,6 @@
 import test from 'node:test';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { PgSession } from '../../src/persistence/pg-session.js';
 import { assignStartedTicket } from '../../src/integrations/tickets.js';
 import { suggestAssign } from '../../src/integrations/tracker-mapping.js';
 import { McpSession } from '../../src/integrations/mcp.js';
@@ -31,7 +31,7 @@ const MAPPING = {
 async function serve(options: { secrets?: SecretStore; state?: { revoked?: boolean; events?: boolean; limited?: boolean; updates?: Record<string, unknown>[] } } = {}) {
   const f = await fixture(); const secrets = options.secrets ?? memorySecrets(); const state = options.state ?? {}; const { fetcher, calls } = fake.fakeTracker(state);
   const trackers = new TrackerService(f.store, secrets, { fetch: fetcher, now: () => new Date('2026-11-17T12:00:00Z') });
-  const server = createApi(f.service, 'test-token', { trackers });
+  const server = await createApi(f.service, 'test-token', { trackers });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const root = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (path: string, method = 'GET', body?: unknown) => {
@@ -145,7 +145,7 @@ test('a project uses an added tool: options, a rule the tool or DevAgents filter
     assert.equal(saved.status, 200, saved.text); assert.equal(saved.data.matches.total, 1);
     const rule = saved.data.connections[0].rule;
     assert.deepEqual({ projects: rule.projects.map((p: { id: string; name: string }) => [p.id, p.name]), columns: rule.columns, start: rule.start, savedAt: rule.savedAt, assignees: rule.assignees, labels: rule.labels }, { projects: [['p-api', 'Backend API']], columns: ['ready-for-development', 'todo'], start: 'auto', savedAt: '2026-11-17T12:00:00.000Z', assignees: undefined, labels: undefined });
-    assert.equal(s.f.store.project('fixture').integrations?.trackers?.[0]?.rule?.projects?.[0]?.id, 'p-api');
+    assert.equal((await s.f.store.project('fixture')).integrations?.trackers?.[0]?.rule?.projects?.[0]?.id, 'p-api');
     // A rule can be removed while the tool stays connected; then no tickets come from it.
     const removed = await s.call(`${one}/rule`, 'DELETE');
     assert.equal(removed.status, 200); assert.equal(removed.data.connections.length, 1); assert.equal(removed.data.connections[0].rule, undefined);
@@ -194,9 +194,9 @@ test('a tool is checked, renamed and given a new token; a refused token shows on
     s.state.limited = false;
 
     // Archiving a project drops its connection, like the GitHub and Jira ones.
-    const project = s.f.store.project('fixture');
+    const project = await s.f.store.project('fixture');
     assert.equal((await s.call('/projects/fixture/archive', 'POST', { archived: true, expectedVersion: project.version ?? 0 })).status, 200);
-    assert.equal(s.f.store.project('fixture').integrations?.trackers, undefined);
+    assert.equal((await s.f.store.project('fixture')).integrations?.trackers, undefined);
     assert.deepEqual((await s.call(`/trackers/${id}`)).data.usedBy, []);
   } finally { await s.close(); }
 });
@@ -243,20 +243,20 @@ test('a project uses several tools, each with its own rule, and a tool added onc
     await s.f.service.submit({ projectId: 'fixture', request: 'FX-2: Fix the footer links\n\nTicket: https://tracker.fixture.invalid/board?task=FX-2' }, 'available-start');
     assert.deepEqual((await s.call('/tickets/available')).data.tickets.map((t: { key: string }) => t.key), ['FX-1', 'FX-3', 'FX-5'], 'a ticket named by a task of the project is started');
     // Put back on the board: once the task was cancelled, or its pull request was closed without merging, the ticket can be started again.
-    const started = s.f.store.summaries({ projectId: 'fixture' }).tasks.find(t => t.request.startsWith('FX-2'))!;
-    const raw = new DatabaseSync(join(s.f.dataDir, 'test.db')); const stored = JSON.parse(String(raw.prepare('SELECT data FROM tasks WHERE id=?').get(started.id)!.data));
-    const set = (state: string) => raw.prepare('UPDATE tasks SET state=?, data=? WHERE id=?').run(state, JSON.stringify({ ...stored, state }), started.id);
+    const started = (await s.f.store.summaries({ projectId: 'fixture' })).tasks.find(t => t.request.startsWith('FX-2'))!;
+    const raw = await PgSession.open(join(s.f.dataDir, 'test.db')); const stored = JSON.parse(String((await raw.prepare('SELECT data FROM tasks WHERE id=$1').get(started.id))!.data));
+    const set = async (state: string) => await raw.prepare('UPDATE tasks SET state=$1, data=$2 WHERE id=$3').run(state, JSON.stringify({ ...stored, state }), started.id);
     const keys = async () => (await s.call('/tickets/available')).data.tickets.map((t: { key: string }) => t.key);
     set('cancelled'); assert.deepEqual(await keys(), ['FX-1', 'FX-2', 'FX-3', 'FX-5']);
     set('completed'); assert.deepEqual(await keys(), ['FX-1', 'FX-3', 'FX-5'], 'a finished task keeps its ticket');
     const pull = { number: 7, base: 'main', draft: false, headSha: 'a'.repeat(40), mergeable: 'unknown' as const, checks: [], comments: [] };
-    s.f.store.savePullRequest(started.id, { ...pull, state: 'open', status: { code: 'ready', text: 'ready to merge' } }); assert.deepEqual(await keys(), ['FX-1', 'FX-3', 'FX-5']);
-    s.f.store.savePullRequest(started.id, { ...pull, state: 'closed', status: { code: 'closed', text: 'closed without merging' } }); assert.deepEqual(await keys(), ['FX-1', 'FX-2', 'FX-3', 'FX-5']);
+    await s.f.store.savePullRequest(started.id, { ...pull, state: 'open', status: { code: 'ready', text: 'ready to merge' } }); assert.deepEqual(await keys(), ['FX-1', 'FX-3', 'FX-5']);
+    await s.f.store.savePullRequest(started.id, { ...pull, state: 'closed', status: { code: 'closed', text: 'closed without merging' } }); assert.deepEqual(await keys(), ['FX-1', 'FX-2', 'FX-3', 'FX-5']);
     // A fix round of that pull request names the ticket in its title; it does not hold the ticket.
-    s.f.service.submit({ projectId: 'fixture', request: 'Resolve the conflict of pull request #7 with main (FX-2: Fix the footer links)', mode: 'autonomous' }, 'round', { taskId: started.id, number: 7, round: 2, baseSha: 'a'.repeat(40), checks: [], comments: [], trigger: 'setting' });
+    await s.f.service.submit({ projectId: 'fixture', request: 'Resolve the conflict of pull request #7 with main (FX-2: Fix the footer links)', mode: 'autonomous' }, 'round', { taskId: started.id, number: 7, round: 2, baseSha: 'a'.repeat(40), checks: [], comments: [], trigger: 'setting' });
     assert.deepEqual(await keys(), ['FX-1', 'FX-2', 'FX-3', 'FX-5']);
-    s.f.store.savePullRequest(started.id, { ...pull, state: 'merged', status: { code: 'merged', text: 'merged into main' } }); assert.deepEqual(await keys(), ['FX-1', 'FX-3', 'FX-5']);
-    raw.close();
+    await s.f.store.savePullRequest(started.id, { ...pull, state: 'merged', status: { code: 'merged', text: 'merged into main' } }); assert.deepEqual(await keys(), ['FX-1', 'FX-3', 'FX-5']);
+    await raw.close();
     // A source that cannot be read is reported and does not hide the others.
     s.state.revoked = true;
     const broken = await s.call('/tickets/available');
@@ -305,13 +305,13 @@ test('a ticket is read with its text, comments and file names, and a task starte
     assert.equal((await s.call(`/trackers/${board}/mapping`, 'PUT', { ...MAPPING, read: { tool: 'tracker_get_task', key: 'ticket' } })).data.error, 'invalid_mapping');
 
     // The task records where it came from; the ticket is then no longer available, whatever the request says.
-    const task = s.f.service.submit({ projectId: 'fixture', request: 'Build the form as described.', ticket: { source: board, key: 'FX-1', url: read.data.ticket.url, readAt: read.data.ticket.readAt } }, 'from-ticket');
+    const task = await s.f.service.submit({ projectId: 'fixture', request: 'Build the form as described.', ticket: { source: board, key: 'FX-1', url: read.data.ticket.url, readAt: read.data.ticket.readAt } }, 'from-ticket');
     assert.deepEqual(task.ticket, { source: board, name: 'Team board', key: 'FX-1', url: 'https://tracker.fixture.invalid/board?task=FX-1', readAt: read.data.ticket.readAt });
-    assert.deepEqual(s.f.store.summaries({ projectId: 'fixture' }).tasks[0]!.ticket, task.ticket);
-    assert.match(s.f.store.events(task.id)[0]!.reason, /started from Team board ticket FX-1/);
+    assert.deepEqual((await s.f.store.summaries({ projectId: 'fixture' })).tasks[0]!.ticket, task.ticket);
+    assert.match((await s.f.store.events(task.id))[0]!.reason, /started from Team board ticket FX-1/);
     assert.deepEqual((await s.call('/tickets/available')).data.tickets.map((t: { key: string; source: { id: string } }) => `${t.source.id === board}/${t.key}`), ['true/FX-2', 'true/FX-3']);
-    assert.throws(() => s.f.service.submit({ projectId: 'fixture', request: 'x', ticket: { source: 'jira', key: 'WEB-1' } }, 'no-jira'), /Jira is not connected/);
-    assert.throws(() => s.f.service.submit({ projectId: 'fixture', request: 'x', ticket: { source: '11111111-1111-4111-8111-111111111111', key: 'FX-1' } }, 'no-tool'), /not connected for this project/);
+    await assert.rejects(async () => await s.f.service.submit({ projectId: 'fixture', request: 'x', ticket: { source: 'jira', key: 'WEB-1' } }, 'no-jira'), /Jira is not connected/);
+    await assert.rejects(async () => await s.f.service.submit({ projectId: 'fixture', request: 'x', ticket: { source: '11111111-1111-4111-8111-111111111111', key: 'FX-1' } }, 'no-tool'), /not connected for this project/);
   } finally { await s.close(); }
 });
 

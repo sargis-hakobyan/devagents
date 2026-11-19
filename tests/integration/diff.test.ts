@@ -9,14 +9,14 @@ import type { Task } from '../../src/domain/schemas.js';
 
 async function completed(files: Record<string, string | Buffer>) {
   const f = await fixture();
-  const task = f.service.submit({ projectId: 'fixture', request: 'Read diff', mode: 'autonomous' }, 'diff');
-  const workspace = await new WorkspaceManager(f.dataDir).create(f.store.project('fixture'), task.id, task.request);
+  const task = await f.service.submit({ projectId: 'fixture', request: 'Read diff', mode: 'autonomous' }, 'diff');
+  const workspace = await new WorkspaceManager(f.dataDir).create(await f.store.project('fixture'), task.id, task.request);
   for (const [name, text] of Object.entries(files)) await writeFile(join(workspace.path, name), text);
   await git(workspace.path, ['add', '.']);
   await git(workspace.path, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'Diff fixture']);
   const final = await git(workspace.path, ['rev-parse', 'HEAD']);
   const done: Task = { ...task, workspace, state: 'completed', outcome: { commit: final, repairCycles: 0 } };
-  return { f, done, read: (t = done) => readTaskDiff(f.store.project('fixture'), t, f.dataDir, ['fixture-secret-value']) };
+  return { f, done, read: async (t = done) => readTaskDiff(await f.store.project('fixture'), t, f.dataDir, ['fixture-secret-value']) };
 }
 
 test('diff reads owned commit objects, redacts values, suppresses binary/protected content and never runs helpers', async () => {
@@ -32,7 +32,7 @@ test('diff reads owned commit objects, redacts values, suppresses binary/protect
     assert.equal(diff.files.find(f => f.path === 'image.bin')!.state, 'binary');
     assert.equal(diff.files.find(f => f.path === '.env')!.state, 'withheld');
     assert.equal(await access(marker).then(() => true, () => false), false);
-    await new WorkspaceManager(x.f.dataDir).cleanup(x.f.store.project('fixture'), x.done.id, [x.done.workspace!], new Set([x.done.workspace!.branch]));
+    await new WorkspaceManager(x.f.dataDir).cleanup(await x.f.store.project('fixture'), x.done.id, [x.done.workspace!], new Set([x.done.workspace!.branch]));
     assert.deepEqual(await x.read(), diff, 'retained branch remains readable after worktree cleanup');
     assert.equal(await git(x.f.project, ['rev-parse', 'HEAD']), x.done.workspace!.baseSha);
   } finally { await x.f.cleanup(); }
@@ -78,28 +78,28 @@ test('configured provider secrets outside the environment-name heuristic are red
   const f = await fixture();
   const value = 'provider-value-9f8e7d6c5b4a';
   // MYPROV_AUTH does not match the environment heuristic; the service adds its value to the store's secret list at startup.
-  const store = new Store(join(f.dataDir, 'f1.db'), [value]);
-  const service = new TaskService(store, Config.parse({ schemaVersion: 1, providers: [{ id: 'openai', kind: 'openai', auth: 'login' }, { id: 'custom', kind: 'anthropic', auth: 'api-key', apiKeyEnv: 'MYPROV_AUTH' }] }), f.dataDir);
-  const server = createApi(service, 't');
+  const store = await Store.open(join(f.dataDir, 'f1.db'), [value]);
+  const service = await TaskService.create(store, Config.parse({ schemaVersion: 1, providers: [{ id: 'openai', kind: 'openai', auth: 'login' }, { id: 'custom', kind: 'anthropic', auth: 'api-key', apiKeyEnv: 'MYPROV_AUTH' }] }), f.dataDir);
+  const server = await createApi(service, 't');
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
     await service.registerProject({ id: 'fixture', path: f.project });
-    const task = service.submit({ projectId: 'fixture', request: 'leak', mode: 'autonomous' }, 'leak');
-    const workspace = await new WorkspaceManager(f.dataDir).create(store.project('fixture'), task.id, task.request);
+    const task = await service.submit({ projectId: 'fixture', request: 'leak', mode: 'autonomous' }, 'leak');
+    const workspace = await new WorkspaceManager(f.dataDir).create(await store.project('fixture'), task.id, task.request);
     await writeFile(join(workspace.path, 'leak.txt'), `const k = "${value}";\n`);
     await git(workspace.path, ['add', '.']); await git(workspace.path, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'leak']);
     const final = await git(workspace.path, ['rev-parse', 'HEAD']);
-    let t = store.checkpoint(task.id, store.task(task.id).version, { workspace }, 'worktree');
-    for (const state of ['ready', 'running', 'validating', 'reviewing', 'committing'] as const) t = store.transition(task.id, t.version, state, 'test', 'fixture');
-    store.transition(task.id, t.version, 'completed', 'test', 'done', { outcome: { commit: final, repairCycles: 0 } });
+    let t = await store.checkpoint(task.id, (await store.task(task.id)).version, { workspace }, 'worktree');
+    for (const state of ['ready', 'running', 'validating', 'reviewing', 'committing'] as const) t = await store.transition(task.id, t.version, state, 'test', 'fixture');
+    await store.transition(task.id, t.version, 'completed', 'test', 'done', { outcome: { commit: final, repairCycles: 0 } });
     const diff = await service.diff(task.id);
     assert.doesNotMatch(JSON.stringify(diff), /provider-value-9f8e7d6c5b4a/);
     assert.match(diff.files[0]!.text, /\[REDACTED\]/); assert.equal(diff.files[0]!.redacted, true);
     const { port } = server.address() as import('node:net').AddressInfo;
     const body = await (await fetch(`http://127.0.0.1:${port}/tasks/${task.id}/diff`, { headers: { authorization: 'Bearer t' } })).text();
     assert.doesNotMatch(body, /provider-value-9f8e7d6c5b4a/);
-    assert.doesNotMatch(JSON.stringify(store.task(task.id)), /provider-value/);
-  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); store.close(); await f.cleanup(); }
+    assert.doesNotMatch(JSON.stringify(await store.task(task.id)), /provider-value/);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await store.close(); await f.cleanup(); }
 });
 
 test('diff limits aggregate patch reads even when oversized files yield no display text', async () => {

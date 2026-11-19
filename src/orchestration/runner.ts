@@ -23,6 +23,7 @@ export class TaskRunner {
   private readonly engines: EngineRegistry;
   private readonly resources: ExecutionResources;
   private readonly poll: ReturnType<typeof setInterval>;
+  private polling: Promise<void> | undefined;
   private checking: Promise<void> | undefined;
   private stopping = false;
   private recovering = false;
@@ -41,53 +42,60 @@ export class TaskRunner {
       return active.execution;
     };
     this.workflows = new TaskWorkflows(service, {
-      prepare: async id => { if (service.store.task(id).state !== 'awaiting_plan_approval') await context(id).prepare(id, context(id).abort.signal); },
+      prepare: async id => { if ((await service.store.task(id)).state !== 'awaiting_plan_approval') await context(id).prepare(id, context(id).abort.signal); },
       plan: id => context(id).plan(id, context(id).abort.signal),
       environment: id => context(id).prepareApprovedEnvironment(),
       execute: id => context(id).execute(id, context(id).abort.signal),
     }, options.workflowStorage);
     this.poll = setInterval(() => {
-      this.drain();
-      if (!this.stopping && !this.executionFailure && !this.recovering) {
-        try { for (const active of this.active.values()) this.service.store.heartbeatDispatch(active.claim); }
-        catch (error) { this.halt('ownership', error); }
-      }
-      if (!this.active.size || this.checking || this.stopping || this.executionFailure) return;
-      this.checking = assertDiskSpace(service.dataDir, DATABASE_HEADROOM).catch(async error => {
-        if (!this.stopping) { await service.diskReserve.release().catch(() => {}); this.halt('storage', error); }
-      }).finally(() => { this.checking = undefined; });
-    }, 1000); this.poll.unref();
+      this.polling ??= this.pollOnce().catch(error => this.halt('scheduler', error)).finally(() => { this.polling = undefined; });
+    }, 1000);
+    this.poll.unref();
   }
-  enqueue(id: string): void {
+
+  private async pollOnce() {
+    await this.drain();
+    if (this.stopping || this.executionFailure || this.recovering) return;
+    for (const active of this.active.values()) {
+      if (active.drained) continue;
+      try { await this.service.store.heartbeatDispatch(active.claim); }
+      catch (error) { if (!active.drained) { this.halt('ownership', error); return; } }
+    }
+    if (!this.active.size || this.checking || this.stopping) return;
+    this.checking = assertDiskSpace(this.service.dataDir, DATABASE_HEADROOM).catch(async error => {
+      if (!this.stopping) { await this.service.diskReserve.release().catch(() => {}); this.halt('storage', error); }
+    }).finally(() => { this.checking = undefined; });
+  }
+  async enqueue(id: string): Promise<void> {
     this.service.assertNotMaintaining(id);
     if (this.executionFailure) throw new AppError('execution_halted', 'Execution halted; recover storage and restart the service before submitting more work', 503);
     if (this.stopping) throw new AppError('stopping', 'Service is shutting down', 503);
-    this.service.store.requestDispatch(id); this.drain();
+    await this.service.store.requestDispatch(id); await this.drain();
   }
-  cancel(id: string): void {
+  async cancel(id: string): Promise<void> {
     this.service.assertNotMaintaining(id); this.active.get(id)?.execution.abort.abort();
-    if (!this.executionFailure && !this.stopping) { this.service.store.requestDispatch(id); this.drain(); }
+    if (!this.executionFailure && !this.stopping) { await this.service.store.requestDispatch(id); await this.drain(); }
   }
   stop(): Promise<void> {
     this.closing ??= (async () => {
       this.stopping = true; clearInterval(this.poll);
       for (const active of this.active.values()) active.execution.abort.abort();
-      await this.idle(); await this.checking; await this.workflows.close();
+      await this.idle(); await this.polling; await this.checking; await this.workflows.close();
     })(); return this.closing;
   }
-  isDrained(id: string): boolean {
-    return (!this.active.has(id) || this.active.get(id)!.drained) && !this.service.store.pendingDispatches().includes(id) && this.workflows.isDrained(id);
+  async isDrained(id: string): Promise<boolean> {
+    return (!this.active.has(id) || this.active.get(id)!.drained) && !(await this.service.store.pendingDispatches()).includes(id) && this.workflows.isDrained(id);
   }
-  get busy(): boolean { return Boolean(this.active.size || this.service.store.pendingDispatches().length); }
-  get scheduling(): SchedulerStatus {
-    const blockers = this.service.store.recoveryBlockers();
+  async busy(): Promise<boolean> { return Boolean(this.active.size || (await this.service.store.pendingDispatches()).length); }
+  async scheduling(): Promise<SchedulerStatus> {
+    const blockers = await this.service.store.recoveryBlockers();
     return { enabled: true, maxConcurrentTasks: this.service.config.maxConcurrentTasks,
       maxConcurrentOperations: this.service.config.maxConcurrentOperations, active: [...this.active.keys()],
-      queued: this.service.store.pendingDispatches().length, runningOperations: this.resources.operations.running,
+      queued: (await this.service.store.pendingDispatches()).length, runningOperations: this.resources.operations.running,
       waitingOperations: this.resources.operations.waiting, held: blockers.length, attention: blockers.slice(0, 50) };
   }
-  taskScheduling(id: string): TaskScheduling {
-    const task = this.service.store.task(id); const queue = this.service.store.dispatch(id);
+  async taskScheduling(id: string): Promise<TaskScheduling> {
+    const task = await this.service.store.task(id); const queue = await this.service.store.dispatch(id);
     if (queue?.blocker) return { status: 'held', reason: queue.blocker };
     const active = this.active.get(id);
     if (active?.drained || active?.execution.abort.signal.aborted) return { status: 'draining', reason: 'Waiting for task workers and resource cleanup to finish' };
@@ -97,7 +105,7 @@ export class TaskRunner {
     return { status: 'queued', reason: this.executionFailure ? 'Execution halted; recover storage and restart the service' : this.recovering ? 'Startup reconciliation is in progress' : this.options.admission?.() ?? 'Waiting for an available task slot' };
   }
   async idle(): Promise<void> {
-    this.drain();
+    await this.drain();
     while (this.active.size) await Promise.all([...this.active.values()].map(a => a.promise));
   }
   /** Only invoked under the local service lock; active effects are never replayed. */
@@ -105,40 +113,53 @@ export class TaskRunner {
     if (this.active.size) throw new AppError('recovery_active', 'Recovery requires a stopped scheduler', 409);
     this.recovering = true;
     try {
-      this.service.store.recover();
-      for (const task of this.service.store.tasks()) {
-        const queue = this.service.store.dispatch(task.id);
+      await this.service.store.recover();
+      for (const task of await this.service.store.tasks()) {
+        const queue = await this.service.store.dispatch(task.id);
         if (queue?.blocker) { if (terminalStates.includes(task.state)) await this.workflows.run(task.id); continue; }
         const snapshot = await this.workflows.state(task.id);
         const safeWait = snapshot?.status === 'suspended' && ['awaiting_mode', 'awaiting_plan_approval'].includes(task.state);
         const uncertain = queue?.owner && !safeWait
-          && this.service.store.evidence(task.id).some(e => ['worktree-intent', 'run-started', 'commit-intent'].includes(e.kind));
+          && (await this.service.store.evidence(task.id)).some(e => ['worktree-intent', 'run-started', 'commit-intent'].includes(e.kind));
         if (uncertain) {
-          this.service.store.recoverDispatch(task.id, 'Prior execution did not record completion; worker termination is unverified. Inspect retained work before cleanup.');
+          await this.service.store.recoverDispatch(task.id, 'Prior execution did not record completion; worker termination is unverified. Inspect retained work before cleanup.');
           continue;
         }
-        this.service.store.recoverDispatch(task.id);
+        await this.service.store.recoverDispatch(task.id);
         if (terminalStates.includes(task.state)) { await this.workflows.run(task.id); await this.service.cleanupTerminalTask(task.id); }
-        else if (['awaiting_mode', 'awaiting_plan_approval'].includes(task.state)) this.service.store.requestDispatch(task.id, true);
-        else if (['planning', 'ready'].includes(task.state)) this.service.store.requestDispatch(task.id, true);
+        else if (['awaiting_mode', 'awaiting_plan_approval'].includes(task.state)) await this.service.store.requestDispatch(task.id, true);
+        else if (['planning', 'ready'].includes(task.state)) await this.service.store.requestDispatch(task.id, true);
       }
     } catch (error) {
       this.halt('recovery', error); throw error;
     } finally {
       this.recovering = false;
     }
-    this.drain();
+    await this.drain();
   }
-  private drain(): void {
+  private dispatching: Promise<void> | undefined;
+  private wakeRequested = false;
+
+  private drain(): Promise<void> {
+    this.wakeRequested = true;
+    return this.dispatching ??= (async () => {
+      do {
+        this.wakeRequested = false;
+        await this.fillSlots();
+      } while (this.wakeRequested);
+    })().finally(() => { this.dispatching = undefined; });
+  }
+
+  private async fillSlots(): Promise<void> {
     if (this.stopping || this.executionFailure || this.recovering) return;
-    while (this.active.size < this.service.config.maxConcurrentTasks) {
+    while (!this.stopping && !this.executionFailure && this.active.size < this.service.config.maxConcurrentTasks) {
       let claim: DispatchClaim | undefined;
       try {
         const excluded = new Set(this.active.keys());
-        if (this.options.admission?.()) for (const id of this.service.store.pendingDispatches()) {
-          if (['planning', 'ready'].includes(this.service.store.task(id).state)) excluded.add(id);
+        if (this.options.admission?.()) for (const id of await this.service.store.pendingDispatches()) {
+          if (['planning', 'ready'].includes((await this.service.store.task(id)).state)) excluded.add(id);
         }
-        claim = this.service.store.claimDispatch(this.owner, excluded);
+        claim = await this.service.store.claimDispatch(this.owner, excluded);
       }
       catch (error) { this.halt('scheduler', error); return; }
       if (!claim) return;
@@ -152,17 +173,18 @@ export class TaskRunner {
       const execution = new TaskExecution(id, this.service, this.engines, validator, environment, this.workflows, this.resources, () => this.stopping);
       const active: Active = { execution, claim, drained: false, promise: Promise.resolve() };
       this.active.set(id, active);
-      active.promise = Promise.resolve().then(() => this.service.store.withDispatch(active.claim, async () => {
+      if (this.stopping) execution.abort.abort();
+      active.promise = Promise.resolve().then(async () => await this.service.store.withDispatch(active.claim, async () => {
         await this.service.diskReserve.replenish(); await execution.run();
       })).catch(error => this.halt(id, error)).finally(async () => {
           try {
             await this.workflows.drain(id); active.drained = true;
             if (!this.executionFailure) {
               await this.service.store.withDispatch(active.claim, () => this.service.cleanupTerminalTask(id));
-              this.service.store.finishDispatch(active.claim);
+              await this.service.store.finishDispatch(active.claim);
             }
           } catch (error) { this.halt(id, error); }
-          finally { this.resources.waiting.delete(id); this.active.delete(id); this.drain(); }
+          finally { this.resources.waiting.delete(id); this.active.delete(id); await this.drain(); }
         });
     }
   }

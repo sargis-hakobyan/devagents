@@ -1,5 +1,24 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    entrypoint: [sh, /local-start.sh]
+    environment:
+      POSTGRES_DB: devagents
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - postgres-login:/run/secrets
+      - ./infra/postgres/local-start.sh:/local-start.sh:ro
+      - ./infra/postgres:/opt/devagents-db:ro
+      - ./infra/postgres/init-public.sql:/docker-entrypoint-initdb.d/01-public.sql:ro
+      - ./infra/postgres/local-role.sql:/docker-entrypoint-initdb.d/10-role.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-d", "devagents", "-U", "devagents_app"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
   devagents:
+    depends_on:
+      postgres: {condition: service_healthy}
     image: devagents:local
     build: .
     init: true
@@ -7,8 +26,12 @@ services:
       - "127.0.0.1:${DEVAGENTS_PORT:-4310}:4310"
     volumes:
       - devagents-data:/data
+      - postgres-login:/run/secrets:ro
     read_only: true
     environment:
+      DEVAGENTS_POSTGRES_HOST: postgres
+      DEVAGENTS_POSTGRES_USER: devagents_app
+      DEVAGENTS_POSTGRES_PASSWORD_FILE: /run/secrets/workspace-db
       DEVAGENTS_MODE: ${DEVAGENTS_MODE:-local}
       DEVAGENTS_AUTH_PROVIDER: ${DEVAGENTS_AUTH_PROVIDER:-}
       DEVAGENTS_PUBLIC_ORIGIN: ${DEVAGENTS_PUBLIC_ORIGIN:-}
@@ -44,3 +67,5 @@ services:
       start_period: 10s
 volumes:
   devagents-data:
+  postgres-data:
+  postgres-login:

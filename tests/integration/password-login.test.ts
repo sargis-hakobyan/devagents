@@ -12,11 +12,11 @@ import { fixture } from '../helpers.js';
 
 async function sharedFixture(https = false) {
   const f = await fixture();
-  const accounts = new LoginAccounts(join(f.dataDir, 'test.db'));
+  const accounts = await LoginAccounts.open(join(f.dataDir, 'test.db'));
   const provider = await PasswordLogin.create(accounts);
   let now = Date.now(); const sessions = new BrowserSessions(() => now, { idleMs: 3600000, absoluteMs: 43200000 });
   const sharedLogin = { provider, users: accounts, publicOrigin: https ? 'https://devagents.example.test' : 'http://127.0.0.1:4310' };
-  const server = createApi(f.service, 'fixture-operator', { sessions, sharedLogin, workspaceOwnerId: accounts.passwordAccount('admin')!.user.id });
+  const server = await createApi(f.service, 'fixture-operator', { sessions, sharedLogin, workspaceOwnerId: (await accounts.passwordAccount('admin'))!.user.id });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as AddressInfo).port; const base = sharedLogin.publicOrigin;
   const call = (path: string, method = 'GET', data?: unknown, headers: Record<string, string> = {}) => new Promise<{ status: number; cookie: string | undefined; body: string }>((resolve, reject) => {
@@ -24,7 +24,7 @@ async function sharedFixture(https = false) {
       let body = ''; res.on('data', c => { body += c; }); res.on('end', () => resolve({ status: res.statusCode!, cookie: res.headers['set-cookie']?.[0], body }));
     }); req.on('error', reject); req.end(data === undefined ? undefined : JSON.stringify(data));
   });
-  return { ...f, accounts, sessions, call, base, tick: (ms: number) => { now += ms; }, close: async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); accounts.close(); await f.cleanup(); } };
+  return { ...f, accounts, sessions, call, base, tick: (ms: number) => { now += ms; }, close: async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await accounts.close(); await f.cleanup(); } };
 }
 const credentials = { username: 'admin', password: 'admin' };
 
@@ -70,7 +70,7 @@ test('shared mode rejects foreign origins, forged identity headers, local sessio
     assert.equal((await f.call('/tasks', 'GET', undefined, { cookie: `devagents_session=${local.id}` })).status, 401);
     const code = f.sessions.mintCode();
     const exchange = await f.call(`/ui/login?code=${code}`); assert.equal(exchange.cookie, undefined);
-    const otherProvider = f.sessions.create({ userId: f.accounts.passwordAccount('admin')!.user.id, providerId: 'sso' });
+    const otherProvider = f.sessions.create({ userId: (await f.accounts.passwordAccount('admin'))!.user.id, providerId: 'sso' });
     assert.equal((await f.call('/tasks', 'GET', undefined, { cookie: `devagents_session=${otherProvider.id}` })).status, 401);
     const login = await f.call('/ui/login', 'POST', credentials); const cookie = login.cookie!.split(';')[0]!;
     assert.equal((await f.call('/tasks', 'GET', undefined, { cookie, origin: 'https://attacker.invalid' })).status, 403);
@@ -93,10 +93,10 @@ test('password login has a bounded attempt budget and HTTPS cookies', async () =
 test('an authenticated second identity cannot read, change, or run work in the bound workspace', async () => {
   const f = await sharedFixture();
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Private task' }, 'owner-request');
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Private task' }, 'owner-request');
     // Synthetic identity only. Production has no account creation or password reset endpoint.
-    const owner = f.accounts.passwordAccount('admin')!;
-    const other = f.accounts.bootstrapPasswordAccount('other', 'Another administrator', owner.salt, owner.hash);
+    const owner = (await f.accounts.passwordAccount('admin'))!;
+    const other = await f.accounts.bootstrapPasswordAccount('other', 'Another administrator', owner.salt, owner.hash);
     const login = await f.call('/ui/login', 'POST', { username: 'other', password: 'admin' });
     assert.equal(login.status, 200);
     const cookie = login.cookie!.split(';')[0]!;
@@ -110,28 +110,28 @@ test('an authenticated second identity cannot read, change, or run work in the b
     for (const path of ['/tasks', '/setup/auth', `/tasks/${task.id}/approve`, `/tasks/${task.id}/cancel`]) {
       assert.equal((await f.call(path, 'POST', {}, headers)).status, 403, path);
     }
-    assert.equal(f.store.task(task.id).version, task.version);
-    assert.throws(() => f.service.workspaceFor({ ownerId: other.id }), /already assigned/);
-    assert.throws(() => f.service.workspaceFor({ ownerId: undefined }), /explicit owner/);
+    assert.equal((await f.store.task(task.id)).version, task.version);
+    await assert.rejects(async () => await f.service.workspaceFor({ ownerId: other.id }), /already assigned/);
+    await assert.rejects(async () => await f.service.workspaceFor({ ownerId: undefined }), /explicit owner/);
   } finally { await f.close(); }
 });
 
 test('queued work uses the persisted workspace owner after restart and rejects a claim for another owner', async () => {
   const f = await sharedFixture();
   try {
-    const id = f.accounts.passwordAccount('admin')!.user.id;
-    const task = f.service.submit({ projectId: 'fixture', request: 'Queued before restart', mode: 'autonomous' }, 'owned-claim');
-    const reopened = new Store(join(f.dataDir, 'test.db'));
+    const id = (await f.accounts.passwordAccount('admin'))!.user.id;
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Queued before restart', mode: 'autonomous' }, 'owned-claim');
+    const reopened = await Store.open(join(f.dataDir, 'test.db'));
     try {
-      assert.equal(reopened.workspaceOwnerId(), id);
-      const claim = reopened.claimDispatch('worker')!;
+      assert.equal(await reopened.workspaceOwnerId(), id);
+      const claim = (await reopened.claimDispatch('worker'))!;
       assert.equal(claim.workspaceOwnerId, id);
       const wrong = { ...claim, workspaceOwnerId: 'other' };
-      assert.throws(() => reopened.withDispatch(wrong, () => reopened.record(task.id, 'unexpected', {})), /another workspace/);
-      assert.throws(() => reopened.heartbeatDispatch(wrong), /another workspace/);
-      assert.throws(() => reopened.finishDispatch(wrong), /another workspace/);
-      reopened.withDispatch(claim, () => reopened.record(task.id, 'owned', {}));
-      reopened.finishDispatch(claim);
-    } finally { reopened.close(); }
+      await assert.rejects(async () => await reopened.withDispatch(wrong, async () => await reopened.record(task.id, 'unexpected', {})), /another workspace/);
+      await assert.rejects(async () => await reopened.heartbeatDispatch(wrong), /another workspace/);
+      await assert.rejects(async () => await reopened.finishDispatch(wrong), /another workspace/);
+      await reopened.withDispatch(claim, async () => await reopened.record(task.id, 'owned', {}));
+      await reopened.finishDispatch(claim);
+    } finally { await reopened.close(); }
   } finally { await f.close(); }
 });

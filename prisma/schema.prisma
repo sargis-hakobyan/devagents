@@ -1,0 +1,349 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  importFileExtension = "js"
+  moduleFormat        = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model CheckpointBinding {
+  singleton    Int
+  store_id     String
+  workspace_id String @default(dbgenerated("workspace_context()")) @db.Uuid
+
+  @@id([workspace_id, singleton])
+
+  @@map("checkpoint_binding")
+}
+
+model MigrationVersion {
+  version Int @id
+  @@map("devagents_migrations")
+}
+
+model Dispatch {
+  task_id           String
+  requested         Int
+  handled           Int     @default(0)
+  requested_version Int
+  generation        Int     @default(0)
+  owner             String?
+  claimed           Int     @default(0)
+  queued_at         String
+  heartbeat_at      String?
+  blocker           String?
+  insertion_order   BigInt  @default(dbgenerated("next_workspace_number('dispatch_queue'::text)"))
+  workspace_id      String  @default(dbgenerated("workspace_context()")) @db.Uuid
+  tasks             Task   @relation(fields: [workspace_id, task_id], references: [workspace_id, id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([workspace_id, task_id])
+  @@unique([workspace_id, insertion_order])
+
+  @@map("dispatch_queue")
+}
+
+model TaskEvent {
+  sequence     BigInt @default(dbgenerated("next_workspace_number('events'::text)"))
+  task_id      String
+  data         String
+  workspace_id String @default(dbgenerated("workspace_context()")) @db.Uuid
+  tasks        Task  @relation(fields: [workspace_id, task_id], references: [workspace_id, id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([workspace_id, sequence])
+  @@index([workspace_id, task_id, sequence], map: "events_by_task")
+
+  @@map("events")
+}
+
+model Evidence {
+  sequence     BigInt @default(dbgenerated("next_workspace_number('evidence'::text)"))
+  task_id      String
+  kind         String
+  data         String
+  workspace_id String @default(dbgenerated("workspace_context()")) @db.Uuid
+  tasks        Task  @relation(fields: [workspace_id, task_id], references: [workspace_id, id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([workspace_id, sequence])
+  @@index([workspace_id, task_id, sequence], map: "evidence_by_task")
+
+  @@map("evidence")
+}
+
+model ExecutionSettings {
+  id           Int
+  data         String
+  workspace_id String @default(dbgenerated("workspace_context()")) @db.Uuid
+
+  @@id([workspace_id, id])
+
+  @@map("execution_settings")
+}
+
+model WorkflowLease {
+  runId          String  @id
+  generation     BigInt
+  ownerId        String
+  leaseExpiresAt BigInt?
+  updatedAt      BigInt
+  workspace_id   String  @default(dbgenerated("workspace_context()")) @db.Uuid
+
+  @@map("mastra_workflow_run_owners")
+}
+
+model WorkflowSnapshot {
+  workflow_name String
+  run_id        String
+  resourceId    String?
+  snapshot      Json
+  createdAt     DateTime  @db.Timestamp(6)
+  updatedAt     DateTime  @db.Timestamp(6)
+  createdAtZ    DateTime? @default(now()) @db.Timestamptz(6)
+  updatedAtZ    DateTime? @default(now()) @db.Timestamptz(6)
+  workspace_id  String    @default(dbgenerated("workspace_context()")) @db.Uuid
+
+  @@id([workflow_name, run_id])
+  @@index([workspace_id, workflow_name, createdAt(sort: Desc)], map: "workflow_by_workspace")
+
+  @@map("mastra_workflow_snapshot")
+}
+
+model ModelCatalog {
+  engine       String
+  data         String
+  workspace_id String @default(dbgenerated("workspace_context()")) @db.Uuid
+
+  @@id([workspace_id, engine])
+
+  @@map("model_catalogs")
+}
+
+model PasswordAccount {
+  username String @id
+  user_id  String @unique
+  salt     String
+  hash     String
+  users    User  @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("password_accounts")
+}
+
+model Project {
+  id           String
+  path         String
+  data         String
+  workspace_id String  @default(dbgenerated("workspace_context()")) @db.Uuid
+  tasks        Task[]
+
+  @@id([workspace_id, id])
+  @@unique([workspace_id, path])
+
+  @@map("projects")
+}
+
+model PullRequest {
+  task_id         String
+  state           String
+  data            String
+  insertion_order BigInt @default(dbgenerated("next_workspace_number('pull_requests'::text)"))
+  workspace_id    String @default(dbgenerated("workspace_context()")) @db.Uuid
+  tasks           Task  @relation(fields: [workspace_id, task_id], references: [workspace_id, id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([workspace_id, task_id])
+  @@unique([workspace_id, insertion_order])
+
+  @@map("pull_requests")
+}
+
+model SubmissionRequest {
+  key          String
+  fingerprint  String
+  task_id      String
+  workspace_id String @default(dbgenerated("workspace_context()")) @db.Uuid
+  tasks        Task  @relation(fields: [workspace_id, task_id], references: [workspace_id, id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([workspace_id, key])
+  @@index([workspace_id, task_id], map: "requests_by_task")
+
+  @@map("requests")
+}
+
+model SchemaVersion {
+  component    String
+  version      Int
+  store_id     String @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String @default(dbgenerated("workspace_context()")) @db.Uuid
+
+  @@id([workspace_id, component])
+
+  @@map("schema_versions")
+}
+
+model SharedTaskHandoff {
+  task_id         String
+  owner_id        String
+  claim_id        String
+  phase           String
+  snapshot        String?
+  insertion_order BigInt  @default(dbgenerated("next_workspace_number('shared_task_handoffs'::text)"))
+  workspace_id    String  @default(dbgenerated("workspace_context()")) @db.Uuid
+  tasks           Task   @relation(fields: [workspace_id, task_id], references: [workspace_id, id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([workspace_id, task_id])
+  @@unique([workspace_id, insertion_order])
+  @@index([workspace_id, phase, task_id], map: "handoffs_by_phase")
+
+  @@map("shared_task_handoffs")
+}
+
+model TaskConcurrency {
+  id                   Int
+  max_concurrent_tasks Int
+  version              Int
+  workspace_id         String @default(dbgenerated("workspace_context()")) @db.Uuid
+
+  @@id([workspace_id, id])
+
+  @@map("task_concurrency")
+}
+
+model TaskHistory {
+  owner_id String  @db.Uuid
+  stream   String
+  sequence BigInt
+  task_id  String  @db.Uuid
+  kind     String?
+  payload  Json    @db.Json
+
+  @@id([owner_id, stream, sequence])
+  @@index([owner_id, task_id, stream, sequence], map: "task_history_page")
+
+  @@map("task_history")
+}
+
+model TaskRun {
+  owner_id    String    @db.Uuid
+  task_id     String    @db.Uuid
+  retry_hash  String
+  input_hash  String
+  submission  Json      @db.Json
+  claim_id    String?   @db.Uuid
+  claimed_at  DateTime? @db.Timestamptz(6)
+  result      Json?     @db.Json
+  finished_at DateTime? @db.Timestamptz(6)
+
+  @@id([owner_id, task_id])
+  @@unique([owner_id, retry_hash])
+
+  @@map("task_runs")
+}
+
+model Task {
+  id                   String
+  project_id           String
+  state                String
+  version              Int
+  data                 String
+  insertion_order      BigInt                @default(dbgenerated("next_workspace_number('tasks'::text)"))
+  workspace_id         String                @default(dbgenerated("workspace_context()")) @db.Uuid
+  dispatch_queue       Dispatch?
+  events               TaskEvent[]
+  evidence             Evidence[]
+  pull_requests        PullRequest?
+  requests             SubmissionRequest[]
+  shared_task_handoffs SharedTaskHandoff?
+  projects             Project              @relation(fields: [workspace_id, project_id], references: [workspace_id, id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([workspace_id, id])
+  @@unique([workspace_id, insertion_order])
+
+  @@map("tasks")
+}
+
+model TeamRevision {
+  team_id      String
+  revision     Int
+  data         String
+  created_at   String
+  reason       String
+  workspace_id String @default(dbgenerated("workspace_context()")) @db.Uuid
+  teams        Team  @relation(fields: [workspace_id, team_id], references: [workspace_id, id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([workspace_id, team_id, revision])
+
+  @@map("team_revisions")
+}
+
+model Team {
+  id             String
+  name           String
+  archived       Int              @default(0)
+  revision       Int
+  created_at     String
+  updated_at     String
+  workspace_id   String           @default(dbgenerated("workspace_context()")) @db.Uuid
+  team_revisions TeamRevision[]
+
+  @@id([workspace_id, id])
+
+  @@map("teams")
+}
+
+model Tracker {
+  id           String
+  data         String
+  workspace_id String @default(dbgenerated("workspace_context()")) @db.Uuid
+
+  @@id([workspace_id, id])
+
+  @@map("trackers")
+}
+
+model User {
+  id                String             @id
+  name              String
+  role              String
+  password_accounts PasswordAccount?
+
+  @@map("users")
+}
+
+model WorkItemConcurrency {
+  id           Int
+  concurrency  Int
+  version      Int
+  workspace_id String @default(dbgenerated("workspace_context()")) @db.Uuid
+
+  @@id([workspace_id, id])
+
+  @@map("work_item_concurrency")
+}
+
+model WorkflowStore {
+  owner_id String @id @db.Uuid
+  store_id String @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  @@map("workflow_stores")
+}
+
+model WorkspaceCounter {
+  workspace_id String @default(dbgenerated("workspace_context()")) @db.Uuid
+  stream       String
+  value        BigInt
+
+  @@id([workspace_id, stream])
+
+  @@map("workspace_counters")
+}
+
+model WorkspaceOwner {
+  singleton    Int
+  user_id      String
+  workspace_id String @default(dbgenerated("workspace_context()")) @db.Uuid
+
+  @@id([workspace_id, singleton])
+
+  @@map("workspace_owner")
+}

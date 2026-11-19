@@ -180,6 +180,8 @@ Verification commands: `npm run check`, `npm run test:ui`, and `npm run test:doc
 
 ## Later AWS architecture
 
+The [self-service deployment proposal](MULTI_USER_DEPLOYMENT_PROPOSAL.md) applies this design to open registration, two active tasks per user and a shared worker fleet.
+
 Retain the task execution boundary while moving workers into separate containers. Use shared production storage, atomic cross-process claims, ownership renewal and storage-enforced generations. A managed transport such as SQS is a candidate, not a dependency or a selected product for the local release.
 
 If an external message queue is adopted, publish through a transactional outbox: save the task transition and dispatch intent together, then relay the intent with a stable identity. Treat redelivery as normal. Acknowledge only after the message's requested action has a durable disposition; long human waits belong in task state, not an indefinitely held message. Reconcile queue delivery and execution independently.

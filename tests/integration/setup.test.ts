@@ -12,7 +12,7 @@ test('browser setup uses session CSRF/Host/Origin, owns challenges, gates execut
     calls++; challenge({ url: 'https://auth.openai.com/codex/device', code: 'ABCD-12345' });
     await new Promise<void>((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('synthetic-secret'))));
   } });
-  const server = createApi(f.service, 'setup-fixture-token', { setupAuth: setup });
+  const server = await createApi(f.service, 'setup-fixture-token', { setupAuth: setup });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const login = async () => {
@@ -62,6 +62,6 @@ test('browser setup uses session CSRF/Host/Origin, owns challenges, gates execut
     await reached;
     assert.equal((await fetch(origin + '/setup/maintenance', { method: 'POST', headers: { authorization: 'Bearer setup-fixture-token' } })).status, 200);
     finishUpload(); assert.equal(await slowLogin, 409); assert.equal(calls, 1);
-    assert.doesNotMatch(JSON.stringify(f.store.summaries()), /ABCD|synthetic-secret/);
+    assert.doesNotMatch(JSON.stringify(await f.store.summaries()), /ABCD|synthetic-secret/);
   } finally { await setup.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await f.cleanup(); }
 });

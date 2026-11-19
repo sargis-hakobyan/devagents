@@ -11,6 +11,7 @@ import { CodexValidator } from '../dist/engines/codex/validator.js';
 import { git } from '../dist/workspace/git.js';
 
 const live = process.argv.includes('--live');
+if (process.env.DEVAGENTS_TEST_DATABASE !== '1') throw Error('Run this fixture with scripts/with-test-postgres.mjs');
 const root = await mkdtemp(join(tmpdir(), 'devagents-m3-')); const project = join(root, 'project'); const data = join(root, 'data');
 let store; let runner; let taskId;
 try {
@@ -23,12 +24,12 @@ try {
   await git(project, ['add', '.']);
   await git(project, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'Initial fixture']);
   const original = await git(project, ['rev-parse', 'HEAD']);
-  store = new Store(join(data, 'state.db'));
-  const service = new TaskService(store, Config.parse({ schemaVersion: 1, concurrency: 2, executionTimeoutMs: 180000 }), data);
+  store = await Store.open(join(data, 'state.db'));
+  const service = await TaskService.create(store, Config.parse({ schemaVersion: 1, concurrency: 2, executionTimeoutMs: 180000 }), data);
   await service.registerProject({ id: 'fixture', path: project });
   const record = store.record.bind(store);
-  store.record = (id, kind, value) => {
-    record(id, kind, value);
+  store.record = async (id, kind, value) => {
+    await record(id, kind, value);
     if (kind === 'run-started' || kind === 'run-completed') console.log(`${value.phase}${value.workItemId ? ` (${value.workItemId})` : ''}: ${kind === 'run-started' ? 'started' : 'completed'}`);
     if (kind === 'work-item') console.log(`Item ${value.itemId}: ${value.state}`);
     if (kind === 'integration-conflict') console.log('Integration conflict: repair required');
@@ -52,25 +53,25 @@ try {
     },
   };
   runner = new TaskRunner(service, engine, new CodexValidator(data)); service.attachRunner(runner);
-  const task = service.submit({ projectId: 'fixture', mode: 'autonomous', request: 'Plan exactly three implementation items with IDs a, b, c. Item a: assign backend-developer to make a/a.cjs return A, own only project:/a/**, validate with node --test a.test.cjs. Item b: assign frontend-developer to make b/b.cjs return B, own only project:/b/**, validate with node --test b.test.cjs. Items a and b are independent (no dependencies). Item c depends on both a and b: assign general-developer to make c/c.cjs call the a/a.cjs and b/b.cjs modules and concatenate their results to AB, own only project:/c/**, validate with node --test c.test.cjs. Set integration assignedAgent to general-developer and combined validation to node --test a.test.cjs b.test.cjs c.test.cjs. Never modify the existing tests. Keep module.exports as a function in every module.', acceptanceCriteria: ['All three existing tests pass unchanged', 'c/c.cjs calls the a/a.cjs and b/b.cjs modules', 'Original checkout remains unchanged'] }, 'm3-smoke');
+  const task = await service.submit({ projectId: 'fixture', mode: 'autonomous', request: 'Plan exactly three implementation items with IDs a, b, c. Item a: assign backend-developer to make a/a.cjs return A, own only project:/a/**, validate with node --test a.test.cjs. Item b: assign frontend-developer to make b/b.cjs return B, own only project:/b/**, validate with node --test b.test.cjs. Items a and b are independent (no dependencies). Item c depends on both a and b: assign general-developer to make c/c.cjs call the a/a.cjs and b/b.cjs modules and concatenate their results to AB, own only project:/c/**, validate with node --test c.test.cjs. Set integration assignedAgent to general-developer and combined validation to node --test a.test.cjs b.test.cjs c.test.cjs. Never modify the existing tests. Keep module.exports as a function in every module.', acceptanceCriteria: ['All three existing tests pass unchanged', 'c/c.cjs calls the a/a.cjs and b/b.cjs modules', 'Original checkout remains unchanged'] }, 'm3-smoke');
   taskId = task.id;
   await runner.idle();
-  const done = store.task(task.id);
+  const done = await store.task(task.id);
   assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
   assert.equal(done.plan.items.length, 3);
-  assert.equal(store.workItems(task.id).every(i => i.state === 'completed'), true);
-  assert.equal(store.evidence(task.id).filter(e => e.kind === 'item-commit-created').length, 3);
-  assert.equal(store.evidence(task.id).filter(e => e.kind === 'commit-created').length, 1);
+  assert.equal((await store.workItems(task.id)).every(i => i.state === 'completed'), true);
+  assert.equal((await store.evidence(task.id)).filter(e => e.kind === 'item-commit-created').length, 3);
+  assert.equal((await store.evidence(task.id)).filter(e => e.kind === 'commit-created').length, 1);
   assert.equal(await git(project, ['rev-parse', 'HEAD']), original);
   assert.equal(await readFile(join(project, 'a', 'a.cjs'), 'utf8'), "module.exports=()=> 'broken';\n");
   assert.equal(await git(project, ['rev-parse', done.workspace.branch]), done.outcome.commit, 'reviewed result survives automatic checkout cleanup');
   assert.deepEqual(done.outcome.files, ['a/a.cjs', 'b/b.cjs', 'c/c.cjs']);
-  const runs = store.evidence(task.id).filter(e => e.kind === 'run-started' && e.data.phase === 'implementation');
+  const runs = (await store.evidence(task.id)).filter(e => e.kind === 'run-started' && e.data.phase === 'implementation');
   assert.equal(new Set(runs.filter(e => e.data.workItemId !== '@integration').map(e => e.data.cwd)).size, 3);
   console.log(`PASS: ${live ? 'live Codex' : 'deterministic'} three-item DAG, isolated worktrees, dependencies, real sandboxed validation, independent item/combined reviews, and final local commit; original checkout unchanged.`);
 } catch (error) {
-  if (store && taskId) console.error('Fixture diagnostics:', JSON.stringify(store.evidence(taskId).filter(e => ['run-completed', 'run-failed', 'validation'].includes(e.kind)).slice(-10)).slice(-12000));
+  if (store && taskId) console.error('Fixture diagnostics:', JSON.stringify((await store.evidence(taskId)).filter(e => ['run-completed', 'run-failed', 'validation'].includes(e.kind)).slice(-10)).slice(-12000));
   throw error;
 } finally {
-  await runner?.stop(); store?.close(); await rm(root, { recursive: true, force: true });
+  await runner?.stop(); await store?.close(); await rm(root, { recursive: true, force: true });
 }

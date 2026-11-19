@@ -14,7 +14,7 @@ test('creation and cleanup coordinate across registered checkouts sharing Git me
     const secondary = join(f.root, 'secondary');
     await git(f.project, ['worktree', 'add', '-b', 'secondary', secondary, 'main']);
     const other = await inspectProject({ id: 'secondary', path: secondary });
-    const manager = new WorkspaceManager(f.dataDir); const primary = f.store.project('fixture');
+    const manager = new WorkspaceManager(f.dataDir); const primary = await f.store.project('fixture');
     let id = randomUUID(); let current = await manager.create(primary, id, 'First');
     for (let i = 0; i < 4; i++) {
       const nextId = randomUUID(); const project = i % 2 ? primary : other;
@@ -81,7 +81,7 @@ test('missing local main fails explicitly instead of falling back to HEAD or ori
     await git(f.project, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
     const missingMain = (error: unknown) => (error as { code?: string }).code === 'main_branch_missing';
     await assert.rejects(inspectProject({ id: 'fixture', path: f.project }), missingMain);
-    await assert.rejects(new WorkspaceManager(f.dataDir).create(f.store.project('fixture'), randomUUID(), 'No fallback'), missingMain);
+    await assert.rejects(new WorkspaceManager(f.dataDir).create(await f.store.project('fixture'), randomUUID(), 'No fallback'), missingMain);
     assert.equal(await git(f.project, ['for-each-ref', '--format=%(refname)', 'refs/heads/devagents/']), '');
   } finally { await f.cleanup(); }
 });
@@ -95,7 +95,7 @@ test('large tracked lockfiles can be reviewed, fully fingerprinted and committed
     await git(f.project, ['add', 'pnpm-lock.yaml']);
     await git(f.project, ['commit', '-m', 'Add large fixture lockfile']);
     await f.service.registerProject({ id: 'fixture', path: f.project });
-    const project = f.store.project('fixture');
+    const project = await f.store.project('fixture');
     const workspace = await new WorkspaceManager(f.dataDir).create(project, randomUUID(), 'Edit the lockfile');
     const agent = (await f.service.agents('fixture')).find(a => a.id === 'general-developer')!;
     const updated = original.replace('package-23999: {version: 1.0.0}', 'package-23999: {version: 1.0.1}');
@@ -122,8 +122,8 @@ test('isolated worktrees preserve dirty checkout and do not invoke repository ho
     const hooks = join(f.project, '.git', 'hooks');
     await writeFile(join(hooks, 'post-checkout'), '#!/bin/sh\nexit 42\n', { mode: 0o755 });
     const manager = new WorkspaceManager(f.dataDir);
-    const a = await manager.create(f.store.project('fixture'), randomUUID(), 'Same request');
-    const b = await manager.create(f.store.project('fixture'), randomUUID(), 'Same request');
+    const a = await manager.create(await f.store.project('fixture'), randomUUID(), 'Same request');
+    const b = await manager.create(await f.store.project('fixture'), randomUUID(), 'Same request');
     assert.notEqual(a.path, b.path); assert.notEqual(a.branch, b.branch);
     await writeFile(join(a.path, 'README.md'), 'Worker changes');
     assert.equal(await readFile(join(b.path, 'README.md'), 'utf8'), '# Fixture\n');
@@ -147,7 +147,7 @@ test('repository checkout filters cannot execute during managed worktree creatio
   const f = await fixture();
   try {
     await git(f.project, ['config', 'filter.hostile.smudge', 'sh -c "exit 42"']);
-    await assert.rejects(new WorkspaceManager(f.dataDir).create(f.store.project('fixture'), randomUUID(), 'Filtered'), /filters requires sandbox/);
+    await assert.rejects(new WorkspaceManager(f.dataDir).create(await f.store.project('fixture'), randomUUID(), 'Filtered'), /filters requires sandbox/);
   } finally { await f.cleanup(); }
 });
 
@@ -161,7 +161,7 @@ test('concurrent item worktree creation in one repository is serialized and ever
   try {
     const base = await git(f.project, ['rev-parse', 'HEAD']);
     const order: string[] = []; const original = git;
-    const created = await Promise.all(['a', 'b', 'c', 'd', 'e', 'f'].map(async id => { const w = await manager.createItem(f.store.project('fixture'), taskId, taskBranch, id, base); order.push(id); return w; }));
+    const created = await Promise.all(['a', 'b', 'c', 'd', 'e', 'f'].map(async id => { const w = await manager.createItem(await f.store.project('fixture'), taskId, taskBranch, id, base); order.push(id); return w; }));
     void original;
     assert.equal(new Set(created.map(w => w.path)).size, 6); assert.equal(new Set(created.map(w => w.branch)).size, 6);
     const registered = (await git(f.project, ['worktree', 'list', '--porcelain'], false)).split('\n').filter(l => l.startsWith('worktree ')).map(l => l.slice(9));
@@ -174,7 +174,7 @@ test('concurrent item worktree creation in one repository is serialized and ever
 test('large unignored dependency caches fail with a setup diagnosis before Git buffer overflow', async () => {
   const f = await fixture(false);
   try {
-    const workspace = await new WorkspaceManager(f.dataDir).create(f.store.project('fixture'), randomUUID(), 'Small greeting');
+    const workspace = await new WorkspaceManager(f.dataDir).create(await f.store.project('fixture'), randomUUID(), 'Small greeting');
     const agent = (await f.service.agents('fixture')).find(a => a.id === 'general-developer')!;
     const cache = join(workspace.path, '.pnpm-store'); await mkdir(cache);
     for (let batch = 0; batch < 90; batch++) await Promise.all(Array.from({ length: 100 }, (_, i) => writeFile(join(cache, String(batch * 100 + i).padStart(235, 'x')), '')));

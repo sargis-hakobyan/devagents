@@ -14,6 +14,7 @@ import { CodexAdapter } from '../dist/engines/codex/adapter.js';
 // An opt-in live run uses the explicitly supplied DevAgents credential profile.
 // The default uses deterministic engine responses but real sandboxed tests and Git.
 const live = process.argv.includes('--live');
+if (process.env.DEVAGENTS_TEST_DATABASE !== '1') throw Error('Run this fixture with scripts/with-test-postgres.mjs');
 const root = await mkdtemp(join(tmpdir(), 'devagents-m2-'));
 const project = join(root, 'fixture'); const data = join(root, 'data');
 let store; let runner;
@@ -25,10 +26,10 @@ try {
   execFileSync('git', ['-C', project, 'add', '.']);
   execFileSync('git', ['-C', project, '-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'Initial fixture']);
   await mkdir(data);
-  store = new Store(join(data, 'state.db'));
+  store = await Store.open(join(data, 'state.db'));
   // Keep this fixture's checkout for the post-completion sandbox containment check below.
   const config = Config.parse({ schemaVersion: 1, executionTimeoutMs: 180000, compactCompletedTasks: false, cleanupTerminalTasks: false });
-  const service = new TaskService(store, config, data);
+  const service = await TaskService.create(store, config, data);
   await service.registerProject({ id: 'fixture', path: project });
   const engine = live ? new CodexAdapter(process.env.DEVAGENTS_DATA_DIR ?? '.devagents') : {
     id: 'codex', async preflight() {},
@@ -41,9 +42,9 @@ try {
     },
   };
   runner = new TaskRunner(service, engine, new CodexValidator(data)); service.attachRunner(runner);
-  const task = service.submit({ projectId: 'fixture', request: 'Fix greeting.cjs so the existing greeting.test.cjs test passes: return hello. Do not change the existing test or package.json. Plan exactly one implementation item and validate with node --test greeting.test.cjs.', mode: 'autonomous' }, 'smoke');
+  const task = await service.submit({ projectId: 'fixture', request: 'Fix greeting.cjs so the existing greeting.test.cjs test passes: return hello. Do not change the existing test or package.json. Plan exactly one implementation item and validate with node --test greeting.test.cjs.', mode: 'autonomous' }, 'smoke');
   await runner.idle();
-  const done = store.task(task.id);
+  const done = await store.task(task.id);
   assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
   assert.match(done.outcome.commit, /^[a-f0-9]{40}$/);
   assert.equal(await readFile(join(project, 'greeting.cjs'), 'utf8'), "module.exports = () => 'broken';\n");
@@ -59,6 +60,6 @@ try {
     console.log('PASS: validation cannot read service credentials, write original checkout/Git metadata, or inherit service secrets.');
   }
 } finally {
-  await runner?.stop(); store?.close();
+  await runner?.stop(); await store?.close();
   await rm(root, { recursive: true, force: true });
 }

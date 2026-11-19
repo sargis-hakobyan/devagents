@@ -82,7 +82,7 @@ export function OverviewPage() {
           <a href="/ui/settings" style={{ fontSize: '13px', fontWeight: 700 }}>Settings →</a>
         </div></Card>
         <Card title="Scheduler"><div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <div class="mono">{status ? `concurrency ${status.limits.concurrency} · repairs ${status.limits.maxRepairCycles} · wave scheduling` : '…'}</div>
+          <div class="mono">{status ? `up to ${status.limits.concurrency} parallel subtasks per task · repairs ${status.limits.maxRepairCycles}` : '…'}</div>
           <div class="muted" style={{ fontSize: '12px' }}>{scheduler?.enabled ? `${scheduler.active.length} / ${scheduler.maxConcurrentTasks} task slots in use · ${scheduler.queued} queued · ${scheduler.runningOperations} / ${scheduler.maxConcurrentOperations} operations running` : 'Execution scheduler is unavailable.'}</div><div class="muted" style={{ fontSize: '12px' }}>Approval waits release capacity. Each task has its own worktree and cancellation.</div>
           <div class="muted" style={{ fontSize: '12px' }}>{storage?.measured ? `${(storage.availableBytes! / 1024 ** 3).toFixed(2)} GiB available on the task-data filesystem` : 'Storage availability not measured'}</div>
         </div></Card>

@@ -26,19 +26,20 @@ const cli = async (...args) => JSON.parse(await docker(['exec', '-T', 'devagents
 const assertWorkflowWait = async taskId => {
   const code = `
     import assert from 'node:assert/strict';
-    import { LibSQLStore } from '@mastra/libsql';
-    const storage = new LibSQLStore({ id: 'fixture-inspection', url: 'file:/data/workflows.db' });
+    import { existsSync } from 'node:fs';
+    import { PgSession } from './dist/persistence/pg-session.js';
+    for (const name of ['devagents.db','workflows.db','service-lock.db']) assert.equal(existsSync('/data/' + name), false);
+    const db = await PgSession.open('/data/devagents.db');
     try {
-      const workflows = await storage.getStore('workflows');
       let snapshot;
       for (let attempt = 0; attempt < 100; attempt++) {
-        snapshot = await workflows.loadWorkflowSnapshot({ workflowName: 'devagents-task-v1', runId: process.argv[1] });
+        snapshot = (await db.prepare('SELECT snapshot FROM mastra_workflow_snapshot WHERE run_id=$1').get(process.argv[1]))?.snapshot;
         if (snapshot?.status === 'suspended') break;
         await new Promise(resolve => setTimeout(resolve, 50));
       }
       assert.equal(snapshot?.status, 'suspended');
       assert.deepEqual(snapshot.context.input, { taskId: process.argv[1] });
-    } finally { await storage.close(); }
+    } finally { await db.close(); }
   `;
   await docker(['exec', '-T', 'devagents', 'node', '--input-type=module', '-e', code, taskId]);
 };
@@ -90,7 +91,8 @@ try {
   assert.equal(connection.connection.method, 'api-key');
   console.log(await docker(['exec', '-T', 'devagents', 'node', 'scripts/vault-smoke.mjs', 'browser']));
   console.log('PASS: browser API saves a synthetic key through the production login manager without a model request.');
-  await docker(['restart']);
+  await docker(['stop', 'devagents']);
+  await docker(['restart', 'postgres']);
   await docker(['up', '-d', '--wait', '--wait-timeout', '60']);
   console.log(await docker(['exec', '-T', 'devagents', 'node', 'scripts/vault-smoke.mjs', 'restore']));
   const restored = await cli('tasks', 'show', task.id);
@@ -111,7 +113,13 @@ try {
     const command = script === 'codex-protocol-smoke.mjs'
       ? ['node', '--input-type=module', '-e', `import {spawn} from 'node:child_process'; await Promise.all([0,1].map(() => new Promise((resolve,reject) => { const child=spawn(process.execPath,['/app/scripts/${script}'],{stdio:'inherit'}); child.once('error',reject); child.once('exit',(code,signal)=>code===0?resolve():reject(new Error('Parallel runtime fixture failed: '+(signal??code)))); })));`]
       : ['node', `/app/scripts/${script}`];
-    const result = await exec('docker', ['run', '--rm', '--read-only', '--pids-limit', String(inspect.HostConfig.PidsLimit), '--cpus', String(inspect.HostConfig.NanoCpus / 1e9), '--memory', String(inspect.HostConfig.Memory), '--tmpfs', '/tmp:size=128m,mode=1777', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--security-opt', 'systempaths=unconfined', '--tmpfs', '/data:size=8g,mode=1777,exec', '-e', 'TMPDIR=/data', '--mount', `type=bind,source=${resolve('scripts', script)},target=/app/scripts/${script},readonly`, 'devagents:local', ...command], { timeout: 90000, maxBuffer: 2 * 1024 * 1024 });
+    const databaseArgs = [];
+    if (['m2-smoke.mjs', 'm3-smoke.mjs', 'parallel-smoke.mjs'].includes(script)) {
+      const volume = inspect.Mounts.find(m => m.Destination === '/run/secrets').Name;
+      databaseArgs.push('--network', Object.keys(inspect.NetworkSettings.Networks)[0], '--mount', 'type=volume,src=' + volume + ',dst=/run/secrets,readonly',
+        '-e','DEVAGENTS_TEST_DATABASE=1','-e','DEVAGENTS_POSTGRES_HOST=postgres','-e','DEVAGENTS_POSTGRES_USER=devagents_app','-e','DEVAGENTS_POSTGRES_DATABASE=devagents','-e','DEVAGENTS_POSTGRES_PASSWORD_FILE=/run/secrets/workspace-db');
+    }
+    const result = await exec('docker', ['run', '--rm', ...databaseArgs, '--read-only', '--pids-limit', String(inspect.HostConfig.PidsLimit), '--cpus', String(inspect.HostConfig.NanoCpus / 1e9), '--memory', String(inspect.HostConfig.Memory), '--tmpfs', '/tmp:size=128m,mode=1777', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--security-opt', 'systempaths=unconfined', '--tmpfs', '/data:size=8g,mode=1777,exec', '-e', 'TMPDIR=/data', '--mount', `type=bind,source=${resolve('scripts', script)},target=/app/scripts/${script},readonly`, 'devagents:local', ...command], { timeout: 90000, maxBuffer: 2 * 1024 * 1024 });
     console.log(result.stdout.trim());
   }
   console.log('PASS: Docker health, unauthenticated setup, explicit project mount, non-root execution, persistent task/event history and idempotent retry.');

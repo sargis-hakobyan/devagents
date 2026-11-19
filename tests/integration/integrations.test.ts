@@ -89,7 +89,7 @@ async function serve(options: { secrets?: SecretStore; state?: { githubRevoked?:
   if (options.origin !== false) execFileSync('git', ['-C', f.project, 'remote', 'add', 'origin', 'git@github.com:example-org/website.git']);
   let now = new Date('2026-11-13T12:00:00Z');
   const integrations = new ProjectIntegrationService(f.store, secrets, { fetch: fetcher, githubApiUrl: 'https://api.github.test', now: () => now });
-  const server = createApi(f.service, 'test-token', { integrations });
+  const server = await createApi(f.service, 'test-token', { integrations });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const root = `http://127.0.0.1:${(server.address() as AddressInfo).port}`; const base = `${root}/projects/fixture/integrations`;
   const call = async (path: string, method = 'GET', body?: unknown, project = 'fixture') => {
@@ -124,9 +124,9 @@ test('GitHub: a token is verified against the folder\'s repository, kept out of 
     assert.deepEqual({ ...connected.data.github, connectedAt: 0, checkedAt: 0 }, { savedToken: 'github-fixture-user', repository: 'example-org/website', tokenKind: 'fine-grained', login: 'fixture-user', canPush: true, expiresAt: '2027-01-10T12:00:00.000Z', state: 'connected', expiresInDays: 58, connectedAt: 0, checkedAt: 0 });
     assert.deepEqual([...secrets.values], [['github-fixture-user', GITHUB_TOKEN]], 'the token is stored under its account, not under the project');
     assert.deepEqual(connected.data.savedTokens.github, [{ id: 'github-fixture-user', label: '@fixture-user', usedBy: [{ id: 'fixture', name: 'fixture' }] }]);
-    const everywhere = [connected.text, (await s.call('')).text, JSON.stringify(s.f.store.projects())].join('\n');
+    const everywhere = [connected.text, (await s.call('')).text, JSON.stringify(await s.f.store.projects())].join('\n');
     assert.equal(everywhere.includes(GITHUB_TOKEN), false, 'the token appears in no response and not in the database');
-    assert.equal(s.f.store.project('fixture').version, 0, 'connecting does not make a default-team edit stale');
+    assert.equal((await s.f.store.project('fixture')).version, 0, 'connecting does not make a default-team edit stale');
 
     s.setNow('2027-01-03T12:00:00Z');
     assert.equal((await s.call('')).data.github.state, 'expiring');
@@ -140,7 +140,7 @@ test('GitHub: a token is verified against the folder\'s repository, kept out of 
 
     const removed = await s.call('/github', 'DELETE');
     assert.equal(removed.data.github, null); assert.equal(secrets.values.size, 0);
-    assert.equal(s.f.store.project('fixture').integrations, undefined);
+    assert.equal((await s.f.store.project('fixture')).integrations, undefined);
     assert.equal((await s.call('/github/check', 'POST', {})).status, 404);
     assert.equal((await fetch(`${s.base.replace('/fixture/', '/unknown/')}`, { headers: { authorization: 'Bearer test-token' } })).status, 404);
     for (const call of s.calls.filter(c => c.url.startsWith('https://api.github.test/'))) assert.match(call.authorization ?? '', /^Bearer /);
@@ -197,12 +197,12 @@ test('Jira Cloud: email and API token connect, the rule is resolved against live
     assert.match((await s.call('/jira/preview', 'POST', { project: 'WEB', assignee: 'Sam Example' })).data.message, /Several people/);
     assert.equal((await s.call('/jira/preview', 'POST', { project: 'NOPE', label: 'devagents' })).data.error, 'invalid_rule');
     const refused = await s.call('/jira/rule', 'PUT', { project: 'WEB', label: 'broken' });
-    assert.equal(refused.data.error, 'jira_refused'); assert.equal(s.f.store.project('fixture').integrations?.jira?.rule, undefined, 'a rule Jira refuses is not saved');
+    assert.equal(refused.data.error, 'jira_refused'); assert.equal((await s.f.store.project('fixture')).integrations?.jira?.rule, undefined, 'a rule Jira refuses is not saved');
 
     const preview = await s.call('/jira/preview', 'POST', { project: 'web', column: 'ready for agents', assignee: 'devagents bot' });
     assert.deepEqual(preview.data.matches, { count: 3, keys: ['WEB-12', 'WEB-15', 'WEB-21'] });
     assert.equal(preview.data.rule.jql, 'project = "WEB" AND status in (10001, 10002) AND assignee = "acc-bot" ORDER BY created ASC');
-    assert.equal(s.f.store.project('fixture').integrations?.jira?.rule, undefined, 'a preview saves nothing');
+    assert.equal((await s.f.store.project('fixture')).integrations?.jira?.rule, undefined, 'a preview saves nothing');
     const saved = await s.call('/jira/rule', 'PUT', { project: 'WEB', column: 'Ready for agents', label: 'devagents', start: 'auto' });
     assert.equal(saved.status, 200);
     assert.deepEqual({ ...saved.data.integrations.jira.rule, savedAt: 0 }, { project: { key: 'WEB', name: 'Website' }, column: { name: 'Ready for agents', statusIds: ['10001', '10002'] }, label: 'devagents', start: 'auto', jql: 'project = "WEB" AND status in (10001, 10002) AND labels = "devagents" ORDER BY created ASC', savedAt: 0 });
@@ -221,7 +221,7 @@ test('Jira Cloud: email and API token connect, the rule is resolved against live
     assert.deepEqual((await s.call('/jira/preview', 'POST', { project: 'OPS', assignee: 'DevAgents Bot' })).data.matches, { count: 1, keys: ['OPS-4'] });
     assert.equal((await s.call('/jira', 'DELETE')).data.jira, null); assert.equal(secrets.values.size, 0);
 
-    const text = JSON.stringify(s.f.store.projects());
+    const text = JSON.stringify(await s.f.store.projects());
     for (const secret of [JIRA_TOKEN, PAT]) assert.equal(text.includes(secret), false);
     for (const call of s.calls) {
       if (call.url.startsWith('https://example.atlassian.net/rest/')) assert.match(call.authorization ?? '', /^Basic /);
@@ -305,7 +305,7 @@ test('without a vault a pasted token is refused and the environment token is use
 });
 
 test('a service without integrations answers 503 instead of pretending', async () => {
-  const f = await fixture(); const server = createApi(f.service, 'test-token');
+  const f = await fixture(); const server = await createApi(f.service, 'test-token');
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
     const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/fixture/integrations`, { headers: { authorization: 'Bearer test-token' } });
@@ -332,7 +332,7 @@ test('Jira: one ticket is read with its text, comments and file names, and a tas
     assert.equal(read.data.ticket.name, 'Jira'); assert.equal(read.data.ticket.source, 'jira');
     const missing = await content('WEB-99'); assert.equal(missing.status, 404); assert.equal(missing.data.error, 'ticket_unreadable');
     assert.equal((await content('not a key')).status, 400);
-    const task = s.f.service.submit({ projectId: 'fixture', request: read.data.request, ticket: { source: 'jira', key: 'web-12', url: 'https://elsewhere.example.com/x' } }, 'from-jira');
+    const task = await s.f.service.submit({ projectId: 'fixture', request: read.data.request, ticket: { source: 'jira', key: 'web-12', url: 'https://elsewhere.example.com/x' } }, 'from-jira');
     assert.deepEqual(task.ticket, { source: 'jira', name: 'Jira', key: 'WEB-12', url: 'https://example.atlassian.net/browse/WEB-12' }, 'the link is the connected Jira, whatever was sent');
   } finally { await s.close(); }
 });
@@ -357,7 +357,7 @@ test('Jira: matching tickets are available, a started one leaves, and its files 
     // A task started from the ticket takes the picture and the text file; the other file stays on the ticket.
     const files: { saved: { name: string; file: string; kind: string; bytes: number }[]; skipped: { name: string; reason: string }[] }[] = [];
     s.f.service.attachTicketFiles(async (task, directory) => { const result = await downloadTicketFiles({ integrations: s.integrations }, task.projectId, task.ticket!, directory); files.push(result); return result; });
-    const task = s.f.service.submit({ projectId: 'fixture', request: 'WEB-12: Add a contact form', mode: 'autonomous', ticket: { source: 'jira', key: 'WEB-12' } }, 'jira-files');
+    const task = await s.f.service.submit({ projectId: 'fixture', request: 'WEB-12: Add a contact form', mode: 'autonomous', ticket: { source: 'jira', key: 'WEB-12' } }, 'jira-files');
     await s.f.service.loadTicketFiles(task.id);
     assert.deepEqual(files[0], {
       saved: [{ name: 'footer.png', file: '01.png', kind: 'image', type: 'image/png', bytes: PNG.byteLength }, { name: 'notes.txt', file: '02.txt', kind: 'text', type: 'text/plain', bytes: 14 }],

@@ -261,8 +261,8 @@ test('browser workflow registers, submits, rejects stale approval, approves and 
   await page.getByRole('tab', { name: /^Work/ }).click();
   // A second writer changes the durable version after the page rendered, before POST arrives.
   await page.route(`${base}/tasks/${id}/approve`, async route => {
-    const store = new Store(join(fixtureDir, 'devagents.db'), []);
-    try { const t = store.task(id); store.checkpoint(id, t.version, {}, 'Fixture stale approval'); } finally { store.close(); }
+    const store = await Store.open(join(fixtureDir, 'devagents.db'), []);
+    try { const t = await store.task(id); await store.checkpoint(id, t.version, {}, 'Fixture stale approval'); } finally { await store.close(); }
     await route.continue();
   });
   await approve.click();
@@ -362,9 +362,9 @@ test('queued and running cancellation work and the committing boundary offers no
 test('an unresolved attempt survives an actual service restart with new sessions and the same database', async ({ page }) => {
   const data = await mkdtemp(join(tmpdir(), 'devagents-u3-restart-'));
   const db = join(data, 'test.db'); const status = await (await call('/status')).json();
-  let store = new Store(db, []); let service = new TaskService(store, Config.parse({ schemaVersion: 1 }), data);
+  let store = await Store.open(db, []); let service = await TaskService.create(store, Config.parse({ schemaVersion: 1 }), data);
   await service.registerProject({ id: 'restart-project', path: root });
-  let server = createApi(service, 'fixture-restart-token', { uiRoot: join(process.cwd(), 'dist/ui'), status: async () => status });
+  let server = await createApi(service, 'fixture-restart-token', { uiRoot: join(process.cwd(), 'dist/ui'), status: async () => status });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const restartPort = (server.address() as AddressInfo).port; const origin = `http://127.0.0.1:${restartPort}`;
   const login = async () => {
@@ -378,10 +378,10 @@ test('an unresolved attempt survives an actual service restart with new sessions
     await page.route(`${origin}/tasks`, async route => { if (route.request().method() !== 'POST') return route.continue(); await route.fetch(); await route.abort(); });
     await page.getByRole('button', { name: 'Submit task', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Retry this attempt' })).toBeEnabled();
-    const original = store.summaries({ limit: 20 }).tasks[0]!;
-    server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); store.close();
-    store = new Store(db, []); service = new TaskService(store, Config.parse({ schemaVersion: 1, defaultMode: 'autonomous' }), data);
-    server = createApi(service, 'fixture-restart-token', { uiRoot: join(process.cwd(), 'dist/ui'), status: async () => status });
+    const original = (await store.summaries({ limit: 20 })).tasks[0]!;
+    server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await store.close();
+    store = await Store.open(db, []); service = await TaskService.create(store, Config.parse({ schemaVersion: 1, defaultMode: 'autonomous' }), data);
+    server = await createApi(service, 'fixture-restart-token', { uiRoot: join(process.cwd(), 'dist/ui'), status: async () => status });
     await new Promise<void>(resolve => server.listen(restartPort, '127.0.0.1', resolve));
     await page.unroute(`${origin}/tasks`); await page.reload();
     await expect(page).toHaveURL(`${origin}/ui/signed-out`);
@@ -390,25 +390,25 @@ test('an unresolved attempt survives an actual service restart with new sessions
     await page.getByRole('button', { name: 'Retry this attempt' }).click();
     await expect(page.getByText('Task accepted', { exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Open task' })).toHaveAttribute('href', `/ui/tasks/${original.id}`);
-    expect(store.summaries({ limit: 20 }).tasks).toHaveLength(1); expect(store.task(original.id).mode).toBeUndefined();
-  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); store.close(); await rm(data, { recursive: true, force: true }); }
+    expect((await store.summaries({ limit: 20 })).tasks).toHaveLength(1); expect((await store.task(original.id)).mode).toBeUndefined();
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await store.close(); await rm(data, { recursive: true, force: true }); }
 });
 
 test('real HTTP diffs distinguish hostile truncated text, binary, empty and missing commits', async ({ page }) => {
   const f = await diffFixture();
   const status = await (await call('/status')).json();
-  const server = createApi(f.service, 'synthetic-diff-token', { uiRoot: join(process.cwd(), 'dist/ui'), status: async () => status });
+  const server = await createApi(f.service, 'synthetic-diff-token', { uiRoot: join(process.cwd(), 'dist/ui'), status: async () => status });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const complete = async (files: Record<string, string | Buffer>) => {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Browser diff fixture', mode: 'autonomous' }, crypto.randomUUID());
-    const workspace = await new WorkspaceManager(f.dataDir).create(f.store.project('fixture'), task.id, task.request);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Browser diff fixture', mode: 'autonomous' }, crypto.randomUUID());
+    const workspace = await new WorkspaceManager(f.dataDir).create(await f.store.project('fixture'), task.id, task.request);
     for (const [name, contents] of Object.entries(files)) await writeFile(join(workspace.path, name), contents);
     await git(workspace.path, ['add', '.']);
     await git(workspace.path, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'Browser diff fixture']);
     const commit = await git(workspace.path, ['rev-parse', 'HEAD']);
-    let t = f.store.checkpoint(task.id, f.store.task(task.id).version, { workspace }, 'fixture');
-    for (const state of ['ready', 'running', 'validating', 'reviewing', 'committing'] as const) t = f.store.transition(task.id, t.version, state, 'fixture', 'fixture');
+    let t = await f.store.checkpoint(task.id, (await f.store.task(task.id)).version, { workspace }, 'fixture');
+    for (const state of ['ready', 'running', 'validating', 'reviewing', 'committing'] as const) t = await f.store.transition(task.id, t.version, state, 'fixture', 'fixture');
     return f.store.transition(task.id, t.version, 'completed', 'fixture', 'done', { outcome: { commit, repairCycles: 0 } });
   };
   try {

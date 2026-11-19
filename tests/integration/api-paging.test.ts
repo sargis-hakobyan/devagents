@@ -6,15 +6,15 @@ import { fixture, validPlan } from '../helpers.js';
 import type { TaskSummary } from '../../src/domain/schemas.js';
 
 test('task lists page by cursor with filters, event and evidence polling use sequence cursors, and evidence is bounded', async () => {
-  const f = await fixture(); const server = createApi(f.service, 't');
+  const f = await fixture(); const server = await createApi(f.service, 't');
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`; const headers = { authorization: 'Bearer t' };
   const get = async <T>(path: string) => { const r = await fetch(`${url}${path}`, { headers }); assert.equal(r.status, 200, path); return await r.json() as T; };
   try {
     const ids: string[] = [];
-    for (let i = 0; i < 5; i++) ids.push(f.service.submit({ projectId: 'fixture', request: `Task ${i} <script>alert(1)</script>`, mode: 'autonomous' }, `page-${i}`).id);
-    const ready = await f.service.proposePlan(ids[0]!, validPlan()); f.store.transition(ids[0]!, ready.version, 'running', 'test', 'started');
-    f.service.cancel(ids[1]!);
+    for (let i = 0; i < 5; i++) ids.push((await f.service.submit({ projectId: 'fixture', request: `Task ${i} <script>alert(1)</script>`, mode: 'autonomous' }, `page-${i}`)).id);
+    const ready = await f.service.proposePlan(ids[0]!, validPlan()); await f.store.transition(ids[0]!, ready.version, 'running', 'test', 'started');
+    await f.service.cancel(ids[1]!);
     const first = await get<{ tasks: TaskSummary[]; nextBefore?: number }>('/tasks?limit=2');
     assert.equal(first.tasks.length, 2); assert.ok(first.nextBefore); assert.equal(first.tasks[0]!.id, ids[4]); assert.equal(first.tasks[0]!.request, 'Task 4 <script>alert(1)</script>');
     const second = await get<{ tasks: TaskSummary[]; nextBefore?: number }>(`/tasks?limit=2&before=${first.nextBefore}`);
@@ -37,7 +37,7 @@ test('task lists page by cursor with filters, event and evidence polling use seq
     const newer = await get<{ sequence: number }[]>(`/tasks/${ids[0]}/events?after=${events[1]!.sequence}`); assert.deepEqual(newer.map(e => e.sequence), [events[2]!.sequence]);
     assert.deepEqual(await get(`/tasks/${ids[0]}/events?after=${events[2]!.sequence}`), []);
     // Evidence: large entries are previewed in lists and complete when fetched alone.
-    f.store.record(ids[0]!, 'validation', { output: 'x'.repeat(40000), exitCode: 0 }); f.store.record(ids[0]!, 'work-item', { itemId: 'greeting', state: 'running' });
+    await f.store.record(ids[0]!, 'validation', { output: 'x'.repeat(40000), exitCode: 0 }); await f.store.record(ids[0]!, 'work-item', { itemId: 'greeting', state: 'running' });
     const evidence = await get<{ sequence: number; kind: string; truncated?: boolean; data: { preview?: string; bytes?: number; output?: string } }[]>(`/tasks/${ids[0]}/evidence`);
     assert.equal(evidence.length, 2); assert.equal(evidence[0]!.truncated, true); assert.equal(evidence[0]!.data.bytes! > 40000, true); assert.equal(Buffer.byteLength(evidence[0]!.data.preview!), 16 * 1024);
     assert.equal(evidence[1]!.truncated, undefined);
@@ -49,21 +49,21 @@ test('task lists page by cursor with filters, event and evidence polling use seq
 });
 
 test('overview categories and grouped task filters include older work before pagination', async () => {
-  const f = await fixture(); const server = createApi(f.service, 't');
+  const f = await fixture(); const server = await createApi(f.service, 't');
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
-    const running = f.service.submit({ projectId: 'fixture', request: 'Old running task', mode: 'autonomous' }, 'old-running');
-    const ready = await f.service.proposePlan(running.id, validPlan()); f.store.transition(running.id, ready.version, 'running', 'test', 'started');
-    const waiting = f.service.submit({ projectId: 'fixture', request: 'Old approval', mode: 'plan-approval' }, 'old-approval');
+    const running = await f.service.submit({ projectId: 'fixture', request: 'Old running task', mode: 'autonomous' }, 'old-running');
+    const ready = await f.service.proposePlan(running.id, validPlan()); await f.store.transition(running.id, ready.version, 'running', 'test', 'started');
+    const waiting = await f.service.submit({ projectId: 'fixture', request: 'Old approval', mode: 'plan-approval' }, 'old-approval');
     await f.service.proposePlan(waiting.id, validPlan());
-    for (let i = 0; i < 51; i++) f.service.submit({ projectId: 'fixture', request: `Mode ${i}` }, `mode-${i}`);
+    for (let i = 0; i < 51; i++) await f.service.submit({ projectId: 'fixture', request: `Mode ${i}` }, `mode-${i}`);
     for (let i = 0; i < 201; i++) {
-      const t = f.service.submit({ projectId: 'fixture', request: `Newer ${i}` }, `newer-${i}`); f.service.cancel(t.id);
+      const t = await f.service.submit({ projectId: 'fixture', request: `Newer ${i}` }, `newer-${i}`); await f.service.cancel(t.id);
     }
     // A large queue must not displace the executing task either.
-    for (let i = 0; i < 201; i++) f.service.submit({ projectId: 'fixture', request: `Queued ${i}`, mode: 'autonomous' }, `queued-${i}`);
-    const overview = f.store.overview();
+    for (let i = 0; i < 201; i++) await f.service.submit({ projectId: 'fixture', request: `Queued ${i}`, mode: 'autonomous' }, `queued-${i}`);
+    const overview = await f.store.overview();
     assert.equal(overview.counts.running, 1); assert.equal(overview.counts.awaiting_plan_approval, 1);
     assert.ok(overview.active.some(t => t.id === running.id)); assert.equal(overview.active.length, 51);
     assert.equal(overview.attention.length, 50); assert.equal(overview.recent.length, 8);
@@ -80,35 +80,35 @@ test('overview categories and grouped task filters include older work before pag
 });
 
 test('task approval is derived from durable history even after cancellation and event pagination', async () => {
-  const f = await fixture(); const server = createApi(f.service, 't');
+  const f = await fixture(); const server = await createApi(f.service, 't');
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
     const approval = async (id: string) => (await (await fetch(`${url}/tasks/${id}`, { headers: { authorization: 'Bearer t' } })).json() as { approval: { status: string; timestamp?: string } }).approval;
-    const rejected = f.service.submit({ projectId: 'fixture', request: 'Reject this', mode: 'plan-approval' }, 'reject');
+    const rejected = await f.service.submit({ projectId: 'fixture', request: 'Reject this', mode: 'plan-approval' }, 'reject');
     assert.equal((await approval(rejected.id)).status, 'not-planned');
     await f.service.proposePlan(rejected.id, validPlan()); assert.equal((await approval(rejected.id)).status, 'awaiting');
-    f.service.cancel(rejected.id); assert.equal((await approval(rejected.id)).status, 'not-approved');
-    const approved = f.service.submit({ projectId: 'fixture', request: 'Approve this', mode: 'plan-approval' }, 'approve');
-    const planned = await f.service.proposePlan(approved.id, validPlan()); f.service.approve(approved.id, planned.version);
+    await f.service.cancel(rejected.id); assert.equal((await approval(rejected.id)).status, 'not-approved');
+    const approved = await f.service.submit({ projectId: 'fixture', request: 'Approve this', mode: 'plan-approval' }, 'approve');
+    const planned = await f.service.proposePlan(approved.id, validPlan()); await f.service.approve(approved.id, planned.version);
     // The approval must not depend on the first page of activity or the current terminal state.
-    for (let i = 0; i < 501; i++) f.store.checkpoint(approved.id, f.store.task(approved.id).version, {}, 'fixture checkpoint');
-    f.service.cancel(approved.id);
+    for (let i = 0; i < 501; i++) await f.store.checkpoint(approved.id, (await f.store.task(approved.id)).version, {}, 'fixture checkpoint');
+    await f.service.cancel(approved.id);
     assert.equal((await approval(approved.id)).status, 'approved'); assert.ok((await approval(approved.id)).timestamp);
-    const auto = f.service.submit({ projectId: 'fixture', request: 'Autonomous', mode: 'autonomous' }, 'auto');
+    const auto = await f.service.submit({ projectId: 'fixture', request: 'Autonomous', mode: 'autonomous' }, 'auto');
     await f.service.proposePlan(auto.id, validPlan()); assert.equal((await approval(auto.id)).status, 'autonomous');
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await f.cleanup(); }
 });
 
 test('large evidence previews preserve bounded validation and review facts independently of text', async () => {
-  const f = await fixture(); const server = createApi(f.service, 't');
+  const f = await fixture(); const server = await createApi(f.service, 't');
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Noisy evidence' }, 'noisy');
-    for (const [exitCode, truncated] of [[0, false], [1, false], [0, true]] as const) f.store.record(task.id, 'validation', { workItemId: 'greeting', executable: 'node', args: ['--test'], exitCode, truncated, output: 'x'.repeat(20000) });
-    f.store.record(task.id, 'run-completed', { runId: 'review-run', workItemId: 'greeting', phase: 'review', output: { approved: true, summary: 'Long review', findings: ['must fix '.repeat(4000)] } });
-    f.store.record(task.id, 'run-completed', { runId: 'approved-run', workItemId: '@integration', phase: 'review', output: { approved: true, summary: 'passed '.repeat(4000), findings: [] } });
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Noisy evidence' }, 'noisy');
+    for (const [exitCode, truncated] of [[0, false], [1, false], [0, true]] as const) await f.store.record(task.id, 'validation', { workItemId: 'greeting', executable: 'node', args: ['--test'], exitCode, truncated, output: 'x'.repeat(20000) });
+    await f.store.record(task.id, 'run-completed', { runId: 'review-run', workItemId: 'greeting', phase: 'review', output: { approved: true, summary: 'Long review', findings: ['must fix '.repeat(4000)] } });
+    await f.store.record(task.id, 'run-completed', { runId: 'approved-run', workItemId: '@integration', phase: 'review', output: { approved: true, summary: 'passed '.repeat(4000), findings: [] } });
     const response = await fetch(`${url}/tasks/${task.id}/evidence`, { headers: { authorization: 'Bearer t' } });
     const rows = await response.json() as { truncated: boolean; metadata: { workItemId: string; exitCode?: number; truncated?: boolean; output?: { approved: boolean; findingsCount: number } }; data: { preview: string } }[];
     assert.deepEqual(rows.slice(0, 3).map(r => [r.metadata.exitCode, r.metadata.truncated]), [[0, false], [1, false], [0, true]]);

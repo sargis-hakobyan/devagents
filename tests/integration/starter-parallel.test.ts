@@ -13,7 +13,7 @@ import { teamBoard, type BoardInput, type TeamBoard } from '../../ui/src/team-bo
 
 test('the starter runs frontend and backend concurrently and exposes both on the live team board', async () => {
   const f = await fixture();
-  const service = new TaskService(f.store, { ...f.service.config, qaEnabled: false }, f.dataDir);
+  const service = await TaskService.create(f.store, { ...f.service.config, qaEnabled: false }, f.dataDir);
   const calls: EngineRequest[] = [];
   let active = 0;
   let liveBoard: TeamBoard | undefined;
@@ -42,7 +42,7 @@ test('the starter runs frontend and backend concurrently and exposes both on the
       assert.equal(request.phase, 'implementation');
       active++;
       if (active === 2) {
-        liveBoard = teamBoard({ task: f.store.task(taskId), items: f.store.workItems(taskId) as BoardInput['items'], evidence: f.store.evidence(taskId), now: Date.now() });
+        liveBoard = teamBoard({ task: await f.store.task(taskId), items: await f.store.workItems(taskId) as BoardInput['items'], evidence: await f.store.evidence(taskId), now: Date.now() });
         release();
       }
       const deadline = new AbortController();
@@ -67,10 +67,10 @@ test('the starter runs frontend and backend concurrently and exposes both on the
     assert.deepEqual(starter.members.map(m => m.id), ['tech-lead', 'frontend-developer', 'backend-developer', 'code-reviewer']);
     assert.equal(service.config.concurrency, 2);
     service.attachRunner(runner);
-    const task = service.submit({ projectId: 'fixture', request: 'Implement the frontend and backend greeting in parallel', mode: 'autonomous' }, 'parallel-starter');
+    const task = await service.submit({ projectId: 'fixture', request: 'Implement the frontend and backend greeting in parallel', mode: 'autonomous' }, 'parallel-starter');
     taskId = task.id;
     await runner.idle();
-    const done = f.store.task(task.id);
+    const done = await f.store.task(task.id);
     assert.equal(done.state, 'completed', JSON.stringify(done.outcome));
     assert.ok(liveBoard, 'observe the real in-flight store while both implementations are open');
     assert.deepEqual(liveBoard.stages.find(s => s.key === 'build')!.members.map(m => [m.name, m.status, m.items[0]!.state]), [

@@ -1,3 +1,4 @@
+import { WorkItemConcurrency } from '../components/WorkItemConcurrency';
 import { TaskConcurrency } from '../components/TaskConcurrency';
 import { ArchivedProjects } from './Project';
 import { useState } from 'preact/hooks';
@@ -65,7 +66,7 @@ export function SettingsPage() {
   if (!status) return <Skeleton rows={6} label="Loading settings" />;
   const c = status.codex;
   return <>
-    <div class="page-head"><div><div class="h">Settings</div><h1>Connection, engine and limits</h1><p>Manage parallel tasks and connections here. Other values reflect the running service and require startup configuration changes.</p></div></div>
+    <div class="page-head"><div><div class="h">Settings</div><h1>Connection, engine and limits</h1><p>Manage parallel tasks, subtasks and connections here. Other values reflect the running service and require startup configuration changes.</p></div></div>
     <div class="connection-cards">
     <Card title="Codex connection" right={<span style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>{c.vaultLocked ? <Chip tone="warn">⚠ Credentials locked</Chip> : c.signedIn ? <Chip tone="ok">✓ Sign-in saved</Chip> : c.installed ? <Chip tone="warn">⚠ Not signed in</Chip> : <Chip tone="bad">✕ Not installed</Chip>}<Chip tone="warn">⚠ Model access not verified</Chip></span>}
       foot={<span style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}><a class="btn" href="/ui/settings/setup">Guided setup / change sign-in</a><Later label="Test connection" increment="U3" reason="Browser testing is unavailable; use the explicitly chosen terminal connection test" /></span>}>
@@ -94,7 +95,7 @@ export function SettingsPage() {
         <dt>Providers</dt><dd>{status.defaults.providers.map(p => <div key={p.id} class="mono">{p.id} · {p.kind} · {p.auth}{p.apiKeyConfigured !== null ? ` · key ${p.apiKeyConfigured ? 'configured' : 'missing'}` : ''}{p.executable ? '' : ' · configuration only'}</div>)}</dd>
       </dl><div class="muted" style={{ fontSize: '12.5px', marginTop: '8px' }}>Per-agent overrides resolve against these defaults.</div></div></Card>
       <Card title="Execution limits"><div style={{ padding: '14px 16px' }}><dl class="kv" style={{ gridTemplateColumns: '170px minmax(0, 1fr)' }}>
-        <dt>Work-item concurrency</dt><dd>{status.limits.concurrency} work items per wave</dd>
+        <dt>Parallel subtasks</dt><dd>Up to {status.limits.concurrency} per task · <a href="#work-item-concurrency">Edit</a></dd>
         <dt>Repair cycles</dt><dd>{status.limits.maxRepairCycles} per item · {status.limits.maxRepairCycles} shared for integration</dd>
         <dt>Execution timeout</dt><dd>{status.limits.executionTimeoutMs / 1000} s per engine run</dd>
         <dt>Validation timeout</dt><dd>{status.limits.validationTimeoutMs / 1000} s per command · output capped at 1 MiB</dd>
@@ -102,7 +103,10 @@ export function SettingsPage() {
         <dt>Scheduling</dt><dd>{status.scheduler?.enabled ? `Up to ${status.scheduler.maxConcurrentTasks} tasks and ${status.scheduler.maxConcurrentOperations} operations concurrently; FIFO task dispatch` : 'Execution scheduler unavailable'}</dd>
       </dl></div></Card>
     </div>
-    <TaskConcurrency />
+    <div class="connection-cards">
+      <TaskConcurrency />
+      <WorkItemConcurrency />
+    </div>
     <Card title="Service and browser session"><div style={{ padding: '14px 16px' }}><dl class="kv">
       <dt>Listening</dt><dd class="mono">{status.service.host}:{status.service.port} · data {status.service.dataDir}</dd>
       <dt>Browser session</dt><dd>{identity?.method === 'password' ? `Signed in as ${identity.user.name}. The session ends on sign-out or when its idle or maximum lifetime expires.` : 'Signed in with a one-time link. This browser stays signed in, also across restarts and sleep, until you sign out from the top bar.'}</dd>

@@ -1,18 +1,19 @@
 import { AppError } from '../domain/errors.js';
 
 type Node = { id: string; dependsOn: string[]; agentId: string; agentConcurrency: number };
-/** Deterministic bounded waves; integration finishes before dependents are released. */
-export function readyWave(nodes: Node[], done: Set<string>, concurrency: number): Node[] {
+/** Select dependency-ready items within the remaining task and per-agent capacity. */
+export function readyItems(nodes: Node[], done: Set<string>, concurrency: number, running: ReadonlySet<string> = new Set()): Node[] {
   if (!Number.isInteger(concurrency) || concurrency < 1) throw new AppError('invalid_concurrency', 'Concurrency must be positive');
-  const active = new Map<string, number>(); const wave: Node[] = [];
+  const active = new Map<string, number>(); const ready: Node[] = [];
+  for (const node of nodes) if (running.has(node.id)) active.set(node.agentId, (active.get(node.agentId) ?? 0) + 1);
   for (const node of nodes) {
-    if (done.has(node.id) || !node.dependsOn.every(id => done.has(id))) continue;
+    if (running.size + ready.length >= concurrency) break;
+    if (done.has(node.id) || running.has(node.id) || !node.dependsOn.every(id => done.has(id))) continue;
     if ((active.get(node.agentId) ?? 0) >= node.agentConcurrency) continue;
-    wave.push(node); active.set(node.agentId, (active.get(node.agentId) ?? 0) + 1);
-    if (wave.length === concurrency) break;
+    ready.push(node); active.set(node.agentId, (active.get(node.agentId) ?? 0) + 1);
   }
-  if (!wave.length && done.size < nodes.length) throw new AppError('scheduler_stalled', 'No schedulable work items remain');
-  return wave;
+  if (!ready.length && !running.size && done.size < nodes.length) throw new AppError('scheduler_stalled', 'No schedulable work items remain');
+  return ready;
 }
 /** Limit shared reviewer invocations without blocking cancellation while queued. */
 export class AgentSlots {

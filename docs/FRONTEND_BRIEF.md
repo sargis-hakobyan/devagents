@@ -24,7 +24,7 @@ The browser becomes the everyday interface. The CLI remains supported for setup,
 | Teams | Named reusable teams, descriptions, member counts, readiness, active/archive filters | Create, duplicate, edit, archive |
 | Projects | Registered repositories, default team, recent tasks, path/access diagnostics | Register an existing repository, set default team, open history |
 | Tasks | Filterable task summaries by project, team and state | Submit work, inspect a task |
-| Settings | Connection availability, engine/model defaults, execution limits | Use supported setup flow, edit validated settings |
+| Settings | Separate provider connections, engine/model defaults, execution limits, parallel tasks and parallel subtasks per task | Use supported setup flow; save task and subtask limits with validation and stale-write feedback |
 
 Use a persistent desktop sidebar, clear page titles and one obvious primary action per page. Prioritize readability and useful density over decoration. Use consistent status text plus icons; colour alone must not convey meaning. Narrow screens must still support reading progress and approving plans; do not build a separate mobile client.
 

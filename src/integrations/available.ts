@@ -27,7 +27,7 @@ const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  */
 export async function availableTickets(store: Store, sources: { integrations?: ProjectIntegrationService | undefined; trackers?: TrackerService | undefined }, now: () => Date = () => new Date()): Promise<AvailableTickets> {
   const tickets: AvailableTicket[] = []; const problems: AvailableTickets['problems'] = [];
-  for (const project of store.projects()) {
+  for (const project of await store.projects()) {
     if (project.archivedAt) continue;
     const projectName = project.name ?? project.id; const found: AvailableTicket[] = [];
     const read = async (source: string, load: () => Promise<Omit<AvailableTicket, 'projectId' | 'projectName'>[]>) => {
@@ -36,11 +36,11 @@ export async function availableTickets(store: Store, sources: { integrations?: P
     };
     if (sources.integrations && project.integrations?.jira?.rule) await read('Jira', () => sources.integrations!.jiraTickets(project.id));
     for (const connection of sources.trackers && project.integrations?.trackers?.filter(c => c.rule) || []) {
-      const name = store.trackers().find(t => t.id === connection.trackerId)?.name ?? 'Ticket tool';
+      const name = (await store.trackers()).find(t => t.id === connection.trackerId)?.name ?? 'Ticket tool';
       await read(name, () => sources.trackers!.ruleTickets(project.id, connection.trackerId));
     }
     if (!found.length) continue;
-    const tasks = store.summaries({ projectId: project.id, limit: RECENT_TASKS }).tasks;
+    const tasks = (await store.summaries({ projectId: project.id, limit: RECENT_TASKS })).tasks;
     const started = (ticket: AvailableTicket) => {
       const pattern = new RegExp(`(^|[^A-Za-z0-9])${escape(ticket.key)}([^A-Za-z0-9]|$)`, 'i');
       // A fix round names its pull request's ticket in its title but is not a task of that ticket; the task that owns the pull request decides.

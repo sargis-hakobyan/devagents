@@ -1,21 +1,13 @@
-import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { PgSession } from './pg-session.js';
 import { AppError } from '../domain/errors.js';
 
-/** SQLite's OS lock is released after a crash, unlike PID files in recreated containers. */
-export function lockService(dataDir: string): () => void {
-  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-  const db = new DatabaseSync(join(dataDir, 'service-lock.db'));
-  try { db.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE;'); }
-  catch (error) {
-    db.close();
-    // SQLite extended result codes keep the primary result in the low byte.
-    const code = error && typeof error === 'object' && 'errcode' in error && typeof error.errcode === 'number'
-      ? error.errcode & 0xff : undefined;
-    if (code === 5 || code === 6) throw new AppError('service_in_use', 'Another service owns this data directory');
-    if (code === 13) throw new AppError('disk_space_low', 'Cannot acquire the service lock: the data disk is full. Free space on the data volume or increase Docker disk capacity, then restart DevAgents.', 507);
-    throw error;
-  }
-  return () => { db.exec('ROLLBACK'); db.close(); };
+/** One runtime per workspace. PostgreSQL releases its session lock when the process exits. */
+export async function lockService(dataDir: string): Promise<() => Promise<void>> {
+  const db = await PgSession.open(join(dataDir, 'devagents.db'), true);
+  try {
+    const row = await db.prepare('SELECT pg_try_advisory_lock(hashtextextended(workspace_context()::text, 1)) AS acquired').get();
+    if (!row?.acquired) throw new AppError('service_in_use', 'Another service owns this data directory');
+    return async () => await db.close();
+  } catch (error) { await db.close(); throw error; }
 }

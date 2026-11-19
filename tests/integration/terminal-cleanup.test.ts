@@ -21,19 +21,19 @@ for (const end of ['completed', 'failed', 'cancelled'] as const) test(`terminal 
     if (request.phase === 'implementation') {
       await mkdir(join(request.cwd, 'node_modules'), { recursive: true }); await writeFile(join(request.cwd, 'node_modules/cache'), 'regenerable');
       await mkdir(join(request.cwd, 'private-output'), { recursive: true }); await writeFile(join(request.cwd, 'private-output/notes'), 'unfinished local material');
-      if (end === 'cancelled') f.service.cancel(taskId);
+      if (end === 'cancelled') await f.service.cancel(taskId);
     }
     return execute(request);
   };
   const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, end);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, end);
     taskId = task.id;
-    await runner.idle(); const done = f.store.task(task.id);
+    await runner.idle(); const done = await f.store.task(task.id);
     assert.equal(done.state, end, JSON.stringify(done.outcome));
     assert.equal(await exists(done.workspace!.path), false);
     assert.ok(await git(f.project, ['rev-parse', done.workspace!.branch]));
-    const records = f.store.evidence(task.id).filter(e => e.kind === 'worktree-cleanup');
+    const records = (await f.store.evidence(task.id)).filter(e => e.kind === 'worktree-cleanup');
     assert.equal(records.length, 1);
     const record = records[0]!.data as CleanupRecord;
     assert.ok(record.recoveryPath);
@@ -51,7 +51,7 @@ for (const end of ['completed', 'failed', 'cancelled'] as const) test(`terminal 
 test('snapshots preserve staged-only binary changes, hidden edits, ignored files and symlinks without following them', async () => {
   const f = await fixture(false);
   try {
-    const id = randomUUID(); const project = f.store.project('fixture');
+    const id = randomUUID(); const project = await f.store.project('fixture');
     const w = await new WorkspaceManager(f.dataDir).create(project, id, 'Snapshot');
     const binary = Buffer.from([0, 255, 1, 128]); await writeFile(join(w.path, 'binary'), binary);
     await git(w.path, ['add', 'binary']); const expectedBlob = await git(w.path, ['rev-parse', ':binary']); await writeFile(join(w.path, 'binary'), 'working copy');
@@ -74,7 +74,7 @@ test('cleanup refuses missing durable intent and nested Git, leaving original ed
   const f = await fixture(false);
   try {
     for (const kind of ['audit', 'nested-git', 'changed'] as const) {
-      const id = randomUUID(); const project = f.store.project('fixture'); const w = await new WorkspaceManager(f.dataDir).create(project, id, kind);
+      const id = randomUUID(); const project = await f.store.project('fixture'); const w = await new WorkspaceManager(f.dataDir).create(project, id, kind);
       await writeFile(join(w.path, 'README.md'), 'Keep');
       if (kind === 'nested-git') { await mkdir(join(w.path, 'nested/.git'), { recursive: true }); }
       await assert.rejects(cleanupTerminalWorktrees(f.dataDir, project, id, [w], () => {
@@ -89,19 +89,19 @@ test('cleanup refuses missing durable intent and nested Git, leaving original ed
 test('restart marks ready setup failures failed, leaving never-started ready tasks alone', async () => {
   const f = await fixture();
   try {
-    const tasks = ['setup', 'idle'].map(key => f.service.submit({ projectId: 'fixture', request: key, mode: 'autonomous' }, key));
-    for (const task of tasks) f.store.transition(task.id, task.version, 'ready', 'test', 'Plan', { plan: validPlan() });
-    f.store.record(tasks[0]!.id, 'run-failed', { phase: 'setup', message: 'database or disk is full' });
-    assert.deepEqual(f.store.recover(), [tasks[0]!.id]);
-    assert.equal(f.store.task(tasks[0]!.id).state, 'failed'); assert.ok(f.store.task(tasks[0]!.id).outcome?.error);
-    assert.equal(f.store.task(tasks[1]!.id).state, 'ready');
+    const tasks = (await Promise.all(['setup', 'idle'].map(async key => await f.service.submit({ projectId: 'fixture', request: key, mode: 'autonomous' }, key))));
+    for (const task of tasks) await f.store.transition(task.id, task.version, 'ready', 'test', 'Plan', { plan: validPlan() });
+    await f.store.record(tasks[0]!.id, 'run-failed', { phase: 'setup', message: 'database or disk is full' });
+    assert.deepEqual(await f.store.recover(), [tasks[0]!.id]);
+    assert.equal((await f.store.task(tasks[0]!.id)).state, 'failed'); assert.ok((await f.store.task(tasks[0]!.id)).outcome?.error);
+    assert.equal((await f.store.task(tasks[1]!.id)).state, 'ready');
   } finally { await f.cleanup(); }
 });
 
 test('conflict recovery retains all three index stages and the working conflict resolution', async () => {
   const f = await fixture(false);
   try {
-    const id = randomUUID(); const project = f.store.project('fixture'); const manager = new WorkspaceManager(f.dataDir);
+    const id = randomUUID(); const project = await f.store.project('fixture'); const manager = new WorkspaceManager(f.dataDir);
     const w = await manager.create(project, id, 'Conflict');
     const other = await manager.createItem(project, id, w.branch, 'other', w.baseSha);
     await writeFile(join(other.path, 'README.md'), 'Other version'); await git(other.path, ['add', '.']); await git(other.path, ['commit', '-qm', 'Other']);
@@ -122,21 +122,21 @@ test('cleanup recovers owned checkouts created before the workspace checkpoint, 
   const f = await fixture(false); f.service.config.cleanupTerminalTasks = true;
   try {
     for (const kind of ['root', 'item'] as const) {
-      const task = f.service.submit({ projectId: 'fixture', request: kind, mode: 'autonomous' }, kind);
-      const project = f.store.project('fixture'); const manager = new WorkspaceManager(f.dataDir);
-      f.store.record(task.id, 'worktree-intent', { owner: task.id });
+      const task = await f.service.submit({ projectId: 'fixture', request: kind, mode: 'autonomous' }, kind);
+      const project = await f.store.project('fixture'); const manager = new WorkspaceManager(f.dataDir);
+      await f.store.record(task.id, 'worktree-intent', { owner: task.id });
       const root = await manager.create(project, task.id, task.request);
       let item: typeof root | undefined;
       if (kind === 'item') {
-        f.store.checkpoint(task.id, f.store.task(task.id).version, { workspace: root }, 'Root created');
+        await f.store.checkpoint(task.id, (await f.store.task(task.id)).version, { workspace: root }, 'Root created');
         item = await manager.createItem(project, task.id, root.branch, 'worker', root.baseSha);
-        f.store.record(task.id, 'worktree-intent', { owner: task.id, workItemId: 'worker', branch: item.branch, baseSha: root.baseSha });
+        await f.store.record(task.id, 'worktree-intent', { owner: task.id, workItemId: 'worker', branch: item.branch, baseSha: root.baseSha });
       }
-      f.store.transition(task.id, f.store.task(task.id).version, 'failed', 'fixture', 'Checkpoint interrupted');
+      await f.store.transition(task.id, (await f.store.task(task.id)).version, 'failed', 'fixture', 'Checkpoint interrupted');
       await f.service.cleanupTerminalTask(task.id);
       assert.equal(await exists(root.path), false);
       if (item) assert.equal(await exists(item.path), false);
-      assert.ok(f.store.evidence(task.id).some(e => e.kind === 'terminal-cleanup'));
+      assert.ok((await f.store.evidence(task.id)).some(e => e.kind === 'terminal-cleanup'));
     }
   } finally { await f.cleanup(); }
 });

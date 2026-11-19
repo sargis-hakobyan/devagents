@@ -13,15 +13,15 @@ import { CredentialVault } from '../../src/security/credential-vault.js';
 const run = promisify(execFile);
 test('KMS launcher reuses an owner-bound encrypted key and refuses to replace a missing or invalid key', async () => {
   const root = await mkdtemp(join(tmpdir(), 'devagents-kms-test-'));
-  const store = new Store(join(root, 'devagents.db'), []);
+  const store = await Store.open(join(root, 'devagents.db'), []);
   const runtime = join(root, 'runtime');
   const owner = randomUUID();
   const arn = 'arn:aws:kms:eu-central-1:000000000000:key/fixture';
   const master = Buffer.alloc(32, 19);
   try {
     await mkdir(runtime);
-    store.bindWorkspaceOwner(owner);
-    assert.equal(sharedVaultOwner(root), owner);
+    await store.bindWorkspaceOwner(owner);
+    assert.equal(await sharedVaultOwner(root), owner);
     const aws = join(root, 'aws');
     // The fixture models an opaque blob that KMS will unwrap only with the same key and context.
     await writeFile(aws, `#!/usr/bin/env python3
@@ -61,5 +61,5 @@ else: sys.exit(1)
     await rm(wrapped);
     assert.ok(await vaultMaterialExists(root, runtime));
     await assert.rejects(key('yes'), /requires its original/);
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+  } finally { await store.close(); await rm(root, { recursive: true, force: true }); }
 });

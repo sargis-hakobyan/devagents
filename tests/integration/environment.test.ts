@@ -101,15 +101,15 @@ test('Mastra prepares only after approval and environment failures never invoke 
   const runner = new TaskRunner(f.service, engine, new FixtureValidator(), { async prepare() { preparations++; throw new Error('Environment blocked: fixture dependency unavailable'); } });
   f.service.attachRunner(runner);
   try {
-    const submitted = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'plan-approval' }, 'environment');
+    const submitted = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'plan-approval' }, 'environment');
     await runner.idle(); assert.equal(preparations, 0);
-    const waiting = f.store.task(submitted.id);
-    f.service.approve(submitted.id, waiting.version); await runner.idle();
-    const done = f.store.task(submitted.id);
+    const waiting = await f.store.task(submitted.id);
+    await f.service.approve(submitted.id, waiting.version); await runner.idle();
+    const done = await f.store.task(submitted.id);
     assert.equal(done.state, 'failed'); assert.equal(done.outcome?.repairCycles, 0);
     assert.match(String(done.outcome?.error), /Environment blocked/);
     assert.deepEqual(engine.calls.map(c => c.phase), ['planning']);
-    assert.equal(f.store.evidence(done.id).some(e => e.kind === 'workflow-step' && (e.data as {step:string}).step === 'prepare-environment'), true);
+    assert.equal((await f.store.evidence(done.id)).some(e => e.kind === 'workflow-step' && (e.data as {step:string}).step === 'prepare-environment'), true);
   } finally { await runner.stop(); await f.cleanup(); }
 });
 
@@ -119,11 +119,11 @@ test('missing dependency validation is retained as evidence and stops without a 
     return { ...command, exitCode: 1, output: "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'jiti' imported from /workspace/" };
   } }); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'missing');
-    await runner.idle(); const done = f.store.task(task.id);
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'missing');
+    await runner.idle(); const done = await f.store.task(task.id);
     assert.equal(done.state, 'failed'); assert.equal(done.outcome?.repairCycles, 0);
     assert.equal(engine.calls.filter(c => c.phase === 'implementation').length, 1);
-    assert.equal(f.store.evidence(task.id).some(e => e.kind === 'validation'), true);
+    assert.equal((await f.store.evidence(task.id)).some(e => e.kind === 'validation'), true);
     assert.match(String(done.outcome?.error), /Environment blocked/);
     assert.doesNotThrow(() => assertValidationEnvironment({ executable: 'node', exitCode: 1, output: 'AssertionError: expected 42, received 0' }));
   } finally { await runner.stop(); await f.cleanup(); }
@@ -136,9 +136,9 @@ test('cancellation during environment preparation drains the task without callin
     started(); await new Promise<void>((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('Preparation cancelled')), { once: true }));
   } }); f.service.attachRunner(runner);
   try {
-    const task = f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'cancel-preparation');
-    await preparing; f.service.cancel(task.id); await runner.idle();
-    assert.equal(f.store.task(task.id).state, 'cancelled');
+    const task = await f.service.submit({ projectId: 'fixture', request: 'Greeting', mode: 'autonomous' }, 'cancel-preparation');
+    await preparing; await f.service.cancel(task.id); await runner.idle();
+    assert.equal((await f.store.task(task.id)).state, 'cancelled');
     assert.deepEqual(engine.calls.map(c => c.phase), ['planning']);
   } finally { await runner.stop(); await f.cleanup(); }
 });
