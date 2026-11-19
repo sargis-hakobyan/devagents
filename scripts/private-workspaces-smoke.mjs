@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium } from '@playwright/test';
 
 const probe = createServer();
@@ -11,9 +14,19 @@ const port = probe.address().port;
 await new Promise(r => probe.close(r));
 const origin = 'http://127.0.0.1:' + port;
 const project = 'devagents-two-users-' + randomUUID().slice(0, 8);
+const postgres = process.argv.includes('--postgres');
+const secretDir = postgres ? mkdtempSync(join(tmpdir(), 'devagents-pg-smoke-')) : undefined;
+if (secretDir) {
+  // The host directory is 0700. Docker mounts individual files for different container UIDs.
+  for (const name of ['postgres-admin', 'alice-db', 'bob-db']) {
+    const file = join(secretDir, name);
+    writeFileSync(file, randomBytes(32).toString('hex'), { mode: 0o600 });
+    chmodSync(file, 0o444);
+  }
+}
 function compose(args, options = {}) {
-  const result = spawnSync('docker', ['compose', '-f', 'examples/compose.workspaces.yaml', '-p', project, ...args], {
-    env: { ...process.env, DEVAGENTS_PREVIEW_PORT: String(port) }, encoding: 'utf8', timeout: 300000, ...options,
+  const result = spawnSync('docker', ['compose', '-f', 'examples/compose.workspaces.yaml', ...(postgres ? ['-f','examples/compose.postgres.yaml'] : []), '-p', project, ...args], {
+    env: { ...process.env, DEVAGENTS_PREVIEW_PORT: String(port), ...(secretDir ? { DEVAGENTS_DB_SECRETS_DIR: secretDir } : {}) }, encoding: 'utf8', timeout: 300000, ...options,
   });
   // No captured output from secret-handling processes is printed, even on failure.
   if (result.status !== 0) throw new Error('Docker workspace smoke step failed: ' + args[0]);
@@ -51,7 +64,7 @@ try {
     compose(['exec', '-T', name, 'node', 'dist/cli/main.js', 'auth', 'unlock'], { input: master.get(name) });
   }
   // Check the actual engine sandbox with command networking enabled, as in default task execution.
-  const probeSocket = "const fs=require('node:fs');const net=require('node:net');if(fs.existsSync('/run/devagents-workspace/api.sock'))process.exit(2);const s=net.connect('/run/devagents-workspace/api.sock');s.on('connect',()=>process.exit(3));s.on('error',()=>process.stdout.write('isolated'));";
+  const probeSocket = "const fs=require('node:fs');const net=require('node:net');if(fs.existsSync('/run/devagents-workspace/api.sock') || fs.existsSync('/run/secrets/alice-db'))process.exit(2);const s=net.connect('/run/devagents-workspace/api.sock');s.on('connect',()=>process.exit(3));s.on('error',()=>process.stdout.write('isolated'));";
   compose(['exec', '-T', '-e', 'DEVAGENTS_PRIVATE_SOCKET_DIR=/run/devagents-workspace', 'alice', 'node', '--input-type=module', '-e',
     `import {CodexValidator} from './dist/engines/codex/validator.js';
      const v=await new CodexValidator('/data').execute('/projects/example',{executable:'node',args:['-e',${JSON.stringify(probeSocket)}]},new AbortController().signal,30000,false);
@@ -71,12 +84,30 @@ try {
   const aliceTeam = await request('/teams', { name: 'Private Alice team', members: [] });
   const aliceProject = await request('/projects', { name: 'Example', path: '/projects/example' });
   await connect('alice', values.alice);
+  let sharedId;
+  if (postgres) {
+    assert.equal((await request('/status')).sharedTaskStorage.backend, 'postgresql');
+    const { csrfToken } = await request('/ui/session');
+    const headers = { origin, 'x-csrf-token': csrfToken, 'idempotency-key': 'smoke-retry' };
+    // An awaiting-mode task exercises the real API/worker handoff without making a model call.
+    const response = await context.request.post(origin + '/tasks', { headers, data: { projectId: aliceProject.id, request: 'Private PostgreSQL smoke' } });
+    assert.equal(response.status(), 201); sharedId = (await response.json()).id;
+    await request('/tasks/' + sharedId + '/cancel', {});
+    for (let attempt = 0;; attempt++) {
+      const saved = await context.request.get(origin + '/tasks/' + sharedId + '/result');
+      if (saved.ok()) { assert.equal((await saved.json()).task.state, 'cancelled'); break; }
+      assert.equal(saved.status(), 404);
+      assert.ok(attempt < 50, 'shared result was not archived');
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
   await page.evaluate(() => sessionStorage.setItem('devagents.submit.ticket', 'Alice private draft'));
   await logout();
   await login('bob');
   assert.equal(await page.evaluate(() => sessionStorage.getItem('devagents.submit.ticket')), null);
   assert.equal((await context.request.get(origin + '/teams/' + aliceTeam.id)).status(), 404);
   assert.deepEqual(await request('/projects'), []);
+  if (postgres) assert.equal((await context.request.get(origin + '/tasks/' + sharedId + '/result')).status(), 404);
   const bobProject = await request('/projects', { name: 'Example', path: '/projects/example' });
   assert.notEqual(bobProject.id, aliceProject.id);
   assert.equal((await request('/setup/claude-auth')).connection.saved, false);
@@ -95,8 +126,10 @@ try {
   await login('alice');
   assert.equal((await request('/projects'))[0].id, aliceProject.id);
   assert.equal((await request('/setup/claude-auth')).connection.saved, true);
+  if (postgres) assert.equal((await request('/tasks/' + sharedId + '/result')).task.state, 'cancelled');
   console.log('PASS: sandbox socket denial, Chromium sign-in/switch, isolated projects and teams, separate Claude reconnect and vault restore after runtime recreation.');
 } finally {
   await browser?.close();
-  compose(['down', '-v', '--remove-orphans']);
+  try { compose(['down', '-v', '--remove-orphans']); }
+  finally { if (secretDir) rmSync(secretDir, { recursive: true, force: true }); }
 }

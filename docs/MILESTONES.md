@@ -9,10 +9,13 @@
 - [x] Support owner-bound KMS unlock of a fresh Docker credential vault using the host launcher.
 - [x] Serve concurrent private workspaces on one host with a shared password-login gateway and a dedicated runtime, store and profile for each provisioned owner.
 - [ ] Validate personal Codex/Claude subscription login, refresh and simultaneous isolated execution on the server.
-- [ ] PostgreSQL persistence and durable workflow state for shared mode; SQLite remains available locally.
+- [x] First PostgreSQL path for shared task submission, execution admission and terminal result retrieval, with owner isolation and recovery of pending handoffs.
+- [ ] Migrate remaining workspace data, live events and durable workflow checkpoints to shared PostgreSQL.
 - [ ] Separate API and workers with database task ownership, cancellation and interruption handling.
 - [ ] Worker-independent repository results and user-scoped publishing.
 - [ ] AWS Docker deployment, additional worker hosts and the pre-update backup/restore procedure.
+
+PostgreSQL verification used a disposable PostgreSQL 17 instance. Two workspaces used the same retry key, ran overlapping deterministic tasks with distinct synthetic credentials, and retrieved their own committed results after worker restart. A refused database write kept execution held. A competing claim was refused, and direct SQL queries using a workspace login saw only that workspace's rows. The Compose/Chromium smoke also exercised the database secret mount, actual engine sandbox, cancellation and result recovery after container recreation.
 
 Organization SSO is deferred until explicitly requested. The original standalone preview uses one administrator. The separate gateway supports provisioned workspaces for multiple identities.
 

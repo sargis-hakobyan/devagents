@@ -1,5 +1,10 @@
 # Decision log
 
+## Gate shared execution on a durable PostgreSQL claim
+
+The shared-runtime migration starts at the task boundary. Keep the existing SQLite transaction that freezes task input, team and retry identity. In PostgreSQL mode it also creates a durable local handoff and holds scheduler admission. Publish the prepared snapshot to one shared PostgreSQL table. A claim bound to both workspace and task opens the gate. Archive the terminal task and bounded diff under that claim. Reconciliation can repeat after a crash without creating a second execution. A dedicated unprivileged SQL login and forced row-level security constrain each workspace connection. Local mode still uses its own SQLite dispatch path.
+
+
 ## Route authenticated users to private workspace runtimes — 2026-11-19
 
 Use one public browser endpoint and one private runtime per provisioned owner on the same host. Separate runtime processes preserve the engine sandbox and scope the SQLite databases, Git clones, setup jobs, connection caches, vault keys and tmpfs profiles. The gateway selects a Unix socket by the verified internal UUID and the runtime checks that UUID against its workspace binding. Socket mounts are private to the gateway and their corresponding owner runtime. Credentials, cookies and operator permissions stay out of the delegation headers. A derived session handle keeps setup attempts private between browsers and allows logout to cancel an outstanding attempt.

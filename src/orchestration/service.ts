@@ -41,6 +41,11 @@ export class TaskService {
     };
   }
 
+  private sharedSubmissionOwner?: string;
+  enableSharedSubmissions(ownerId: string) {
+    if (this.store.workspaceOwnerId() !== ownerId) throw new AppError('workspace_owner_mismatch', 'Shared storage requires a bound workspace');
+    this.sharedSubmissionOwner = ownerId;
+  }
   private runner?: Runner;
   private ticketLoader?: TicketFileLoader;
   private readonly removingTicketFiles = new Map<string, Promise<void>>();
@@ -67,6 +72,13 @@ export class TaskService {
   private submitted?: (task: Task) => void;
   /** Runs once for every accepted task, so an integration can record what the task starts with. */
   onSubmitted(hook: (task: Task) => void): void { this.submitted = hook; }
+  private admitted?: (task: Task) => void;
+  onAdmitted(hook: (task: Task) => void) { this.admitted = hook; }
+  admitSubmission(task: Task) {
+    if (terminalStates.includes(task.state)) return;
+    try { this.admitted?.(task); } catch { /* Integration notifications are best effort. */ }
+    this.runner?.enqueue(task.id);
+  }
   private startBase?: (task: Task) => Promise<string | undefined>;
   /** Lets an integration name the commit a task's worktree starts from. Without one, or when it names none, the task starts from local `main`. */
   onStart(resolve: (task: Task) => Promise<string | undefined>): void { this.startBase = resolve; }
@@ -136,7 +148,12 @@ export class TaskService {
       maxConcurrentOperations: this.config.maxConcurrentOperations, active: [], queued: 0,
       runningOperations: 0, waitingOperations: 0, held: 0, attention: [] };
   }
-  taskScheduling(id: string): TaskScheduling | undefined { return this.runner?.taskScheduling?.(id); }
+  taskScheduling(id: string): TaskScheduling | undefined {
+    if (this.sharedSubmissionOwner && this.store.heldForSharedClaim(id)) {
+      return { status: 'held', reason: 'Waiting for the workspace claim in PostgreSQL' };
+    }
+    return this.runner?.taskScheduling?.(id);
+  }
   private assertExecutionAvailable(): void {
     if (this.executionFailure) throw new AppError('execution_halted', 'Execution halted; recover storage and restart the service before submitting more work', 503);
   }
@@ -366,9 +383,10 @@ export class TaskService {
   submit(input: unknown, key: string, followUp?: Task['followUp']): Task {
     this.assertExecutionAvailable();
     const task = TaskInput.parse(input);
-    const created = this.store.createTask(task, key, () => this.freezeTeam(task.teamId, task.projectId), () => this.store.project(task.projectId).defaultMode ?? this.config.defaultMode, this.config.devagentsRules, followUp);
+    const created = this.store.createTask(task, key, () => this.freezeTeam(task.teamId, task.projectId), () => this.store.project(task.projectId).defaultMode ?? this.config.defaultMode, this.config.devagentsRules, followUp, this.sharedSubmissionOwner);
     try { this.submitted?.(created); } catch { /* an integration's bookkeeping never refuses a task */ }
-    this.runner?.enqueue(created.id); return created;
+    if (!this.sharedSubmissionOwner) this.admitSubmission(created);
+    return created;
   }
   mode(id: string, mode: unknown): Task {
     this.assertExecutionAvailable();

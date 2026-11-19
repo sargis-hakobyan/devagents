@@ -10,6 +10,8 @@ import { parse } from 'yaml';
 import { z } from 'zod';
 import { ModelCatalogService, claudeModelLister, codexModelLister } from '../engines/model-catalog.js';
 import { loadConfig, dataDirectory } from '../config.js';
+import { PostgresTasks } from '../persistence/postgres-tasks.js';
+import { SharedTasks } from '../orchestration/shared-tasks.js';
 import { Store } from '../persistence/store.js';
 import { TaskService } from '../orchestration/service.js';
 import { accessToken } from '../auth/operator-token.js';
@@ -130,15 +132,25 @@ cli.command('serve').description('Start the API and runner').option('--workspace
   // A task keeps the pull request choices of its project; finished tasks of projects that publish on their own are picked up below.
   const pullRequests = new PullRequestService(store, secretStore);
   // A task started from a ticket also takes the ticket: it is assigned to the account the connection uses.
-  service.onSubmitted(task => { pullRequests.freeze(task.id, task.projectId); if (!store.lastEvidence(task.id, 'ticket-assigned') && !store.lastEvidence(task.id, 'ticket-assign-failed')) void assignStartedTicket({ integrations, trackers }, task, (kind, data) => store.record(task.id, kind, data)); });
+  service.onSubmitted(task => pullRequests.freeze(task.id, task.projectId));
+  service.onAdmitted(task => { if (!store.lastEvidence(task.id, 'ticket-assigned') && !store.lastEvidence(task.id, 'ticket-assign-failed')) void assignStartedTicket({ integrations, trackers }, task, (kind, data) => store.record(task.id, kind, data)); });
   pullRequests.attachRounds((input, key, followUp) => service.submit(input, key, followUp));
   service.onStart(task => pullRequests.startCommit(task));
   // A task started from a ticket takes the ticket's pictures and short text files with it while it works.
   service.attachTicketFiles((task, directory) => downloadTicketFiles({ integrations, trackers }, task.projectId, task.ticket!, directory));
   const providerOf = (kind: string) => config.providers.find(p => p.kind === kind && !p.baseUrl);
   const models = new ModelCatalogService(store, { codex: codexModelLister(dataDir, providerOf('openai')), 'claude-code': claudeModelLister(dataDir, providerOf('anthropic')) });
+  let sharedTasks: SharedTasks | undefined;
+  if (process.env.DEVAGENTS_POSTGRES_HOST || process.env.DEVAGENTS_POSTGRES_PASSWORD_FILE) {
+    if (!privateOwner || !process.env.DEVAGENTS_POSTGRES_HOST || !process.env.DEVAGENTS_POSTGRES_PASSWORD_FILE) {
+      throw new AppError('shared_store_config', 'PostgreSQL task storage requires a private owner runtime, database host and password file');
+    }
+    store.bindWorkspaceOwner(privateOwner);
+    sharedTasks = new SharedTasks(service, await PostgresTasks.configured(privateOwner));
+  }
   const server = createApi(service, await accessToken(dataDir), {
     sessions: new BrowserSessions(undefined, sessionLimits(process.env, sharedLogin ? { idleMs: 3600000, absoluteMs: 43200000 } : {}), sessionFile(dataDir, login.mode)),
+    ...(sharedTasks ? { sharedTasks } : {}),
     ...(privateOwner ? { privateRuntimeOwner: privateOwner } : {}),
     ...(sharedLogin ? { sharedLogin, workspaceOwnerId: accounts!.passwordAccount('admin')!.user.id } : {}), uiRoot, publicPort, setupAuth, claudeAuth, assertSetupIdle,
     integrations, pullRequests, trackers, models,
@@ -151,6 +163,7 @@ cli.command('serve').description('Start the API and runner').option('--workspace
   // Only the process which owns the listening socket may reconcile this service's tasks.
   const recovered = store.recover();
   await runner.recover();
+  sharedTasks?.start();
   await service.diskReserve.replenish();
   log('service_started', { host, port: port(), publicPort, recovered, projects: store.projects().length, executionEnabled: true, ui: uiRoot ? `http://127.0.0.1:${publicPort}/ui/` : 'not built' });
   log('setup', { message: privateOwner ? 'Private workspace runtime ready.' : sharedLogin ? `Open ${sharedLogin.publicOrigin}/ui/ and sign in. Shared mode currently supports one administrator; private multi-user execution is not implemented yet.` : 'Register an existing checkout and authenticate Codex. Use tasks submit, show and evidence to follow work. Open the browser UI with a one-time link from: devagents ui' });
@@ -159,7 +172,7 @@ cli.command('serve').description('Start the API and runner').option('--workspace
   const shutdown = () => {
     if (closing) return; closing = true; clearInterval(publishing);
     void claudeAuth.close(); void setupAuth.close(); void runner.stop();
-    server.close(() => { void Promise.all([runner.stop(), setupAuth.close(), claudeAuth.close()]).then(() => { accounts?.close(); store.close(); unlock(); process.exitCode = 0; }); });
+    server.close(() => { void Promise.all([runner.stop(), setupAuth.close(), claudeAuth.close()]).then(async () => { await sharedTasks?.stop(); accounts?.close(); store.close(); unlock(); process.exitCode = 0; }); });
     server.closeIdleConnections();
   };
   process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);

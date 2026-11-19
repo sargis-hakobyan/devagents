@@ -18,6 +18,8 @@ Shared mode supports password login to an owner-bound workspace and optional KMS
 
 Open **Settings → Claude connection → Set up / change Claude connection** for the [Claude setup flow](docs/SETUP.md#claude).
 
+Shared Docker runtimes can also use [self-managed PostgreSQL for task submissions, execution claims and results](docs/SETUP.md#shared-task-storage-in-postgresql).
+
 ## Quickstart
 
 **Requires:** Git and Docker with Compose on macOS or desktop Linux. Linux also needs `openssl`, `secret-tool`, and an unlocked desktop keyring. No host Node.js installation is needed for Docker.

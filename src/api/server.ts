@@ -9,6 +9,8 @@ import { ProjectId, State, TeamId } from '../domain/schemas.js';
 import { environmentSecrets, redactValues, log } from '../telemetry/redact.js';
 import { createBrowserAccess, type BrowserAccessOptions } from './browser-access.js';
 import { runtimeAccess } from './workspace-gateway.js';
+import { terminalStates } from '../domain/lifecycle.js';
+import type { SharedTasks } from '../orchestration/shared-tasks.js';
 import { body } from './http-body.js';
 import { securityHeaders } from './static.js';
 import { evidenceMetadata } from './evidence.js';
@@ -42,6 +44,7 @@ const integer = (value: string | null, fallback: number) => { const n = Number(v
 export type ApiOptions = BrowserAccessOptions & {
   workspaceOwnerId?: string;
   privateRuntimeOwner?: string;
+  sharedTasks?: SharedTasks;
   setupAuth?: SetupAuth;
   claudeAuth?: SetupAuth;
   assertSetupIdle?: () => void;
@@ -249,7 +252,7 @@ export function createApi(application: TaskService, token: string, options: ApiO
       if (req.method === 'GET' && path === '/scheduler') return send(res, 200, service.scheduling());
       if (req.method === 'GET' && path === '/status') {
         if (!options.status) throw new AppError('not_found', 'Status reporting is not configured', 404);
-        return send(res, 200, { ...await options.status() as object, ...(options.privateRuntimeOwner ? { privateWorkspace: true } : {}), scheduler: service.scheduling() });
+        return send(res, 200, { ...await options.status() as object, ...(options.privateRuntimeOwner ? { privateWorkspace: true } : {}), ...(options.sharedTasks ? { sharedTaskStorage: { backend: 'postgresql', problem: options.sharedTasks.problem } } : {}), scheduler: service.scheduling() });
       }
       if (req.method === 'GET' && path === '/storage') return send(res, 200, await service.storageStatus());
       // Tickets that match a project's rule and have no task yet. Read only; starting one is a normal task submission.
@@ -283,11 +286,19 @@ export function createApi(application: TaskService, token: string, options: ApiO
       if (req.method === 'POST' && path === '/tasks') {
         const key = z.string().min(1).max(200).parse(req.headers['idempotency-key']);
         const input = await body(req); assertExecutionReady();
-        return send(res, 201, named(service.submit(input, key)));
+        const task = service.submit(input, key);
+        if (options.sharedTasks) await options.sharedTasks.publish(task.id);
+        return send(res, 201, named(task));
       }
-      const match = /^\/tasks\/([a-f0-9-]{36})(?:\/(events|evidence|items|diff|usage|execution|run|mode|plan|approve|cancel|cleanup|compaction-preview|compact)(?:\/(\d{1,12}))?)?$/.exec(path);
+      const match = /^\/tasks\/([a-f0-9-]{36})(?:\/(events|evidence|items|diff|result|usage|execution|run|mode|plan|approve|cancel|cleanup|compaction-preview|compact)(?:\/(\d{1,12}))?)?$/.exec(path);
       if (match) {
         const id = match[1]!; const action = match[2]; const sub = match[3];
+        if (req.method === 'GET' && action === 'result' && !sub) {
+          if (!options.sharedTasks) throw new AppError('not_found', 'Shared result storage is not configured', 404);
+          const result = await options.sharedTasks.result(id);
+          if (!result) throw new AppError('not_found', 'No shared result for this task', 404);
+          return send(res, 200, result);
+        }
         if (req.method === 'GET' && action === 'execution' && !sub) return send(res, 200, taskExecution(service.store.task(id), service.store.executionEvidence(id)));
         if (req.method === 'GET' && action === 'usage' && !sub) return send(res, 200, taskUsage(service.store.task(id), service.store.usageEvidence(id), service.config));
         if (req.method === 'GET' && action === 'diff' && !sub) {
@@ -296,7 +307,10 @@ export function createApi(application: TaskService, token: string, options: ApiO
         }
         if (req.method === 'GET' && action === 'compaction-preview' && !sub) return send(res, 200, await service.compactionPreview(id));
         if (req.method === 'GET' && !action) {
-          const task = service.store.task(id);
+          const local = service.store.task(id);
+          const archived = terminalStates.includes(local.state) && options.sharedTasks && service.store.sharedHandoff(id)
+            ? await options.sharedTasks.result(id) : undefined;
+          const task = archived?.task ?? local;
           return send(res, 200, { ...named(task), approval: service.store.planApproval(id), scheduling: service.taskScheduling(id), ...(service.store.project(task.projectId).archivedAt ? { projectArchived: true } : {}) });
         }
         if (req.method === 'GET' && action === 'events') return send(res, 200, service.store.events(id, integer(url.searchParams.get('after'), 0), Math.min(integer(url.searchParams.get('limit'), 500), 1000)));

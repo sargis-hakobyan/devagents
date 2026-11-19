@@ -22,6 +22,35 @@ For existing application identities, omit the example account seeder. Start `gat
 
 Each runtime resumes its own persisted queue when restarted. Workspaces have independent concurrency settings. Additional users need a provisioned runtime and an existing identity. The KMS procedure below also works with `scripts/unlock-workspace.sh` when `DEVAGENTS_KMS_KEY_ARN` is exported. Keep the trusted gateway and its socket directory inaccessible to workers belonging to other users.
 
+## Shared task storage in PostgreSQL
+
+The optional Compose overlay runs one PostgreSQL 17 server for both private runtimes. New tasks store their frozen submission, workspace claim and terminal result there. Keep the private runtime volumes: live workflow checkpoints, project configuration, events and Git repositories still reside in those volumes. The overlay applies to new submissions. Existing tasks stay accessible from their original workspace.
+
+For the two-user Docker example, prepare the three database passwords **once** on the operator host. The enclosing directory is accessible only to its owner. Inside it, each file needs to be readable by its designated container UID. Compose mounts individual secret files into the relevant containers.
+
+```sh
+export DEVAGENTS_DB_SECRETS_DIR="$PWD/.devagents/postgres-secrets"
+(
+  set -eu
+  umask 077
+  mkdir -p "$PWD/.devagents"
+  mkdir -m 700 "$DEVAGENTS_DB_SECRETS_DIR"
+  for name in postgres-admin alice-db bob-db; do
+    openssl rand -hex 32 > "$DEVAGENTS_DB_SECRETS_DIR/$name"
+    chmod 444 "$DEVAGENTS_DB_SECRETS_DIR/$name"
+  done
+)
+```
+
+Reuse the same directory on subsequent starts. Adding the overlay recreates the runtime containers, so finish active work first. Rebuild the shared image, then start the services and unlock their vaults as described above.
+
+```sh
+docker compose -f examples/compose.workspaces.yaml build gateway
+docker compose -f examples/compose.workspaces.yaml -f examples/compose.postgres.yaml up -d --no-build --wait
+```
+
+The database initializes the schema and example login roles on first use of its persistent volume. Each role is named for its workspace UUID. The server grants access through the `devagents_worker` group and enforces a row policy matching the authenticated database login. The database administrator password stays in the PostgreSQL service. For another installation, apply [the schema](../infra/postgres/tasks.sql) as the database administrator, provision a distinct unprivileged login per owner, and mount that owner's password under `/run/secrets` in its runtime. Set `DEVAGENTS_POSTGRES_HOST`, `DEVAGENTS_POSTGRES_PASSWORD_FILE`, and optionally `DEVAGENTS_POSTGRES_DATABASE` (default `devagents`).
+
 ## Shared-server login foundation
 
 Local mode remains the default: the existing launcher, one-time browser links and engine credentials work as before. The single-runtime shared configuration adds **one administrator login**, not private multi-user execution. See the two-workspace configuration above for multiple users. Existing projects, teams and tasks remain in the same workspace, accessible to this administrator.

@@ -28,7 +28,7 @@ export class Store {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
     // Version 4 added optional QA settings. Preserve that table when the QA feature is stashed.
-    if (version > 12) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
+    if (version > 13) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
     if (version === 0) this.db.exec(`
       BEGIN IMMEDIATE;
       CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, data TEXT NOT NULL);
@@ -111,6 +111,36 @@ export class Store {
       PRAGMA user_version=12;
       COMMIT;
     `);
+    if (version < 13) this.db.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS shared_task_handoffs (
+        task_id TEXT PRIMARY KEY REFERENCES tasks(id), owner_id TEXT NOT NULL, claim_id TEXT NOT NULL,
+        phase TEXT NOT NULL CHECK (phase IN ('held','released','archived')), snapshot TEXT
+      );
+      CREATE INDEX IF NOT EXISTS requests_by_task ON requests(task_id);
+      CREATE INDEX IF NOT EXISTS handoffs_by_phase ON shared_task_handoffs(phase, task_id);
+      PRAGMA user_version=13;
+      COMMIT;
+    `);
+  }
+
+  heldForSharedClaim(id: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM shared_task_handoffs WHERE task_id=? AND phase='held'").get(id));
+  }
+  sharedHandoff(id: string) {
+    return this.db.prepare(`SELECT h.owner_id AS ownerId,h.claim_id AS claimId,h.phase,h.snapshot,r.key AS retryKey,r.fingerprint
+      FROM shared_task_handoffs h JOIN requests r ON r.task_id=h.task_id WHERE h.task_id=?`).get(id) as
+      { ownerId: string; claimId: string; phase: 'held' | 'released' | 'archived'; snapshot: string | null; retryKey: string; fingerprint: string } | undefined;
+  }
+  outstandingHandoffs(): string[] {
+    return this.db.prepare(`SELECT h.task_id FROM shared_task_handoffs h JOIN tasks t ON t.id=h.task_id
+      WHERE h.phase='held' OR (h.phase='released' AND t.state IN ('completed','failed','cancelled')) ORDER BY h.rowid`).all().map(row => String(row.task_id));
+  }
+  advanceHandoff(id: string, ownerId: string, claimId: string, from: 'held' | 'released') {
+    const next = from === 'held' ? 'released' : 'archived';
+    const changed = this.db.prepare('UPDATE shared_task_handoffs SET phase=?, snapshot=NULL WHERE task_id=? AND owner_id=? AND claim_id=? AND phase=?')
+      .run(next, id, ownerId, claimId, from);
+    if (changed.changes !== 1) throw new AppError('shared_task_conflict', 'The local workspace handoff has changed', 409);
   }
 
   workspaceOwnerId(): string | undefined {
@@ -232,6 +262,7 @@ export class Store {
   pendingDispatches(): string[] {
     return this.db.prepare(`SELECT q.task_id FROM dispatch_queue q JOIN tasks t ON t.id=q.task_id
       WHERE q.requested>q.handled AND q.owner IS NULL AND q.blocker IS NULL
+      AND NOT EXISTS (SELECT 1 FROM shared_task_handoffs h WHERE h.task_id=q.task_id AND h.phase='held')
       AND t.state IN ('awaiting_mode','planning','awaiting_plan_approval','ready','cancelled')
       ORDER BY q.queued_at, q.rowid`).all().map(row => String(row.task_id));
   }
@@ -556,7 +587,7 @@ export class Store {
     if (!integrations?.trackers?.some(c => c.trackerId === ref.source)) throw new AppError('not_connected', 'This ticket tool is not connected for this project', 422);
     return { source: ref.source, name: this.tracker(ref.source).name, key: ref.key, ...(ref.url ? { url: ref.url } : {}), ...read };
   }
-  createTask(input: unknown, key: string, freeze?: (task: Task) => TaskTeam | undefined, defaultMode?: () => Task['mode'], devagentsRules = true, followUp?: Task['followUp']): Task {
+  createTask(input: unknown, key: string, freeze?: (task: Task) => TaskTeam | undefined, defaultMode?: () => Task['mode'], devagentsRules = true, followUp?: Task['followUp'], sharedOwner?: string): Task {
     const parsed = TaskInput.parse(input);
     if (this.project(parsed.projectId).archivedAt) throw new AppError('project_archived', 'This project is archived. Restore it before submitting work.', 409);
     const clean = redactValues(parsed, this.secrets) as typeof parsed;
@@ -578,6 +609,10 @@ export class Store {
       if (team) task = { ...task, team, agents: team.members.map(m => ({ ...m, schemaVersion: 1 as const, instructionsFile: 'team', source: `team:${team.id}@${team.revision}` })) };
       this.db.prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)').run(task.id, task.projectId, task.state, task.version, this.taskJson(task));
       this.db.prepare('INSERT INTO requests VALUES (?, ?, ?)').run(key, fingerprint, task.id);
+      if (sharedOwner) {
+        if (this.workspaceOwnerId() !== sharedOwner) throw new AppError('workspace_owner_mismatch', 'Shared submission requires its workspace owner', 403);
+        this.db.prepare("INSERT INTO shared_task_handoffs VALUES (?, ?, ?, 'held', ?)").run(task.id, sharedOwner, randomUUID(), this.taskJson(task));
+      }
       this.requestDispatchRow(task);
       this.append(task, 'user', `${mode ? 'Task submitted with autonomy mode' : 'Choose autonomous or plan-approval to continue'}${team ? ` · team "${team.name}" revision ${team.revision} frozen` : ''}${ticket ? ` · started from ${ticket.name} ticket ${ticket.key}` : ''}`);
       return task;

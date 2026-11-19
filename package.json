@@ -27,13 +27,15 @@
     "test:codex-protocol": "npm run build && node scripts/codex-protocol-smoke.mjs",
     "test:codex-live": "npm run build && node scripts/m2-smoke.mjs --live",
     "test:m3": "npm run build && node scripts/m3-smoke.mjs",
-    "test:m3-live": "npm run build && node scripts/m3-smoke.mjs --live"
+    "test:m3-live": "npm run build && node scripts/m3-smoke.mjs --live",
+    "test:postgres": "DEVAGENTS_TEST_POSTGRES=1 tsx --test tests/integration/postgres-tasks.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.317",
     "@mastra/core": "1.80.0",
     "@mastra/libsql": "1.27.1",
     "commander": "15.0.0",
+    "pg": "8.23.1",
     "pnpm": "10.34.9",
     "semver": "7.7.3",
     "yaml": "2.9.1",
@@ -43,6 +45,7 @@
     "@playwright/test": "1.64.1",
     "@preact/preset-vite": "2.10.6",
     "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
     "@types/semver": "7.7.1",
     "preact": "11.1.0",
     "preact-iso": "2.12.2",
