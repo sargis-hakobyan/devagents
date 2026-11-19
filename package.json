@@ -34,6 +34,7 @@
     "@anthropic-ai/claude-agent-sdk": "0.3.317",
     "@mastra/core": "1.80.0",
     "@mastra/libsql": "1.27.1",
+    "@mastra/pg": "1.35.0",
     "commander": "15.0.0",
     "pg": "8.23.1",
     "pnpm": "10.34.9",

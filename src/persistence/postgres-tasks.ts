@@ -4,6 +4,9 @@ import { readFile, realpath } from 'node:fs/promises';
 import pg from 'pg';
 import { AppError } from '../domain/errors.js';
 import type { Task } from '../domain/schemas.js';
+import { PostgresHistory } from './postgres-history.js';
+import { openCheckpointStorage } from './postgres-checkpoints.js';
+import type { Store } from './store.js';
 import type { TaskDiff } from '../workspace/diff.js';
 
 export type SharedResult = { ownerId: string; task: Task; diff: TaskDiff | null };
@@ -19,10 +22,10 @@ export class PostgresTasks {
     pool.on('error', () => { /* Idle client failures are retried by the pool. */ });
     try {
       const check = await pool.query(`SELECT current_user AS login, r.rolsuper OR r.rolbypassrls AS privileged,
-        t.relrowsecurity AND t.relforcerowsecurity AS protected
-        FROM pg_roles r, pg_class t WHERE r.rolname=current_user AND t.oid='devagents.task_runs'::regclass`);
+        bool_and(t.relrowsecurity AND t.relforcerowsecurity) AS protected, count(*) AS tables
+        FROM pg_roles r, pg_class t WHERE r.rolname=current_user AND t.oid IN ('devagents.task_runs'::regclass, 'devagents.task_history'::regclass, 'devagents.workflow_stores'::regclass) GROUP BY r.rolsuper, r.rolbypassrls`);
       const row = check.rows[0];
-      if (row?.login !== ownerId || row.privileged || !row.protected) throw Error('Invalid workspace database configuration');
+      if (row?.login !== ownerId || row.privileged || !row.protected || Number(row.tables) !== 3) throw Error('Invalid workspace database configuration');
       return new PostgresTasks(pool, ownerId);
     } catch {
       await pool.end();
@@ -74,5 +77,7 @@ export class PostgresTasks {
     const rows = await this.pool.query('SELECT result FROM devagents.task_runs WHERE owner_id=$1 AND task_id=$2 AND result IS NOT NULL', [this.ownerId, id]).catch(() => { throw unavailable(); });
     return rows.rows[0]?.result;
   }
+  history(store: Store) { return new PostgresHistory(this.pool, this.ownerId, store); }
+  checkpoints(store: Store, dataDir: string) { return openCheckpointStorage(this.pool, this.ownerId, store, dataDir); }
   close() { return this.pool.end(); }
 }

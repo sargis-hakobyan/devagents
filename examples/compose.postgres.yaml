@@ -8,6 +8,7 @@ services:
     secrets: [postgres-admin, alice-db, bob-db]
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ../infra/postgres/30-history.sql:/docker-entrypoint-initdb.d/30-history.sql:ro
       - ../infra/postgres/tasks.sql:/docker-entrypoint-initdb.d/10-tasks.sql:ro
       - ../infra/postgres/20-example-roles.sql:/docker-entrypoint-initdb.d/20-example-roles.sql:ro
     networks: [alice-network, bob-network]

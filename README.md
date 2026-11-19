@@ -18,7 +18,7 @@ Shared mode supports password login to an owner-bound workspace and optional KMS
 
 Open **Settings → Claude connection → Set up / change Claude connection** for the [Claude setup flow](docs/SETUP.md#claude).
 
-Shared Docker runtimes can also use [self-managed PostgreSQL for task submissions, execution claims and results](docs/SETUP.md#shared-task-storage-in-postgresql).
+Shared Docker runtimes can also use [self-managed PostgreSQL for task submissions, workflow checkpoints, live Activity history and results](docs/SETUP.md#shared-task-storage-in-postgresql).
 
 ## Quickstart
 

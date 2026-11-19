@@ -8,9 +8,11 @@ export class SharedTasks {
   private readonly active = new Map<string, Promise<void>>();
   private timer?: ReturnType<typeof setInterval>;
   private sweep?: Promise<void>;
+  readonly history: ReturnType<PostgresTasks['history']>;
   private lastFailure: string | null = null;
   constructor(private readonly service: TaskService, private readonly database: PostgresTasks) {
     service.enableSharedSubmissions(database.ownerId);
+    this.history = database.history(service.store);
   }
 
   start() {
@@ -27,7 +29,8 @@ export class SharedTasks {
       for (const id of this.service.store.outstandingHandoffs()) {
         try { await this.sync(id); } catch { failed = true; }
       }
-      this.lastFailure = failed ? 'Shared task handoff pending. Check PostgreSQL connectivity and claim ownership.' : null;
+      try { await this.history.flush(); } catch { failed = true; }
+      this.lastFailure = failed ? 'Shared task or history synchronization pending. Check PostgreSQL connectivity and claim ownership.' : null;
     } catch { this.lastFailure = 'Local task handoff storage unavailable.'; }
   }
   async publish(id: string) {
@@ -77,6 +80,6 @@ export class SharedTasks {
     clearInterval(this.timer);
     await this.sweep;
     await Promise.allSettled(this.active.values());
-    await this.database.close();
+    try { await this.history.flush(); } finally { await this.database.close(); }
   }
 }

@@ -92,14 +92,13 @@ try {
     // An awaiting-mode task exercises the real API/worker handoff without making a model call.
     const response = await context.request.post(origin + '/tasks', { headers, data: { projectId: aliceProject.id, request: 'Private PostgreSQL smoke' } });
     assert.equal(response.status(), 201); sharedId = (await response.json()).id;
-    await request('/tasks/' + sharedId + '/cancel', {});
     for (let attempt = 0;; attempt++) {
-      const saved = await context.request.get(origin + '/tasks/' + sharedId + '/result');
-      if (saved.ok()) { assert.equal((await saved.json()).task.state, 'cancelled'); break; }
-      assert.equal(saved.status(), 404);
-      assert.ok(attempt < 50, 'shared result was not archived');
+      const evidence = await request('/tasks/' + sharedId + '/evidence');
+      if (evidence.some(e => e.kind === 'workflow-status' && e.data.status === 'suspended')) break;
+      assert.ok(attempt < 100, 'mode checkpoint was not persisted');
       await new Promise(resolve => setTimeout(resolve, 100));
     }
+    compose(['exec', '-T', 'alice', 'sh', '-c', 'test ! -e /data/workflows.db']);
   }
   await page.evaluate(() => sessionStorage.setItem('devagents.submit.ticket', 'Alice private draft'));
   await logout();
@@ -126,7 +125,19 @@ try {
   await login('alice');
   assert.equal((await request('/projects'))[0].id, aliceProject.id);
   assert.equal((await request('/setup/claude-auth')).connection.saved, true);
-  if (postgres) assert.equal((await request('/tasks/' + sharedId + '/result')).task.state, 'cancelled');
+  if (postgres) {
+    assert.equal((await request('/tasks/' + sharedId)).state, 'awaiting_mode');
+    const history = await request('/tasks/' + sharedId + '/evidence');
+    assert.equal(history.filter(e => e.kind === 'workflow-started').length, 1);
+    await request('/tasks/' + sharedId + '/cancel', {});
+    for (let attempt = 0;; attempt++) {
+      const saved = await context.request.get(origin + '/tasks/' + sharedId + '/result');
+      if (saved.ok()) { assert.equal((await saved.json()).task.state, 'cancelled'); break; }
+      assert.equal(saved.status(), 404);
+      assert.ok(attempt < 50, 'shared result was not archived');
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
   console.log('PASS: sandbox socket denial, Chromium sign-in/switch, isolated projects and teams, separate Claude reconnect and vault restore after runtime recreation.');
 } finally {
   await browser?.close();

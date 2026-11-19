@@ -10,7 +10,8 @@
 - [x] Serve concurrent private workspaces on one host with a shared password-login gateway and a dedicated runtime, store and profile for each provisioned owner.
 - [ ] Validate personal Codex/Claude subscription login, refresh and simultaneous isolated execution on the server.
 - [x] First PostgreSQL path for shared task submission, execution admission and terminal result retrieval, with owner isolation and recovery of pending handoffs.
-- [ ] Migrate remaining workspace data, live events and durable workflow checkpoints to shared PostgreSQL.
+- [x] Store Mastra checkpoints and live Activity/evidence in owner-isolated PostgreSQL storage. Import existing approval waits, resume after runtime recreation and catch up from a retained history journal.
+- [ ] Migrate remaining workspace configuration, task working state and approval records.
 - [ ] Separate API and workers with database task ownership, cancellation and interruption handling.
 - [ ] Worker-independent repository results and user-scoped publishing.
 - [ ] AWS Docker deployment, additional worker hosts and the pre-update backup/restore procedure.

@@ -313,9 +313,13 @@ export function createApi(application: TaskService, token: string, options: ApiO
           const task = archived?.task ?? local;
           return send(res, 200, { ...named(task), approval: service.store.planApproval(id), scheduling: service.taskScheduling(id), ...(service.store.project(task.projectId).archivedAt ? { projectArchived: true } : {}) });
         }
-        if (req.method === 'GET' && action === 'events') return send(res, 200, service.store.events(id, integer(url.searchParams.get('after'), 0), Math.min(integer(url.searchParams.get('limit'), 500), 1000)));
-        if (req.method === 'GET' && action === 'evidence' && sub) return send(res, 200, boundEvidence(service.store.evidenceEntry(id, Number(sub)), EVIDENCE_ENTRY_BYTES));
-        if (req.method === 'GET' && action === 'evidence') return send(res, 200, service.store.evidence(id, integer(url.searchParams.get('after'), 0), Math.min(integer(url.searchParams.get('limit'), 200), 1000)).map(e => boundEvidence(e, EVIDENCE_PREVIEW_BYTES)));
+        const history = options.sharedTasks?.history ?? service.store;
+        if (req.method === 'GET' && action === 'events') return send(res, 200, await history.events(id, integer(url.searchParams.get('after'), 0), Math.min(integer(url.searchParams.get('limit'), 500), 1000)));
+        if (req.method === 'GET' && action === 'evidence' && sub) return send(res, 200, boundEvidence(await history.evidenceEntry(id, Number(sub)), EVIDENCE_ENTRY_BYTES));
+        if (req.method === 'GET' && action === 'evidence') {
+          const entries = await history.evidence(id, integer(url.searchParams.get('after'), 0), Math.min(integer(url.searchParams.get('limit'), 200), 1000));
+          return send(res, 200, entries.map(e => boundEvidence(e, EVIDENCE_PREVIEW_BYTES)));
+        }
         if (req.method === 'GET' && action === 'items') return send(res, 200, service.store.workItems(id));
         if (req.method === 'POST' && !sub) {
           if (action === 'run') return send(res, 202, service.run(id));

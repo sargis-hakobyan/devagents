@@ -24,7 +24,7 @@ Each runtime resumes its own persisted queue when restarted. Workspaces have ind
 
 ## Shared task storage in PostgreSQL
 
-The optional Compose overlay runs one PostgreSQL 17 server for both private runtimes. New tasks store their frozen submission, workspace claim and terminal result there. Keep the private runtime volumes: live workflow checkpoints, project configuration, events and Git repositories still reside in those volumes. The overlay applies to new submissions. Existing tasks stay accessible from their original workspace.
+The optional Compose overlay runs one PostgreSQL 17 server for both private runtimes. PostgreSQL stores workflow checkpoints, redacted Activity events and evidence, plus submissions, claims and results for new tasks. Keep the private runtime volumes for Git repositories, the execution journal, approvals, teams, connections and projects. On first PostgreSQL startup, existing workflow snapshots are imported before recovery. The history journal backfills earlier events with their original sequence numbers.
 
 For the two-user Docker example, prepare the three database passwords **once** on the operator host. The enclosing directory is accessible only to its owner. Inside it, each file needs to be readable by its designated container UID. Compose mounts individual secret files into the relevant containers.
 
@@ -50,6 +50,15 @@ docker compose -f examples/compose.workspaces.yaml -f examples/compose.postgres.
 ```
 
 The database initializes the schema and example login roles on first use of its persistent volume. Each role is named for its workspace UUID. The server grants access through the `devagents_worker` group and enforces a row policy matching the authenticated database login. The database administrator password stays in the PostgreSQL service. For another installation, apply [the schema](../infra/postgres/tasks.sql) as the database administrator, provision a distinct unprivileged login per owner, and mount that owner's password under `/run/secrets` in its runtime. Set `DEVAGENTS_POSTGRES_HOST`, `DEVAGENTS_POSTGRES_PASSWORD_FILE`, and optionally `DEVAGENTS_POSTGRES_DATABASE` (default `devagents`).
+
+For an **existing PostgreSQL volume**, apply the history migration as the database administrator after provisioning workspace logins and before starting the updated runtimes. The example's initialization scripts run automatically only on a new PostgreSQL volume. Finish active execution, stop the workspace runtimes, and retain the workspace volumes and a restore-tested database copy for rollback. With the existing Compose environment and project name:
+
+```sh
+docker compose -f examples/compose.workspaces.yaml -f examples/compose.postgres.yaml exec -T postgres \
+  psql -v ON_ERROR_STOP=1 -U postgres -d devagents < infra/postgres/30-history.sql
+```
+
+Apply the same [migration](../infra/postgres/30-history.sql) when adding a workspace database login. It creates the append-only history table and provisions a private schema for each workspace's Mastra tables. Restart the runtimes with the overlay and unlock them as usual. Once checkpoint migration completes, rollback requires restoring the pre-upgrade runtime and database together.
 
 ## Shared-server login foundation
 

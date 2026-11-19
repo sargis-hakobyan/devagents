@@ -110,8 +110,19 @@ cli.command('serve').description('Start the API and runner').option('--workspace
   const engines = new EngineRegistry([new CodexAdapter(dataDir, 'codex', sandbox), new ClaudeAdapter(dataDir, sandbox)]);
   const service = new TaskService(store, config, dataDir, process.platform, engines.ids());
   const credentialRuntime = process.env.DEVAGENTS_CREDENTIAL_RUNTIME;
+  let database: PostgresTasks | undefined;
+  if (process.env.DEVAGENTS_POSTGRES_HOST || process.env.DEVAGENTS_POSTGRES_PASSWORD_FILE) {
+    if (!privateOwner || !process.env.DEVAGENTS_POSTGRES_HOST || !process.env.DEVAGENTS_POSTGRES_PASSWORD_FILE) {
+      throw new AppError('shared_store_config', 'PostgreSQL task storage requires a private owner runtime, database host and password file');
+    }
+    store.bindWorkspaceOwner(privateOwner);
+    database = await PostgresTasks.configured(privateOwner);
+  }
+  const sharedTasks = database ? new SharedTasks(service, database) : undefined;
+  await sharedTasks?.history.initialize();
+  const workflowStorage = await database?.checkpoints(store, dataDir);
   const runner = new TaskRunner(service, engines, new CodexValidator(dataDir, 'codex', sandbox), undefined, {
-    startPaused: true,
+    startPaused: true, ...(workflowStorage ? { workflowStorage } : {}),
     admission: () => credentialRuntime && !existsSync(join(credentialRuntime, 'unlocked'))
       ? 'Waiting for credential vault unlock; finish startup in the launcher' : undefined,
   });
@@ -140,14 +151,6 @@ cli.command('serve').description('Start the API and runner').option('--workspace
   service.attachTicketFiles((task, directory) => downloadTicketFiles({ integrations, trackers }, task.projectId, task.ticket!, directory));
   const providerOf = (kind: string) => config.providers.find(p => p.kind === kind && !p.baseUrl);
   const models = new ModelCatalogService(store, { codex: codexModelLister(dataDir, providerOf('openai')), 'claude-code': claudeModelLister(dataDir, providerOf('anthropic')) });
-  let sharedTasks: SharedTasks | undefined;
-  if (process.env.DEVAGENTS_POSTGRES_HOST || process.env.DEVAGENTS_POSTGRES_PASSWORD_FILE) {
-    if (!privateOwner || !process.env.DEVAGENTS_POSTGRES_HOST || !process.env.DEVAGENTS_POSTGRES_PASSWORD_FILE) {
-      throw new AppError('shared_store_config', 'PostgreSQL task storage requires a private owner runtime, database host and password file');
-    }
-    store.bindWorkspaceOwner(privateOwner);
-    sharedTasks = new SharedTasks(service, await PostgresTasks.configured(privateOwner));
-  }
   const server = createApi(service, await accessToken(dataDir), {
     sessions: new BrowserSessions(undefined, sessionLimits(process.env, sharedLogin ? { idleMs: 3600000, absoluteMs: 43200000 } : {}), sessionFile(dataDir, login.mode)),
     ...(sharedTasks ? { sharedTasks } : {}),
@@ -172,7 +175,12 @@ cli.command('serve').description('Start the API and runner').option('--workspace
   const shutdown = () => {
     if (closing) return; closing = true; clearInterval(publishing);
     void claudeAuth.close(); void setupAuth.close(); void runner.stop();
-    server.close(() => { void Promise.all([runner.stop(), setupAuth.close(), claudeAuth.close()]).then(async () => { await sharedTasks?.stop(); accounts?.close(); store.close(); unlock(); process.exitCode = 0; }); });
+    server.close(() => {
+      void Promise.all([runner.stop(), setupAuth.close(), claudeAuth.close()])
+        .then(() => sharedTasks?.stop())
+        .catch(() => { log('shutdown_incomplete', { message: 'Check workspace storage before restarting. Pending history is retained locally.' }); process.exitCode = 1; })
+        .finally(() => { accounts?.close(); store.close(); unlock(); });
+    });
     server.closeIdleConnections();
   };
   process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);

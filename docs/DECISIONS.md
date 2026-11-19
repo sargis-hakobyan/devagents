@@ -1,5 +1,11 @@
 # Decision log
 
+## Persist shared workflow checkpoints and Activity history in PostgreSQL
+
+Use the Mastra PostgreSQL workflow adapter with a private schema per workspace login. This lets Mastra own atomic checkpoint updates and gives the database an owner boundary for both parent and child runs. Import legacy snapshots once under the existing exclusive service lock. Bind the workspace volume to the selected checkpoint store before accepting work. Approval still uses the version-checked task transition and uncertain work remains subject to the existing recovery checks.
+
+Keep redacted events and evidence in the local execution transaction and use those append-only rows as the journal for PostgreSQL history delivery. Key each central row by workspace, stream and original sequence. Database roles can insert and read their own rows. Synchronize before serving Activity pages and after terminal cleanup so an outage or restart can catch up without replaying a task. Local mode continues to use LibSQL checkpoints and SQLite history.
+
 ## Gate shared execution on a durable PostgreSQL claim
 
 The shared-runtime migration starts at the task boundary. Keep the existing SQLite transaction that freezes task input, team and retry identity. In PostgreSQL mode it also creates a durable local handoff and holds scheduler admission. Publish the prepared snapshot to one shared PostgreSQL table. A claim bound to both workspace and task opens the gate. Archive the terminal task and bounded diff under that claim. Reconciliation can repeat after a crash without creating a second execution. A dedicated unprivileged SQL login and forced row-level security constrain each workspace connection. Local mode still uses its own SQLite dispatch path.

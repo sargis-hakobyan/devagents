@@ -1,3 +1,4 @@
+import type { MastraCompositeStore } from '@mastra/core/storage';
 import { randomUUID } from 'node:crypto';
 import type { DispatchClaim, SchedulerStatus, TaskScheduling } from '../domain/dispatch.js';
 import type { CodingEngine, Validator } from '../domain/engine.js';
@@ -30,7 +31,7 @@ export class TaskRunner {
   readonly workflows: TaskWorkflows;
   constructor(private readonly service: TaskService, engine: CodingEngine | EngineRegistry,
     private readonly validator: Validator, private readonly environment?: EnvironmentPreparer,
-    private readonly options: { startPaused?: boolean; admission?: () => string | undefined } = {}) {
+    private readonly options: { workflowStorage?: MastraCompositeStore; startPaused?: boolean; admission?: () => string | undefined } = {}) {
     this.recovering = options.startPaused ?? false;
     this.engines = engine instanceof EngineRegistry ? engine : new EngineRegistry([engine]);
     this.resources = new ExecutionResources(service.dataDir, service.config.maxConcurrentOperations, service.config.minFreeDiskBytes);
@@ -44,7 +45,7 @@ export class TaskRunner {
       plan: id => context(id).plan(id, context(id).abort.signal),
       environment: id => context(id).prepareApprovedEnvironment(),
       execute: id => context(id).execute(id, context(id).abort.signal),
-    });
+    }, options.workflowStorage);
     this.poll = setInterval(() => {
       this.drain();
       if (!this.stopping && !this.executionFailure && !this.recovering) {

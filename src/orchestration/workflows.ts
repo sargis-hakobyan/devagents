@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import type { MastraCompositeStore } from '@mastra/core/storage';
 import { Mastra } from '@mastra/core/mastra';
 import { createStep, createWorkflow, type WorkflowOptions } from '@mastra/core/workflows';
 import { LibSQLStore } from '@mastra/libsql';
@@ -22,11 +23,12 @@ const errorMessage = (error: unknown): string => error && typeof error === 'obje
  */
 export class TaskWorkflows {
   private readonly ownedWork = new Map<string, Set<Promise<unknown>>>();
-  private readonly storage: LibSQLStore;
+  private readonly storage: MastraCompositeStore;
   private readonly workflow;
   private readonly options: WorkflowOptions;
-  constructor(private readonly service: TaskService, hooks: Hooks) {
-    this.storage = new LibSQLStore({ id: 'devagents-workflows', url: pathToFileURL(join(service.dataDir, 'workflows.db')).href });
+  constructor(private readonly service: TaskService, hooks: Hooks, storage?: MastraCompositeStore) {
+    if (!storage && service.store.checkpointBinding()) throw new AppError('checkpoint_store_required', 'This workspace requires its PostgreSQL workflow checkpoints');
+    this.storage = storage ?? new LibSQLStore({ id: 'devagents-workflows', url: pathToFileURL(join(service.dataDir, 'workflows.db')).href });
     this.options = {
       autoRestartActiveRuns: false,
       pruneSnapshot: ({ snapshot }) => redactValues(JSON.parse(JSON.stringify(snapshot, (_key, value: unknown) =>
@@ -118,6 +120,9 @@ export class TaskWorkflows {
         }
       }
       return;
+    }
+    if (!previous && this.service.store.checkpointBinding() && this.service.store.lastEvidence(id, 'workflow-started')) {
+      throw new AppError('workflow_interrupted', 'A previously started workflow is missing its checkpoint. Inspect the saved work before recovery.');
     }
     if (previous && previous.status !== 'suspended') {
       // Never restart a possibly executed command/commit from a stale framework snapshot.

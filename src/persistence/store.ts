@@ -28,7 +28,7 @@ export class Store {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
     // Version 4 added optional QA settings. Preserve that table when the QA feature is stashed.
-    if (version > 13) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
+    if (version > 14) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
     if (version === 0) this.db.exec(`
       BEGIN IMMEDIATE;
       CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, data TEXT NOT NULL);
@@ -122,6 +122,38 @@ export class Store {
       PRAGMA user_version=13;
       COMMIT;
     `);
+    if (version < 14) this.db.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS checkpoint_binding(singleton INTEGER PRIMARY KEY CHECK(singleton=1), store_id TEXT NOT NULL);
+      PRAGMA user_version=14;
+      COMMIT;
+    `);
+  }
+
+  checkpointBinding(): string | undefined {
+    return this.db.prepare('SELECT store_id FROM checkpoint_binding WHERE singleton=1').get()?.store_id as string | undefined;
+  }
+  bindCheckpoints(storeId: string): void {
+    this.db.prepare('INSERT INTO checkpoint_binding VALUES (1,?) ON CONFLICT DO NOTHING').run(storeId);
+    if (this.checkpointBinding() !== storeId) throw new AppError('checkpoint_store_changed', 'Restore the PostgreSQL checkpoint store bound to this workspace');
+  }
+  historyEnd(stream: 'events' | 'evidence'): number {
+    const table = stream === 'events' ? 'events' : 'evidence';
+    return Number(this.db.prepare(`SELECT COALESCE(MAX(sequence),0) AS seq FROM ${table}`).get()!.seq);
+  }
+  historyBatch(stream: 'events' | 'evidence', after: number, through: number) {
+    const select = stream === 'events' ? 'NULL AS kind, data FROM events' : 'kind, data FROM evidence';
+    const rows = this.db.prepare(`SELECT sequence, task_id AS "taskId", ${select}
+      WHERE sequence>? AND sequence<=? ORDER BY sequence LIMIT 32`).iterate(after, through);
+    const batch: { sequence: number; taskId: string; kind: string | null; data: string }[] = [];
+    let bytes = 0;
+    for (const row of rows) {
+      const entry = row as (typeof batch)[number];
+      bytes += Buffer.byteLength(entry.data);
+      if (batch.length && bytes > 1024 * 1024) break;
+      batch.push(entry);
+    }
+    return batch;
   }
 
   heldForSharedClaim(id: string): boolean {
@@ -563,6 +595,7 @@ export class Store {
     if (row) return { status: 'approved', timestamp: (JSON.parse(String(row.data)) as TaskEvent).timestamp };
     return { status: task.state === 'awaiting_plan_approval' ? 'awaiting' : 'not-approved' };
   }
+  hasTask(id: string): boolean { return Boolean(this.db.prepare('SELECT 1 FROM tasks WHERE id=?').get(id)); }
   task(id: string): Task {
     const row = this.db.prepare('SELECT data FROM tasks WHERE id=?').get(id);
     if (!row) throw new AppError('not_found', 'Unknown task', 404);
