@@ -59,7 +59,7 @@ export type CheckStatus = 'passed' | 'failed' | 'running' | 'skipped';
 export type PullRequestCheck = { name: string; status: CheckStatus; url?: string; /** GitHub's id of the check run, used to read its log and annotations. */ runId?: number; /** GitHub's own short description of the result. Remote text, shown as plain text. */ summary?: string };
 export type PullRequestComment = {
   id: string; author: string;
-  /** The author can write to the repository. Other comments are shown and never block or start anything. */
+  /** The author is a GitHub bot or can write to the repository. Other comments are shown and never block or start anything automatically. */
   counts: boolean; path?: string; line?: number; body: string; url?: string;
 };
 export type PullRequestState = 'open' | 'merged' | 'closed';

@@ -140,7 +140,7 @@ export async function runDag(h: Hooks): Promise<void> {
         check();
         await implement(developer, `Implement only this work item. Dependency results are already present in this worktree. Do not commit or modify Git metadata.${rules ? ' Do not modify ignored files.' : ' Generated files and setup scripts are permitted. Prepare any new dependencies or generated prerequisites before returning; keep source changes visible to review.'}\nRequest: ${task.request}\nUser acceptance criteria: ${JSON.stringify(task.acceptanceCriteria)}\nWork item: ${JSON.stringify(item)}\n${feedback}`, workerSignal, { cwd: ownedWorker.path, workItemId: item.id });
         const before = await changes(ownedWorker, developer);
-        if (!before.files.length) throw new AppError('no_changes', `Work item ${item.id} produced no changes`);
+        if (!before.files.length) throw new AppError('no_changes', `Work item ${item.id} produced no changes. DevAgents requires a code change for each work item. This item stopped before automated validation and independent review; the task could not complete.`);
         check(); state(item.id, 'validating');
         const evidence = await validate(ownedWorker, item.validation, workerSignal, item.id);
         const after = await changes(ownedWorker, developer);
@@ -242,7 +242,7 @@ export async function runDag(h: Hooks): Promise<void> {
     await h.workflows.repeat(task.id, 'combined-validation-review', async () => {
       h.active(); h.move('validating', 'Validating combined work-item results');
       const before = await changes(workspace, integrator);
-      if (!before.files.length) throw new AppError('no_changes', 'Combined task has no changes');
+      if (!before.files.length) throw new AppError('no_changes', 'Combined task has no changes. The combined work has no code changes relative to the starting commit. DevAgents stopped before combined validation and independent review; no final task commit was created.');
       const evidence = await validate(workspace, commands, signal, '@integration');
       const after = await changes(workspace, integrator);
       let feedback = '';

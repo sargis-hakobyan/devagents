@@ -668,3 +668,13 @@ The owner asked that starting a Jira or Pulse ticket assigns it to "the owner of
 ## A ticket is available again when its task left nothing — 2026-11-18
 
 The owner closed a pull request and moved its Pulse ticket back to todo, and the ticket did not return to the Available column: a ticket was hidden for good once any task had been started from it. A ticket now stays hidden only while a task from it is waiting, working or completed. It returns when that task failed or was cancelled, or when its pull request was closed without merging. A completed task without a pull request, and a merged one, keep the ticket hidden. Automatic ticket start is not implemented; when it is, it must not restart a ticket whose task failed without a limit.
+
+
+## Explain task failures without changing their outcome — 2026-11-19
+
+Failed task headers and Result now describe why execution stopped and what to do next. The blanket setup recommendation was removed because empty changes, rejected reviews and interruptions are not necessarily setup problems. New no-change errors explain the gate in API and CLI output too; old error messages remain recognized in the UI without migrating task history. For no-change failures, the matching developer report is shown as a report, never as independent approval. Validation, independent review and commit requirements remain unchanged. This extends the existing task status banner using the current styles; no new task state or verification-only completion path is introduced.
+
+
+## Include bot code-review comments in repair rounds — 2026-11-19
+
+The owner requested fixes for bot review comments as well as human feedback. The GitHub review-thread query now reads the author’s `__typename`; `Bot` authors count alongside repository owners, members and collaborators, including when `authorAssociation` is `NONE`. This uses GitHub’s identity type rather than guessing from login names. Existing comment repair settings, validation/review gates, round limits and workflow-file push approval apply unchanged. Unresolved bot threads also block merging. General PR conversation comments and review summaries remain outside the current review-thread reader. Existing open PRs are reclassified on the next successful poll; no historical evidence is rewritten.

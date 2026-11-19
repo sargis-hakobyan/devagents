@@ -1,4 +1,4 @@
-import type { SchedulerStatus, TaskScheduling } from '../../src/domain/dispatch';
+import type { SchedulerStatus, TaskScheduling } from '../../src/domain/dispatch.js';
 /** Same-origin API client. Cookie auth only; the CLI bearer token never exists in the browser. */
 export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }

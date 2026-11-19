@@ -10,6 +10,30 @@ import { Config, Plan } from '../../src/domain/schemas.js';
 import { TaskService } from '../../src/orchestration/service.js';
 import { Store } from '../../src/persistence/store.js';
 
+test('no source changes retains a clear failure explanation without claiming validation or review', async () => {
+  const f = await fixture(); const engine = new FakeEngine();
+  const execute = engine.execute.bind(engine);
+  engine.execute = async request => {
+    if (request.phase !== 'implementation') return execute(request);
+    engine.calls.push(request);
+    return { output: { summary: 'The requested behavior already exists. No source changes were needed.' } };
+  };
+  const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);
+  try {
+    const task = f.service.submit({ projectId: 'fixture', request: 'Verify existing behavior', mode: 'autonomous' }, 'no-changes');
+    await runner.idle();
+    const done = f.store.task(task.id);
+    assert.equal(done.state, 'failed');
+    assert.match(done.outcome!.error!, /requires a code change/);
+    assert.match(done.outcome!.error!, /before automated validation and independent review/);
+    assert.equal(done.outcome?.commit, undefined);
+    assert.deepEqual(engine.calls.map(c => c.phase), ['planning', 'implementation']);
+    assert.equal(f.store.evidence(task.id).some(e => e.kind === 'validation' || e.kind === 'commit-created'), false);
+    const implementation = f.store.evidence(task.id).find(e => e.kind === 'run-completed' && (e.data as { phase: string }).phase === 'implementation');
+    assert.match(JSON.stringify(implementation), /already exists/);
+  } finally { await runner.stop(); await f.cleanup(); }
+});
+
 test('autonomous task starts from main and completes without touching a dirty feature checkout', async () => {
   const f = await fixture(); const engine = new FakeEngine();
   const runner = new TaskRunner(f.service, engine, new FixtureValidator()); f.service.attachRunner(runner);

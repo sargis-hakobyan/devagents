@@ -228,7 +228,7 @@ export class TaskExecution {
       this.ensureActive(id, signal); if (hiddenBefore) assertHiddenUnchanged(hiddenBefore, await hiddenFiles(task.workspace!.path), 'Implementation');
       await this.prepareEnvironment(id, task.workspace!.path, item.validation, signal);
       const before = await changes(task.workspace!, developer);
-      if (!before.files.length) throw new AppError('no_changes', 'Implementation produced no reviewable changes');
+      if (!before.files.length) throw new AppError('no_changes', 'Implementation produced no reviewable changes. DevAgents requires a code change to complete a task. It stopped before automated validation and independent review; no final commit was created.');
       this.ensureActive(id, signal); this.move(id, 'validating', rules ? 'Running validation in a read-only command sandbox' : 'Running project validation in the engine sandbox');
       const evidence = await validateWithSetup({ commands: item.validation, rules,
         digest: async () => (await changes(task.workspace!, developer)).digest,

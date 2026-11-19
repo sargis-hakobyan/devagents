@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { resolve } from 'node:path';
+import { mkdir } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { fixture, validPlan } from '../helpers.js';
 import { BrowserSessions } from '../../src/api/session.js';
@@ -88,4 +89,33 @@ test('large evidence retains pass, failure, truncation and review outcomes in ev
   await page.getByRole('tab', { name: 'Result' }).click();
   await expect(page.locator('dl.kv')).toContainText('2 of 4 validation runs passed');
   await expect(page.locator('dl.kv')).toContainText('Approved · Successful independent review.');
+});
+
+test('failed tasks explain no changes on desktop and mobile, retain historical evidence, and escape report text', async ({ page }) => {
+  const task = f.service.submit({ projectId: 'fixture', request: 'Remember project filters', mode: 'autonomous' }, 'historical-empty-change');
+  await f.service.proposePlan(task.id, validPlan());
+  f.store.transition(task.id, f.store.task(task.id).version, 'running', 'fixture', 'Implementation started');
+  f.store.record(task.id, 'run-completed', { phase: 'implementation', output: { summary: 'The requested behavior already exists. No source changes were needed. <img src=x onerror=alert(1)>\n\nReported checks passed.' } });
+  f.store.transition(task.id, f.store.task(task.id).version, 'failed', 'fixture', 'Implementation produced no reviewable changes', { outcome: { error: 'Implementation produced no reviewable changes', repairCycles: 0 } });
+  await signIn(page, `/ui/tasks/${task.id}`);
+  const notice = page.getByRole('region', { name: 'Why this task failed' }).first();
+  await expect(notice).toContainText('Stopped because no code changes were produced');
+  await expect(notice).toContainText('before automated validation and independent review');
+  await expect(notice).toContainText('The requested behavior already exists');
+  await expect(notice).toContainText('It was not independently reviewed');
+  await expect(page.getByRole('link', { name: 'Check setup before submitting a new task' })).toHaveCount(0);
+  await expect(page.locator('img[src="x"]')).toHaveCount(0);
+  await notice.getByRole('button', { name: 'View failure activity' }).click();
+  await expect(page.getByRole('tab', { name: /Activity/ })).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('tab', { name: 'Result', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Why this task failed' }).last()).toContainText('verify it before closing the ticket');
+  await page.getByRole('tab', { name: /Work ·/ }).click();
+  await mkdir(resolve('test-results/ui-screenshots'), { recursive: true });
+  await page.screenshot({ path: resolve('test-results/ui-screenshots/task-failure-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(notice).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: resolve('test-results/ui-screenshots/task-failure-mobile.png'), fullPage: true });
+  await notice.getByText('Technical details', { exact: true }).click();
+  await expect(notice.locator('pre')).toHaveText('Implementation produced no reviewable changes');
 });

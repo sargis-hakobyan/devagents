@@ -35,7 +35,7 @@ async function setup(options: { connected?: boolean } = {}) {
     if (g.down && (url.endsWith('/graphql') || /\/(pulls\/\d+|commits\/)/.test(path))) return json({ message: 'Bad credentials' }, 401);
     if (url === 'https://api.github.test/graphql' && String(JSON.parse(String(init!.body)).query).startsWith('mutation')) { assert.deepEqual(JSON.parse(String(init!.body)).variables, { id: 'PR_node42' }); state.readied += 1; return json({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }); }
     if (path === '/pulls/42/merge' && method === 'PUT') { state.merges.push(JSON.parse(String(init!.body))); if (g.refuseMerge) return json({ message: 'Pull Request is not mergeable' }, 405); state.github = { ...g, merged: true }; return json({ merged: true, sha: 'e'.repeat(40) }); }
-    if (url === 'https://api.github.test/graphql') { assert.deepEqual(JSON.parse(String(init!.body)).variables, { owner: 'example-org', name: 'website', number: 42 }); return json({ data: { repository: { pullRequest: { reviewThreads: { nodes: g.threads ?? [] } } } } }); }
+    if (url === 'https://api.github.test/graphql') { const body = JSON.parse(String(init!.body)); assert.match(body.query, /author\{__typename login\}/, 'request GitHub actor types to recognize bots'); assert.deepEqual(body.variables, { owner: 'example-org', name: 'website', number: 42 }); return json({ data: { repository: { pullRequest: { reviewThreads: { nodes: g.threads ?? [] } } } } }); }
     if (/^\/pulls\/42$/.test(path)) return json({ node_id: 'PR_node42', number: 42, state: g.closed || g.merged ? 'closed' : 'open', merged: g.merged === true, draft: state.pulls[0]?.draft === true, mergeable: g.mergeable === 'dirty' ? false : true, mergeable_state: g.mergeable ?? 'clean', head: { sha: g.head?.() ?? 'f'.repeat(40) }, base: { ref: 'main' } });
     if (path === '/check-runs/7/annotations?per_page=20') return json([{ path: 'tests/signup.test.ts', start_line: 48, message: 'expected 200 to be 400' }]);
     if (/^\/commits\/[0-9a-f]{40}\/check-runs/.test(path)) return json({ check_runs: g.runs ?? [] });
@@ -238,6 +238,47 @@ test('GitHub is read once a minute: checks, unresolved comments from writers, an
 });
 
 const FAILING = { runs: [{ id: 7, name: 'test', status: 'completed', conclusion: 'failure', output: { title: '1 failed, 23 passed' } }], threads: [{ id: 'a', isResolved: false, path: 'src/form.ts', line: 71, comments: { nodes: [{ author: { login: 'reviewer-a' }, authorAssociation: 'MEMBER', body: 'Use the shared messages file.' }] } }] };
+
+test('bot review threads count without repository membership and follow the configured repair mode', async () => {
+  for (const mode of ['off', 'ask', 'auto'] as const) {
+    const s = await setup(); let now = new Date('2026-11-18T12:00:00Z');
+    try {
+      (s.pulls as unknown as { now: () => Date }).now = () => now;
+      s.pulls.save('fixture', { publish: 'auto', fixComments: mode, maxFixRounds: 1, merge: 'auto' });
+      const t = await s.finished(); await s.pulls.publishDue();
+      const thread = (id: string, author: object | null, resolved = false) => ({ id, isResolved: resolved, path: 'src/form.ts', line: 71, comments: { nodes: [{ author, authorAssociation: 'NONE', body: `Fix ${id}.` }] } });
+      s.state.github = { head: () => s.remoteRef(t.branch), threads: [
+        thread('bot', { __typename: 'Bot', login: 'review-assistant[bot]' }),
+        thread('outsider', { __typename: 'User', login: 'helpful-bot' }),
+        thread('deleted', null),
+        thread('resolved-bot', { __typename: 'Bot', login: 'review-assistant[bot]' }, true),
+      ] };
+      await s.pulls.syncDue();
+      const view = s.pulls.view(t.id);
+      assert.deepEqual(view.github!.comments.map(c => [c.id, c.counts]), [['bot', true], ['outsider', false], ['deleted', false]], mode);
+      assert.equal(view.github!.status.text, '1 comment open', mode);
+      assert.equal(view.canMerge, false, 'an unresolved bot finding blocks merging');
+      assert.equal(s.state.merges.length, 0);
+      if (mode === 'auto') {
+        assert.equal(view.rounds!.length, 1);
+        const round = view.rounds![0]!; const task = s.f.store.task(round.taskId);
+        assert.equal(round.trigger, 'setting');
+        assert.deepEqual(task.followUp!.comments, ['bot']);
+        assert.equal(task.followUp!.baseSha, s.remoteRef(t.branch));
+        assert.match(task.request, /Review comment by @review-assistant\[bot\] on src\/form.ts line 71:\n<<<\nFix bot\.\n>>>/);
+        assert.doesNotMatch(task.request, /Fix outsider|Fix deleted|Fix resolved-bot/);
+        const fixed = await s.finishRound(round.taskId, { 'fix-bot.txt': 'fixed\n' });
+        await s.pulls.syncDue();
+        assert.equal(s.remoteRef(t.branch), fixed, 'the reviewed fix is pushed to the same PR branch');
+        now = new Date(now.getTime() + 61000); await s.pulls.syncDue();
+        assert.equal(s.pulls.view(t.id).rounds!.length, 1, 'bot feedback obeys the automatic round limit');
+      } else {
+        assert.deepEqual(view.rounds, [], mode);
+        assert.equal(view.canFix!.comments, mode === 'ask');
+      }
+    } finally { await s.f.cleanup(); }
+  }
+});
 
 test('a click starts a fix round from the pull request, and the reviewed result is pushed onto it', async () => {
   const s = await setup(); let now = new Date('2026-11-18T12:00:00Z'); const later = () => { now = new Date(now.getTime() + 61000); };

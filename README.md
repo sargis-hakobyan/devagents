@@ -54,10 +54,10 @@ The starter team includes a **Tech Lead**, **Frontend Developer**, **Backend Dev
 | --- | --- |
 | **Configurable teams** | Reusable roles, instructions, permissions, and per-member engine/model choices. Each submitted task keeps a frozen team snapshot. |
 | **Parallel development** | Dependency-aware work assignment, isolated Git worktrees, and an explicitly assigned integration owner. |
-| **Visible execution** | A browser timeline of agent runs, parallel work, automated checks, reviewer findings, and repair attempts. |
+| **Visible execution** | A browser timeline of agent runs, parallel work, automated checks, reviewer findings, and repair attempts. Failed tasks explain why they stopped and what to do next, with relevant developer reports kept separate from verified results. |
 | **Quality gates** | Developer validation and independent, read-only code review. Optional QA verifies acceptance criteria. |
 | **Usage tracking** | Reported tokens by step and attempt. Available cost estimates are labelled; missing data stays unavailable. |
-| **Project connections** | Connect GitHub, Jira and ticket tools. Drag an available ticket into Planning to start it with its full content and project defaults, or edit it first. A project connected to GitHub can publish a finished task as a pull request, on a click or on its own, shows its checks and review comments, can fix failed checks and comments in reviewed rounds that are pushed onto the pull request, and can merge it, each on a click or on its own. Automatic ticket pickup is not implemented yet. |
+| **Project connections** | Connect GitHub, Jira and ticket tools. Drag an available ticket into Planning to start it with its full content and project defaults, or edit it first. A project connected to GitHub can publish a finished task as a pull request, on a click or on its own, shows its checks and review comments, can fix failed checks and human or bot code-review comments in reviewed rounds that are pushed onto the pull request, and can merge it, each on a click or on its own. Automatic ticket pickup is not implemented yet. |
 | **Project archive** | Take a project out of use and register its repository again under a new name; its task history stays and it can be restored. |
 | **Local results** | Read-only diffs, local branches and commits, persistent task history, and automatic cleanup with recovery snapshots for unfinished work. |
 

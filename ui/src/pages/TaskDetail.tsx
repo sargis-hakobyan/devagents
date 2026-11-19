@@ -1,3 +1,5 @@
+import { taskFailure } from '../task-failure';
+import { TaskFailureNotice } from '../components/TaskFailure';
 import { ExecutionWorkflow } from '../components/ExecutionWorkflow';
 import { ProjectRef } from './Project';
 import { TaskUsage } from '../components/TaskUsage';
@@ -99,8 +101,7 @@ export function TaskDetailPage({ id }: { id: string }) {
             {renderActions()}
           </div>
         </div>
-        <div class={`note ${summary.tone}`} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}><span aria-hidden="true" style={{ fontSize: '16px' }}>{state.icon}</span><div><b>{summary.title}</b><div class="muted" style={{ fontSize: '13.5px' }}>{summary.detail}</div></div></div>
-        {task.state === 'failed' && <a href="/ui/settings/setup">Check setup before submitting a new task</a>}
+        {task.state === 'failed' ? <TaskFailureNotice failure={taskFailure(task, evidence.rows)} onActivity={() => { setActivityItem(undefined); setTab('activity'); }} /> : <div class={`note ${summary.tone}`} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}><span aria-hidden="true" style={{ fontSize: '16px' }}>{state.icon}</span><div><b>{summary.title}</b><div class="muted" style={{ fontSize: '13.5px' }}>{summary.detail}</div></div></div>}
         {task.state === 'awaiting_plan_approval' && <div class="note warn"><b>Approval binds to version {task.version}.</b> If the plan changes before you approve, the page refreshes and asks again. {pull.data?.mode === 'auto' ? 'When the task completes, this project opens a pull request on its own.' : 'Approving a plan is not permission to push, merge or run destructive commands.'}</div>}
       </div>
     </Card>
@@ -111,7 +112,7 @@ export function TaskDetailPage({ id }: { id: string }) {
     {tab === 'plan' && <><PlanTab task={task} />{task.state === 'awaiting_plan_approval' && <div class="decision-bar plan-decision-bar">{renderActions()}</div>}</>}
     {tab === 'activity' && <ActivityTab task={task} events={events.rows} evidence={evidence.rows} filter={activityItem} onClear={() => setActivityItem(undefined)} />}
     {tab === 'usage' && <TaskUsage key={id} id={id} />}
-    {tab === 'result' && <ResultTab task={task} evidence={evidence.rows} />}
+    {tab === 'result' && <ResultTab task={task} evidence={evidence.rows} onActivity={() => { setActivityItem(undefined); setTab('activity'); }} />}
     {tab === 'pull-request' && pullShown && <PullRequestTab taskId={id} view={pull.data!} reload={pull.reload} />}
   </>;
 }
@@ -129,7 +130,6 @@ function summarize(task: Task, items: ItemProgress[], pull?: TaskPullRequestView
     case 'running': case 'validating': case 'reviewing': case 'repairing': return { title: current ? `Now: ${itemVerb(current.state)} work item ${current.itemId}${current.agentId ? ` (${current.agentId})` : ''}` : `Now: ${task.state}`, tone: 'info', detail: items.length > 1 ? `${done} of ${items.length} items integrated. After every item is integrated, the combined result is validated and reviewed before one local commit. No merge, push or deployment happens.` : 'Implementation, real validation and an independent review precede one local commit on the task branch. No merge, push or deployment happens.' };
     case 'committing': return { title: 'Creating the reviewed local commit', tone: 'info', detail: 'This boundary cannot be cancelled; the outcome appears in Result.' };
     case 'completed': { const n = limitationCount(task.outcome); return { title: n ? `Completed with ${task.outcome?.limitationOverflow ? 'at least ' : ''}${n} check${n === 1 ? '' : 's'} not run in this environment` : 'Completed: one reviewed local commit on the task branch', tone: n ? 'warn' : 'info', detail: `Commit ${task.outcome?.commit?.slice(0, 7) ?? '—'} on ${task.workspace?.branch ?? 'the task branch'}. ${pull?.pullRequest ? `Published as pull request #${pull.pullRequest.number}${pull.github?.state === 'merged' ? `, which was ${pull.github.status.text}.` : '; nothing was merged.'}` : 'Nothing was merged or pushed; you integrate it yourself.'}${n ? ' The Result tab lists what you should verify yourself.' : ''}` }; }
-    case 'failed': if (task.outcome?.error?.startsWith('QA could not verify required acceptance criteria.')) return { title: 'Implementation complete; verification stopped at QA', tone: 'warn', detail: 'The developer finished and project validation passed. QA could not verify some checks in its environment, so this earlier run stopped before review and commit. See Activity for the original evidence.' }; return { title: /Service shutdown interrupted/.test(task.outcome?.error ?? '') ? 'Interrupted by a service shutdown' : 'Stopped: the task failed', tone: 'bad', detail: task.outcome?.error ?? 'See Activity for the last recorded step.' };
     case 'cancelled': return { title: 'Cancelled by you', tone: 'warn', detail: 'Workers are stopping or have stopped. See Result for cleanup status and any recovery snapshot. Resubmitting creates a new task.' };
     default: return { title: task.state, tone: 'info', detail: '' };
   }
@@ -272,7 +272,7 @@ function TaskCleanup({ task, evidence }: { task: Task; evidence: Evidence[] }) {
     {task.state !== 'completed' && <div>Resubmitting creates a new task.</div>}
   </div>;
 }
-function ResultTab({ task, evidence }: { task: Task; evidence: Evidence[] }) {
+function ResultTab({ task, evidence, onActivity }: { task: Task; evidence: Evidence[]; onActivity: () => void }) {
   const reviews = evidence.filter(e => e.kind === 'run-completed' && evidenceFacts(e).phase === 'review');
   const last = reviews[reviews.length - 1]; const review = last ? evidenceFacts(last).output as ReviewFacts | undefined : undefined;
   const validations = evidence.filter(e => e.kind === 'validation');
@@ -283,7 +283,7 @@ function ResultTab({ task, evidence }: { task: Task; evidence: Evidence[] }) {
   const qaSummary = qa ? `${qa.state} · ${qa.summary}` : skipped?.state === 'skipped' ? String(skipped.reason ?? 'QA skipped') : 'No QA verification recorded';
   if (task.state !== 'completed') return <Card tone={task.state === 'failed' ? 'bad' : undefined}><div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
     <b>Result</b><span>Diff inspection is offered for completed tasks only.</span><div class="wrap-anywhere"><b>Quality assurance</b> · {qaSummary}</div><div><b>Not verified here</b><LimitationReports outcome={task.outcome} /></div>
-    {task.state === 'failed' || task.state === 'cancelled' ? <><div class="wrap-anywhere">{task.outcome?.error ?? 'No commit was created.'}</div><TaskCleanup task={task} evidence={evidence} /><div style={{ display: 'flex', gap: '8px' }}><a class="btn" href={`/ui/tasks/new?from=${task.id}`}>Submit a new task from this request</a><Later label="Clean up worktrees" increment="U3" reason="Cleanup with a preview arrives in U3. CLI: devagents tasks cleanup" /></div></> : <div class="muted">Not available yet. Completion means one reviewed local commit{task.workspace ? <> on <span class="mono">{task.workspace.branch}</span></> : null}; you merge it yourself. Changed files, test evidence and the review outcome appear here afterwards.</div>}
+    {task.state === 'failed' || task.state === 'cancelled' ? <>{task.state === 'failed' ? <TaskFailureNotice failure={taskFailure(task, evidence)} onActivity={onActivity} /> : <div class="wrap-anywhere">{task.outcome?.error ?? 'No commit was created.'}</div>}<TaskCleanup task={task} evidence={evidence} /><div style={{ display: 'flex', gap: '8px' }}><a class="btn" href={`/ui/tasks/new?from=${task.id}`}>Submit a new task from this request</a><Later label="Clean up worktrees" increment="U3" reason="Cleanup with a preview arrives in U3. CLI: devagents tasks cleanup" /></div></> : <div class="muted">Not available yet. Completion means one reviewed local commit{task.workspace ? <> on <span class="mono">{task.workspace.branch}</span></> : null}; you merge it yourself. Changed files, test evidence and the review outcome appear here afterwards.</div>}
   </div></Card>;
   return <div class="stack">
     <Card title="Result · completed"><div style={{ padding: '14px 16px' }}><dl class="kv">

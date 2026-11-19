@@ -13,7 +13,7 @@ import { GITHUB_API } from './github.js';
 import { list, record, remote, text, type Fetch } from './http.js';
 
 const exec = promisify(execFile);
-const THREADS = 'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved path line comments(first:1){nodes{author{login} authorAssociation body url}}}}}}}';
+const THREADS = 'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved path line comments(first:1){nodes{author{__typename login} authorAssociation body url}}}}}}}';
 export type PullRequestOptions = {
   fetch?: Fetch; githubApiUrl?: string; now?: () => Date;
   /** Where a repository is pushed to. Tests point this at a local bare repository. */
@@ -232,7 +232,10 @@ export class PullRequestService {
       const thread = record(value); const first = record(list(record(thread.comments).nodes)[0]); const id = text(thread.id, 200);
       if (thread.isResolved === true || !id) continue;
       const path = text(thread.path, 500); const line = Number(thread.line); const url = text(first.url, 500);
-      open.push({ id, author: text(record(first.author).login, 100) || 'unknown', counts: WRITERS.has(text(first.authorAssociation, 40)), body: text(first.body, 2000), ...(path ? { path } : {}), ...(Number.isInteger(line) && line > 0 ? { line } : {}), ...(/^https:\/\//.test(url) ? { url } : {}) });
+      const author = record(first.author);
+      // GitHub App reviewers are Bot actors, commonly with authorAssociation NONE.
+      const counts = author.__typename === 'Bot' || WRITERS.has(text(first.authorAssociation, 40));
+      open.push({ id, author: text(author.login, 100) || 'unknown', counts, body: text(first.body, 2000), ...(path ? { path } : {}), ...(Number.isInteger(line) && line > 0 ? { line } : {}), ...(/^https:\/\//.test(url) ? { url } : {}) });
     }
     return open;
   }
