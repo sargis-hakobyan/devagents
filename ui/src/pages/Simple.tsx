@@ -1,7 +1,7 @@
 import { TaskConcurrency } from '../components/TaskConcurrency';
 import { ArchivedProjects } from './Project';
 import { useState } from 'preact/hooks';
-import { api, ApiError, resources, type Project, type TeamSummary } from '../api';
+import { api, ApiError, resources, session, type Project, type TeamSummary } from '../api';
 import { Card, Chip, Code, Empty, ErrorNote, Later, Skeleton } from '../components/ui';
 import { formatTime } from '../format';
 import { usePoll } from '../state';
@@ -59,21 +59,32 @@ export function ProjectsPage() {
   </>;
 }
 export function SettingsPage() {
+  const identity = usePoll('session', session, 5 * 60 * 1000).data;
   const { data: status, error } = usePoll(resources.status.key, resources.status.load, resources.status.intervalMs);
   if (!status && error) return <ErrorNote message={error} />;
   if (!status) return <Skeleton rows={6} label="Loading settings" />;
   const c = status.codex;
   return <>
     <div class="page-head"><div><div class="h">Settings</div><h1>Connection, engine and limits</h1><p>Manage parallel tasks and connections here. Other values reflect the running service and require startup configuration changes.</p></div></div>
+    <div class="connection-cards">
     <Card title="Codex connection" right={<span style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>{c.vaultLocked ? <Chip tone="warn">⚠ Credentials locked</Chip> : c.signedIn ? <Chip tone="ok">✓ Sign-in saved</Chip> : c.installed ? <Chip tone="warn">⚠ Not signed in</Chip> : <Chip tone="bad">✕ Not installed</Chip>}<Chip tone="warn">⚠ Model access not verified</Chip></span>}
-      foot={<span style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}><a class="btn" href="/ui/settings/setup">Guided setup / change sign-in</a><Later label="Test connection" increment="U3" reason="Browser testing is unavailable; use the explicitly chosen terminal connection test" /><span>Terminal setup today: <Code>npm run cli -- auth setup</Code> or <Code>./devagents start</Code></span></span>}>
+      foot={<span style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}><a class="btn" href="/ui/settings/setup">Guided setup / change sign-in</a><Later label="Test connection" increment="U3" reason="Browser testing is unavailable; use the explicitly chosen terminal connection test" /></span>}>
       <div style={{ padding: '14px 16px' }}><dl class="kv">
         <dt>Runtime</dt><dd>{c.installed ? `${c.version ?? 'Codex'} · installed · dedicated profile` : 'Codex CLI not found on PATH'}</dd>
         <dt>Credential store</dt><dd>{c.credentialStore === 'keyring' ? 'OS keychain (native).' : 'Encrypted vault in the data volume, unlocked by ./devagents start.'} Secrets are never shown here; a replacement is write-only.</dd>
+        <dt>Terminal setup</dt><dd><Code>npm run cli -- auth setup</Code> or <Code>./devagents start</Code></dd>
         <dt>Model access</dt><dd>A saved sign-in does not establish quota or access to every model. The optional connection test sends one small request on your allowance; it never runs automatically.</dd>
-        <dt>Claude</dt><dd>{status.claude.installed ? `Installed ${status.claude.version ?? ''}` : 'Not installed'} · <Chip tone="neutral">{status.claude.enabled ? status.claude.signedIn ? 'Connection saved' : 'Not connected' : 'Not enabled'} · {status.claude.note}</Chip></dd>
       </dl></div>
     </Card>
+    <Card title="Claude connection" right={<span style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>{!status.claude.installed ? <Chip tone="bad">✕ Not installed</Chip> : !status.claude.enabled ? <Chip tone="neutral">Not enabled</Chip> : status.claude.signedIn ? <Chip tone="ok">✓ Connection saved</Chip> : <Chip tone="warn">⚠ Not connected</Chip>}<Chip tone="warn">⚠ Model access not verified</Chip></span>}
+      foot={<a class="btn" href="/ui/settings/claude">Set up / change Claude connection</a>}>
+      <div style={{ padding: '14px 16px' }}><dl class="kv">
+        <dt>Runtime</dt><dd>{status.claude.installed ? `${status.claude.version ?? 'Claude Code'} · installed` : 'Claude Code not found on PATH'}</dd>
+        <dt>Connection</dt><dd>{status.claude.note}</dd>
+        <dt>Credential store</dt><dd>{c.credentialStore === 'keyring' ? <>Native service: set <Code>ANTHROPIC_API_KEY</Code> or <Code>CLAUDE_CODE_OAUTH_TOKEN</Code> in the service environment. Browser credential saving requires the Docker vault.</> : 'Separate encrypted Claude vault in the data volume, unlocked by ./devagents start.'}</dd>
+      </dl></div>
+    </Card>
+    </div>
     <div class="items" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))' }}>
       <Card title="Engine and model defaults"><div style={{ padding: '14px 16px' }}><dl class="kv" style={{ gridTemplateColumns: '140px minmax(0, 1fr)' }}>
         <dt>Extra DevAgents rules</dt><dd>{status.defaults.devagentsRules ? 'On · command allowlist and role scopes' : 'Off · engine sandbox'}<div class="muted">Set DEVAGENTS_RULES=true in .env and restart to enable. Applies to new tasks.</div></dd>
@@ -94,7 +105,7 @@ export function SettingsPage() {
     <TaskConcurrency />
     <Card title="Service and browser session"><div style={{ padding: '14px 16px' }}><dl class="kv">
       <dt>Listening</dt><dd class="mono">{status.service.host}:{status.service.port} · data {status.service.dataDir}</dd>
-      <dt>Browser session</dt><dd>Signed in with a one-time link. This browser stays signed in, also across restarts and sleep, until you sign out from the top bar.</dd>
+      <dt>Browser session</dt><dd>{identity?.method === 'password' ? `Signed in as ${identity.user.name}. The session ends on sign-out or when its idle or maximum lifetime expires.` : 'Signed in with a one-time link. This browser stays signed in, also across restarts and sleep, until you sign out from the top bar.'}</dd>
       <dt>CLI access</dt><dd>Bearer token in <span class="mono">api-token</span>, never sent to the browser</dd>
       <dt>Version</dt><dd class="mono">devagents {status.service.version} · node {status.service.node} · {status.service.platform} · started {formatTime(status.service.startedAt)}</dd>
     </dl></div></Card>

@@ -78,6 +78,9 @@ export async function sandboxFlags(cwd: string, permissions: AgentDefinition['pe
   await mkdir(temp, { recursive: true, mode: 0o700 });
   filesystem[await realpath(temp)] = 'write';
   if (runtime) filesystem[await realpath(runtime)] = 'write';
+  // A worker shell must never reach the gateway's private control socket.
+  const controlSocketDir = process.env.DEVAGENTS_PRIVATE_SOCKET_DIR;
+  if (controlSocketDir) filesystem[await realpath(controlSocketDir)] = 'deny';
   const credentials = credentialRuntime();
   if (credentials) filesystem[await realpath(credentials)] = 'deny';
   // Node may live under nvm on native installations, outside :minimal.

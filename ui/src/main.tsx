@@ -8,8 +8,9 @@ import { Shell } from './components/Shell';
 import { OverviewPage } from './pages/Overview';
 import { TasksPage } from './pages/Tasks';
 import { TaskDetailPage } from './pages/TaskDetail';
-import { ProjectsPage, SettingsPage, SignedOutPage } from './pages/Simple';
-import { SetupPage } from './pages/Setup';
+import { ProjectsPage, SettingsPage } from './pages/Simple';
+import { LoginPage } from './pages/Login';
+import { ClaudeConnectionPage, SetupPage } from './pages/Setup';
 import { SubmitTaskPage } from './pages/SubmitTask';
 import { RegisterProjectPage } from './pages/RegisterProject';
 import { ProjectPage } from './pages/Project';
@@ -17,16 +18,17 @@ import { ToolsPage } from './pages/Tools';
 import { TeamEditorPage, TeamsPage } from './pages/Teams';
 
 function App() {
-  const { path, route } = useLocation();
-  useEffect(() => { setSignedOutHandler(() => route('/ui/signed-out')); }, []);
-  if (path === '/ui/signed-out') return <SignedOutPage />;
+  const { path } = useLocation();
+  useEffect(() => { setSignedOutHandler(() => location.replace(location.pathname === '/ui/settings/claude' ? '/ui/signed-out?next=claude' : '/ui/signed-out')); }, []);
+  if (path === '/ui/signed-out' || path === '/ui/login') return <LoginPage />;
   return <Authenticated />;
 }
 // The router renders a matched page once per URL, so every page subscribes to its own data through
 // the shared pollers instead of receiving it from here.
 function Authenticated() {
   const auth = usePoll('session', () => session(), 5 * 60 * 1000);
-  if (!auth.data && !auth.error) return <div class="app"><div class="band"><span class="brand-name">devagents</span></div><main class="main"><div class="sk" style={{ width: '40%', height: '20px' }} /></main></div>;
+  if (!auth.data && auth.error) return <main class="main"><div class="note bad" role="alert">{auth.error}</div><button class="btn" onClick={auth.reload}>Retry sign-in check</button></main>;
+  if (!auth.data) return <div class="app"><div class="band"><span class="brand-name">devagents</span></div><main class="main"><div class="sk" style={{ width: '40%', height: '20px' }} /></main></div>;
   return <Shell>
     <Router>
       <Route path="/ui/" component={OverviewPage} />
@@ -40,6 +42,7 @@ function Authenticated() {
       <Route path="/ui/projects" component={ProjectsPage} />
       <Route path="/ui/projects/:id" component={({ id }: { id: string }) => <ProjectPage id={id} />} />
       <Route path="/ui/tools" component={ToolsPage} />
+      <Route path="/ui/settings/claude" component={ClaudeConnectionPage} />
       <Route path="/ui/settings/setup" component={SetupPage} />
       <Route path="/ui/settings" component={SettingsPage} />
       <Route default component={() => <div class="note info">Unknown page. <a href="/ui/">Back to the overview</a></div>} />

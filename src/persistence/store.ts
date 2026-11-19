@@ -1,3 +1,4 @@
+import { loginSchema } from './login-schema.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
@@ -27,7 +28,7 @@ export class Store {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
     // Version 4 added optional QA settings. Preserve that table when the QA feature is stashed.
-    if (version > 9) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
+    if (version > 12) throw new AppError('database_version', 'Database was created by a newer DevAgents version');
     if (version === 0) this.db.exec(`
       BEGIN IMMEDIATE;
       CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, data TEXT NOT NULL);
@@ -91,7 +92,39 @@ export class Store {
       PRAGMA user_version=9;
       COMMIT;
     `);
+    // Identity is independent of login credentials. Local mode does not create password accounts.
+    if (version < 10) this.db.exec(`
+      BEGIN IMMEDIATE;
+      ${loginSchema}
+      PRAGMA user_version=10;
+      COMMIT;
+    `);
+    if (version < 11) this.db.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS work_item_concurrency (id INTEGER PRIMARY KEY CHECK (id=1), concurrency INTEGER NOT NULL CHECK (concurrency BETWEEN 1 AND 8), version INTEGER NOT NULL);
+      PRAGMA user_version=11;
+      COMMIT;
+    `);
+    if (version < 12) this.db.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS workspace_owner (singleton INTEGER PRIMARY KEY CHECK (singleton=1), user_id TEXT NOT NULL);
+      PRAGMA user_version=12;
+      COMMIT;
+    `);
   }
+
+  workspaceOwnerId(): string | undefined {
+    return this.db.prepare('SELECT user_id FROM workspace_owner WHERE singleton=1').get()?.user_id as string | undefined;
+  }
+
+  /** Bind legacy workspace contents once. A later login change cannot transfer them. */
+  bindWorkspaceOwner(userId: string): void {
+    this.transaction(() => {
+      this.db.prepare('INSERT INTO workspace_owner VALUES (1, ?) ON CONFLICT(singleton) DO NOTHING').run(userId);
+      if (this.workspaceOwnerId() !== userId) throw new AppError('workspace_owner_mismatch', 'Workspace is already assigned to another user', 403);
+    });
+  }
+
   pullRequest(taskId: string): PullRequestSnapshot | undefined {
     const row = this.db.prepare('SELECT data FROM pull_requests WHERE task_id=?').get(taskId) as { data: string } | undefined;
     return row ? JSON.parse(row.data) as PullRequestSnapshot : undefined;
@@ -208,10 +241,15 @@ export class Store {
       const row = this.db.prepare(`UPDATE dispatch_queue SET owner=?, generation=generation+1,
         claimed=requested, heartbeat_at=? WHERE task_id=? AND owner IS NULL AND blocker IS NULL
         RETURNING generation, claimed`).get(owner, new Date().toISOString(), taskId)!;
-      return { taskId, owner, generation: Number(row.generation), sequence: Number(row.claimed) };
+      const workspaceOwnerId = this.workspaceOwnerId();
+      return { taskId, owner, ...(workspaceOwnerId ? { workspaceOwnerId } : {}), generation: Number(row.generation), sequence: Number(row.claimed) };
     });
   }
+  private assertClaimWorkspace(claim: DispatchClaim): void {
+    if (claim.workspaceOwnerId !== this.workspaceOwnerId()) throw new AppError('dispatch_ownership', 'Dispatch belongs to another workspace', 409);
+  }
   finishDispatch(claim: DispatchClaim): void {
+    this.assertClaimWorkspace(claim);
     const changed = this.db.prepare(`UPDATE dispatch_queue SET handled=CASE WHEN (SELECT state FROM tasks WHERE id=task_id) IN ('completed','failed','cancelled') THEN requested ELSE claimed END, owner=NULL, heartbeat_at=NULL
       WHERE task_id=? AND owner=? AND generation=?`).run(claim.taskId, claim.owner, claim.generation).changes;
     if (!changed) throw new AppError('dispatch_ownership', 'Dispatch ownership changed', 409);
@@ -221,6 +259,7 @@ export class Store {
     this.assertClaim(claim); return this.execution.run(claim, work);
   }
   private assertClaim(claim: DispatchClaim): void {
+    this.assertClaimWorkspace(claim);
     const row = this.dispatch(claim.taskId);
     if (!row || row.owner !== claim.owner || row.generation !== claim.generation || row.claimed !== claim.sequence || row.blocker) {
       throw new AppError('dispatch_ownership', 'Execution no longer owns this task', 409);
@@ -236,6 +275,7 @@ export class Store {
     if (this.execution.getStore()) this.assertExecution(id);
   }
   heartbeatDispatch(claim: DispatchClaim): void {
+    this.assertClaimWorkspace(claim);
     const changed = this.db.prepare('UPDATE dispatch_queue SET heartbeat_at=? WHERE task_id=? AND owner=? AND generation=? AND blocker IS NULL')
       .run(new Date().toISOString(), claim.taskId, claim.owner, claim.generation).changes;
     if (!changed) throw new AppError('dispatch_ownership', 'Execution no longer owns this task', 409);

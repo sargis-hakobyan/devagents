@@ -1,5 +1,27 @@
 # Milestone checklist
 
+## Shared-server architecture — started 2026-11-19
+
+- [x] Extract login-provider and application-identity contracts from HTTP authentication.
+- [x] Add opt-in password login with the requested initial administrator, hashed credentials and persistent identity.
+- [x] Keep local mode and its CLI/browser login; separate shared sessions and retain CSRF/Origin/Host protections.
+- [x] Isolate login routes and password persistence from business services. Bind the current workspace and worker dispatch claims to a stable internal owner.
+- [x] Support owner-bound KMS unlock of a fresh Docker credential vault using the host launcher.
+- [x] Serve concurrent private workspaces on one host with a shared password-login gateway and a dedicated runtime, store and profile for each provisioned owner.
+- [ ] Validate personal Codex/Claude subscription login, refresh and simultaneous isolated execution on the server.
+- [ ] PostgreSQL persistence and durable workflow state for shared mode; SQLite remains available locally.
+- [ ] Separate API and workers with database task ownership, cancellation and interruption handling.
+- [ ] Worker-independent repository results and user-scoped publishing.
+- [ ] AWS Docker deployment, additional worker hosts and the pre-update backup/restore procedure.
+
+Organization SSO is deferred until explicitly requested. The original standalone preview uses one administrator. The separate gateway supports provisioned workspaces for multiple identities.
+
+Multi-workspace verification on 2026-11-19 covered two simultaneous fixture tasks with isolated Git commits, teams, events, credentials and results. The Docker/Chromium smoke checked both production runtime containers, login changes in one browser, clearing private drafts, reconnecting a synthetic Claude credential, and restoring each owner's encrypted credentials after container recreation. The real Codex command sandbox also denied access to the private control socket. All provider credentials used for verification were synthetic. Standard checks passed 402 tests with four optional checks skipped, and 27 selected browser workflows passed.
+
+Owner authorization and vault verification passed on 2026-11-19. The standard checks passed 401 tests, with four optional runtime checks skipped, plus both typechecks and the build. Twelve selected browser workflows passed. Synthetic identities verified ownership enforcement on reads, mutations and worker claims. A simulated KMS CLI verified owner-bound encryption context and key reuse. An isolated Docker run exercised the actual CLI with a private memory-backed mount and a synthetic key. Live AWS IAM and KMS verification remains pending.
+
+Verification: the unit/integration suite passed 393 tests with four existing optional sandbox checks skipped (397 total). Backend/UI typechecks and the production build passed. All 12 selected browser workflows passed, covering the shared password form and local overview, task, session and guided-setup regressions; the mobile login screenshot was inspected. After the final asynchronous-provider and cookie-comparison adjustments, 14 focused authentication/session tests passed again. No authenticated model calls, live service restart or AWS deployment. Full browser and Docker sandbox suites were not run for this increment.
+
 ## M0 — Compatibility (partially verified)
 
 - [x] Current official Codex/Claude execution and authentication documentation.

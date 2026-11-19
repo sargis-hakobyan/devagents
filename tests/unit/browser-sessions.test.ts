@@ -60,4 +60,24 @@ test('time limits still work where they are configured', () => {
   now += 4 * HOUR; assert.equal(sessions.get(busy.id), undefined, 'total limit, however active');
   assert.match(sessionCookie('a'.repeat(64), false), /HttpOnly; SameSite=Strict; Max-Age=34560000$/);
   assert.match(sessionCookie('a'.repeat(64), true, 60), /Max-Age=60; Secure$/);
+  assert.equal(sessions.get('é'.repeat(64)), undefined, 'non-ASCII cookie values are refused without a byte-length exception');
+  assert.equal(sessions.verifyCsrf(busy, 'é'.repeat(64)), false);
+});
+
+test('shared identity and expiry survive restart without importing local sessions', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'devagents-shared-sessions-')); let now = Date.now();
+  const limits = { idleMs: HOUR, absoluteMs: 12 * HOUR };
+  try {
+    const local = new BrowserSessions(() => now, {}, sessionFile(dir)); const localSession = signIn(local);
+    const sessions = new BrowserSessions(() => now, limits, sessionFile(dir, 'shared'));
+    assert.equal(sessions.get(localSession.id), undefined);
+    const signedIn = sessions.create({ userId: 'admin-id', providerId: 'password' });
+    now += 30 * 60 * 1000; assert.ok(sessions.get(signedIn.id));
+    const restarted = new BrowserSessions(() => now, limits, sessionFile(dir, 'shared'));
+    assert.equal(restarted.get(signedIn.id)?.userId, 'admin-id');
+    assert.equal(restarted.get(signedIn.id)?.providerId, 'password');
+    now += HOUR + 1;
+    assert.equal(new BrowserSessions(() => now, limits, sessionFile(dir, 'shared')).get(signedIn.id), undefined, 'a restart cannot revive an idle session');
+    assert.ok(new BrowserSessions(() => now, {}, sessionFile(dir)).get(localSession.id));
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });

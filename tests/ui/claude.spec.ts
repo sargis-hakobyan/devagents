@@ -23,6 +23,9 @@ test('Claude connection forms save both credential types privately and members s
   try {
     const response = await fetch(origin + '/ui/bootstrap', { method: 'POST', headers: { authorization: 'Bearer synthetic-browser-token', 'content-type': 'application/json' }, body: '{"setup":true}' });
     await page.goto((await response.json()).url);
+    await page.goto(origin + '/ui/settings');
+    await page.getByRole('link', { name: 'Set up / change Claude connection' }).click();
+    await expect(page).toHaveURL(origin + '/ui/settings/claude');
     await page.getByRole('button', { name: 'Use my Claude subscription', exact: true }).click();
     await expect(page.getByText('claude setup-token', { exact: true })).toBeVisible();
     await page.getByLabel('Claude subscription token', { exact: true }).fill('synthetic-credential');

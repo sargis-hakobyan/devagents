@@ -1,5 +1,28 @@
 # Decision log
 
+## Route authenticated users to private workspace runtimes — 2026-11-19
+
+Use one public browser endpoint and one private runtime per provisioned owner on the same host. Separate runtime processes preserve the engine sandbox and scope the SQLite databases, Git clones, setup jobs, connection caches, vault keys and tmpfs profiles. The gateway selects a Unix socket by the verified internal UUID and the runtime checks that UUID against its workspace binding. Socket mounts are private to the gateway and their corresponding owner runtime. Credentials, cookies and operator permissions stay out of the delegation headers. A derived session handle keeps setup attempts private between browsers and allows logout to cancel an outstanding attempt.
+
+The existing local and standalone service entry points continue to work. The two-account Compose example uses disposable identities and separate volumes. Workspace provisioning is an operator step. PostgreSQL, multi-host scheduling and organizational SSO remain separate milestones.
+
+## Authorize workspaces independently of login — 2026-11-19
+
+Browser authentication, session routes and credential storage for application login have dedicated modules. Task operations receive a workspace selected using a verified internal actor. The CLI bearer credential represents the installation operator. A shared SQLite workspace binds to its existing administrator once, and worker dispatch claims carry the same owner through execution, heartbeat and completion. This supports the current single-workspace service. Serving multiple owners concurrently also requires independent repository files and engine profiles.
+
+Use one symmetric KMS key per environment to protect separate workspace data keys. The opt-in shared Docker launcher calls KMS on the host with the workspace owner in the encryption context. The encrypted data key lives on the host and its fingerprint is pinned in the data volume. The credential envelopes continue to use the existing authenticated encryption and private runtime mount. Local installations continue to use their OS credential store. A future PostgreSQL credential backend can store the envelopes centrally.
+
+
+## Separate application login from local execution — 2026-11-19
+
+The owner authorized the first shared-server refactor after discussion: username/password first with the explicit initial `admin` / `admin` account; organizational SSO only on a later explicit request. Authentication is a replaceable provider behind a small identity/store contract in `src/auth/`, with HTTP session/origin policy in `src/api/authentication.ts`. Stable application user IDs are separate from password credentials. Passwords use salted scrypt (N=32768, r=8, p=3, 64-byte output); the bootstrap never resets an existing account. Login bodies and hashes are not placed in task evidence or API identities.
+
+Deployment login settings are separate from agent/task YAML: local is the default, while shared mode selects the password provider and requires a public origin. Unsupported modes/providers fail startup. Shared sessions bind both provider and user, expire, persist independently of local sessions, and never accept a local bootstrap cookie. The operator CLI token retains its existing contract; `ui` returns an ordinary shared URL with no session bypass. The login endpoint checks exact Origin and Host, bounds attempts and concurrent hashing, and creates a fresh HttpOnly/SameSite cookie. Existing mutations still require CSRF.
+
+This delivery is intentionally one administrator over the existing workspace. It creates no registration flow or additional accounts, and does not claim private multi-user isolation, per-user engine profiles, PostgreSQL, worker separation, cloud subscription verification or an AWS deployment. The local launcher and credential vault remain intact. The login form extends existing Preact components and indigo/amber styles with loading, error and pending states, keyboard submission and a narrow-screen layout; no design-system change is introduced.
+
+The agreed follow-on architecture uses private user-owned work, personal Codex/Claude connections, self-managed PostgreSQL and separate Docker execution workers. Start on one server, later add workers over a private network; results must outlive workers. Local mode retains SQLite and its existing experience. PostgreSQL updates get a temporary same-server backup, a restore check and a rollback procedure; scheduled backups are not requested. These remain planned work rather than capabilities of this authentication increment.
+
 ## User-confirmed choices — 2026-10-29
 
 - Register existing local Git checkouts by absolute path; mount each explicitly in Docker. Do not clone/import.

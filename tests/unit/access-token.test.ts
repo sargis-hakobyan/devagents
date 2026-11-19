@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, chmod, stat, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { accessToken } from '../../src/api/server.js';
+import { accessToken } from '../../src/auth/operator-token.js';
 
 test('the data directory is tightened to 0700 on every start and the token stays private and stable', async () => {
   const root = await mkdtemp(join(tmpdir(), 'access-token-')); const dataDir = join(root, 'data');

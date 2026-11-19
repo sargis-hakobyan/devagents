@@ -6,6 +6,8 @@ Read this with `DEV_AGENTS_SPEC.md`, `IMPLEMENTATION_PROMPT.md`, `docs/MILESTONE
 
 ## Product purpose
 
+The 2026-11-19 shared-server login foundation adds an optional username/password screen using the current compact indigo/amber components. It includes loading, connection-error, invalid-credential and pending states, keyboard submission and password-manager autocomplete. Shared mode displays the signed-in administrator; local mode keeps the terminal-link screen. The first increment has only one administrator, and does not imply private multi-user execution or SSO.
+
 A user starts DevAgents, opens a browser, and understands:
 
 1. Which teams and projects they have.

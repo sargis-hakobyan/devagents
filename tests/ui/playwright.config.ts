@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 // engine, temporary data directory). They never need model credentials. Build first: npm run build.
 export const fixtureDir = process.env.DEVAGENTS_UI_FIXTURE_DIR ?? join(tmpdir(), 'devagents-ui-fixture-playwright');
 export const port = Number(process.env.DEVAGENTS_UI_FIXTURE_PORT ?? 4399);
+export const sharedPort = Number(process.env.DEVAGENTS_UI_SHARED_PORT ?? port + 1);
 export default defineConfig({
   testDir: '.',
   testMatch: /.*\.spec\.ts/,
@@ -17,7 +18,7 @@ export default defineConfig({
   outputDir: join(tmpdir(), 'devagents-ui-test-results'),
   use: { baseURL: `http://127.0.0.1:${port}`, viewport: { width: 1360, height: 900 }, trace: 'retain-on-failure' },
   webServer: {
-    command: `node scripts/ui-fixture.mjs --port ${port} --data "${fixtureDir}" --hold 600000`,
+    command: `node scripts/ui-fixture.mjs --port ${port} --shared-port ${sharedPort} --data "${fixtureDir}" --hold 600000`,
     url: `http://127.0.0.1:${port}/health`,
     cwd: join(import.meta.dirname, '..', '..'),
     reuseExistingServer: false,

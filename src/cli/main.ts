@@ -12,7 +12,10 @@ import { ModelCatalogService, claudeModelLister, codexModelLister } from '../eng
 import { loadConfig, dataDirectory } from '../config.js';
 import { Store } from '../persistence/store.js';
 import { TaskService } from '../orchestration/service.js';
-import { createApi, accessToken } from '../api/server.js';
+import { accessToken } from '../auth/operator-token.js';
+import { createWorkspaceGateway } from '../api/workspace-gateway.js';
+import { listenPrivate } from '../api/private-listener.js';
+import { createApi } from '../api/server.js';
 import { BrowserSessions, sessionFile, sessionLimits } from '../api/session.js';
 import { findUiRoot } from '../api/static.js';
 import { statusReporter } from '../api/status.js';
@@ -34,6 +37,7 @@ import { testCodexConnection } from '../engines/codex/connection-test.js';
 import { onboard } from './onboarding.js';
 import type { AuthChoice } from '../domain/auth.js';
 import { selectChoice } from './choice-prompt.js';
+import { sharedVaultOwner, vaultMaterialExists, verifyVaultBinding } from '../security/vault-owner.js';
 import { configuredVault } from '../security/credential-vault.js';
 import { configuredSecretStore } from '../security/secret-store.js';
 import { hostFolders } from './project-mount.js';
@@ -42,6 +46,9 @@ import { PullRequestService } from '../integrations/pull-requests.js';
 import { TrackerService } from '../integrations/trackers.js';
 import { downloadTicketFiles } from '../integrations/ticket-files.js';
 import { assignStartedTicket } from '../integrations/tickets.js';
+import { loginConfig } from '../auth/config.js';
+import { LoginAccounts } from '../persistence/login-accounts.js';
+import { PasswordLogin } from '../auth/password.js';
 
 const print = (data: unknown) => console.log(JSON.stringify(redactValues(data, environmentSecrets()), null, 2));
 const port = () => z.coerce.number().int().min(1).max(65535).parse(process.env.DEVAGENTS_PORT ?? 4310);
@@ -55,13 +62,48 @@ async function request(path: string, method = 'GET', body?: unknown, key?: strin
   return result;
 }
 const cli = new Command().name('devagents').description('Local-first configurable development teams').version('0.1.0');
-cli.command('serve').description('Start the local API').action(async () => {
-  const dataDir = dataDirectory(); const config = await loadConfig();
+async function builtUi() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  return findUiRoot([resolve(here, '../ui'), resolve(here, '../../dist/ui'), resolve(here, '../../ui/dist')]);
+}
+
+cli.command('gateway <socketDirectory>').description('Serve the shared UI and route verified users to their private workspace sockets').action(async (directory: string) => {
+  const login = loginConfig();
+  if (login.mode !== 'shared') throw new AppError('invalid_config', 'The workspace gateway requires shared login');
+  const dataDir = dataDirectory();
+  const release = lockService(dataDir);
+  const token = await accessToken(dataDir);
+  const accounts = new LoginAccounts(join(dataDir, existsSync(join(dataDir, 'devagents.db')) ? 'devagents.db' : 'accounts.db'));
+  const provider = accounts.hasUsers() ? new PasswordLogin(accounts) : await PasswordLogin.create(accounts);
+  const server = createWorkspaceGateway(token, {
+    sharedLogin: { provider, users: accounts, publicOrigin: login.publicOrigin },
+    sessions: new BrowserSessions(undefined, sessionLimits(process.env, { idleMs: 3600000, absoluteMs: 43200000 }), sessionFile(dataDir, 'shared')),
+    uiRoot: await builtUi(),
+  }, directory);
+  const host = process.env.DEVAGENTS_HOST ?? '127.0.0.1';
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port(), host, resolve); });
+  log('gateway_started', { host, port: port() });
+  const shutdown = () => { server.close(() => { accounts.close(); release(); }); server.closeIdleConnections(); };
+  process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown);
+});
+
+cli.command('serve').description('Start the API and runner').option('--workspace-owner <uuid>', 'Serve one isolated workspace over a private Unix socket')
+  .option('--socket-directory <path>', 'Private directory mounted into this runtime and the gateway')
+  .action(async (opts: { workspaceOwner?: string; socketDirectory?: string }) => {
+  if (Boolean(opts.workspaceOwner) !== Boolean(opts.socketDirectory)) throw new AppError('invalid_config', 'Specify both a workspace owner and a private socket directory');
+  const privateOwner = opts.workspaceOwner ? z.uuid().parse(opts.workspaceOwner) : undefined;
+  if (opts.socketDirectory) process.env.DEVAGENTS_PRIVATE_SOCKET_DIR = opts.socketDirectory;
+  const dataDir = dataDirectory(); const config = await loadConfig(); const login = loginConfig();
+  if (privateOwner && (login.mode !== 'shared' || !await configuredVault(dataDir))) {
+    throw new AppError('invalid_config', 'Owner runtimes require shared mode and their own Docker tmpfs credential mount');
+  }
   const unlock = lockService(dataDir);
   // Recover database writes even when a prior process stopped on a full filesystem.
   await new DiskReserve(dataDir).release();
   const configuredSecrets = config.providers.flatMap(p => p.apiKeyEnv && process.env[p.apiKeyEnv] ? [process.env[p.apiKeyEnv]!] : []);
   const store = new Store(join(dataDir, 'devagents.db'), [...environmentSecrets(), ...configuredSecrets]);
+  const accounts = !privateOwner && login.mode === 'shared' ? new LoginAccounts(join(dataDir, 'devagents.db')) : undefined;
+  const sharedLogin = accounts && login.mode === 'shared' ? { provider: await PasswordLogin.create(accounts), users: accounts, publicOrigin: login.publicOrigin } : undefined;
   const sandbox = { scanLimit: config.workspaceScanLimit };
   const engines = new EngineRegistry([new CodexAdapter(dataDir, 'codex', sandbox), new ClaudeAdapter(dataDir, sandbox)]);
   const service = new TaskService(store, config, dataDir, process.platform, engines.ids());
@@ -75,8 +117,7 @@ cli.command('serve').description('Start the local API').action(async () => {
   // Docker explicitly binds to all container interfaces; Compose exposes only host loopback.
   const host = process.env.DEVAGENTS_HOST ?? '127.0.0.1';
   if (!['127.0.0.1', '0.0.0.0'].includes(host)) throw new AppError('invalid_host', 'Unsupported bind address');
-  const here = dirname(fileURLToPath(import.meta.url));
-  const uiRoot = await findUiRoot([resolve(here, '../ui'), resolve(here, '../../dist/ui'), resolve(here, '../../ui/dist')]);
+  const uiRoot = privateOwner ? undefined : await builtUi();
   // Docker listens on 4310 inside the container; Compose publishes DEVAGENTS_PORT on the host loopback.
   const publicPort = z.coerce.number().int().min(1).max(65535).parse(process.env.DEVAGENTS_PUBLIC_PORT ?? port());
   const assertSetupIdle = () => {
@@ -97,33 +138,36 @@ cli.command('serve').description('Start the local API').action(async () => {
   const providerOf = (kind: string) => config.providers.find(p => p.kind === kind && !p.baseUrl);
   const models = new ModelCatalogService(store, { codex: codexModelLister(dataDir, providerOf('openai')), 'claude-code': claudeModelLister(dataDir, providerOf('anthropic')) });
   const server = createApi(service, await accessToken(dataDir), {
-    sessions: new BrowserSessions(undefined, sessionLimits(), sessionFile(dataDir)), uiRoot, publicPort, setupAuth, claudeAuth, assertSetupIdle,
+    sessions: new BrowserSessions(undefined, sessionLimits(process.env, sharedLogin ? { idleMs: 3600000, absoluteMs: 43200000 } : {}), sessionFile(dataDir, login.mode)),
+    ...(privateOwner ? { privateRuntimeOwner: privateOwner } : {}),
+    ...(sharedLogin ? { sharedLogin, workspaceOwnerId: accounts!.passwordAccount('admin')!.user.id } : {}), uiRoot, publicPort, setupAuth, claudeAuth, assertSetupIdle,
     integrations, pullRequests, trackers, models,
     status: statusReporter({ dataDir, config, version: '0.1.0', host, port: () => publicPort, executionEnabled: true, revision: () => setupAuth.revision + claudeAuth.revision }),
   });
   await service.agents();
   await service.initializeStarterTeam();
-  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port(), host, resolve); });
+  if (opts.socketDirectory) await listenPrivate(server, opts.socketDirectory);
+  else await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port(), host, resolve); });
   // Only the process which owns the listening socket may reconcile this service's tasks.
   const recovered = store.recover();
   await runner.recover();
   await service.diskReserve.replenish();
   log('service_started', { host, port: port(), publicPort, recovered, projects: store.projects().length, executionEnabled: true, ui: uiRoot ? `http://127.0.0.1:${publicPort}/ui/` : 'not built' });
-  log('setup', { message: 'Register an existing checkout and authenticate Codex. Use tasks submit, show and evidence to follow work. Open the browser UI with a one-time link from: devagents ui' });
+  log('setup', { message: privateOwner ? 'Private workspace runtime ready.' : sharedLogin ? `Open ${sharedLogin.publicOrigin}/ui/ and sign in. Shared mode currently supports one administrator; private multi-user execution is not implemented yet.` : 'Register an existing checkout and authenticate Codex. Use tasks submit, show and evidence to follow work. Open the browser UI with a one-time link from: devagents ui' });
   const publishing = setInterval(() => { void pullRequests.publishDue().then(() => pullRequests.syncDue()); }, 15000); publishing.unref();
   let closing = false;
   const shutdown = () => {
     if (closing) return; closing = true; clearInterval(publishing);
     void claudeAuth.close(); void setupAuth.close(); void runner.stop();
-    server.close(() => { void Promise.all([runner.stop(), setupAuth.close(), claudeAuth.close()]).then(() => { store.close(); unlock(); process.exitCode = 0; }); });
+    server.close(() => { void Promise.all([runner.stop(), setupAuth.close(), claudeAuth.close()]).then(() => { accounts?.close(); store.close(); unlock(); process.exitCode = 0; }); });
     server.closeIdleConnections();
   };
   process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
 });
-cli.command('ui').description('Create a one-time sign-in link for the browser UI (never exposes the CLI token)').option('--open', 'Open the link with the OS browser').option('--setup', 'Open guided setup').action(async (opts: { open?: boolean; setup?: boolean }) => {
-  const link = await request('/ui/bootstrap', 'POST', opts.setup ? { setup: true } : {}) as { url: string; expiresInSeconds: number };
+cli.command('ui').description('Open the browser UI; local mode creates a one-time sign-in link').option('--open', 'Open the link with the OS browser').option('--setup', 'Open guided setup').action(async (opts: { open?: boolean; setup?: boolean }) => {
+  const link = await request('/ui/bootstrap', 'POST', opts.setup ? { setup: true } : {}) as { url: string; expiresInSeconds: number | null };
   console.log(link.url);
-  console.error(`Single use, valid for ${Math.round(link.expiresInSeconds / 60)} minutes. Once opened, the browser stays signed in until you sign out.`);
+  console.error(link.expiresInSeconds === null ? 'Sign in with your DevAgents username and password.' : `Single use, valid for ${Math.round(link.expiresInSeconds / 60)} minutes. Once opened, the browser stays signed in until you sign out.`);
   if (!opts.open) return;
   const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
   const child = spawn(opener, [link.url], { stdio: 'ignore', detached: true });
@@ -373,12 +417,25 @@ tasks.command('compact-preview <id>').description('Preview removal of ignored de
 tasks.command('compact <id>').requiredOption('--digest <digest>', 'Digest from the compaction preview you reviewed').description('Remove only previewed regenerable dependencies; keep worktrees and history').action(async (id: string, opts: { digest: string }) => print(await request(`/tasks/${id}/compact`, 'POST', { digest: opts.digest })));
 tasks.command('cleanup <id>').description('Remove a finished task’s managed worktrees and item branches (keeps a completed task’s branch)').action(async (id: string) => print(await request(`/tasks/${id}/cleanup`, 'POST', {})));
 const auth = cli.command('auth');
+auth.command('account-id <username>').description('Print the stable ID of an existing gateway account').action((username: string) => {
+  const dir = dataDirectory();
+  const accounts = new LoginAccounts(join(dir, existsSync(join(dir, 'devagents.db')) ? 'devagents.db' : 'accounts.db'));
+  try {
+    const account = accounts.passwordAccount(username);
+    if (!account) throw new AppError('unknown_account', 'Unknown account');
+    console.log(account.user.id);
+  } finally { accounts.close(); }
+});
+auth.command('vault-owner').description('Report the internal owner ID for host-side KMS unlock').action(() => {
+  if (loginConfig().mode !== 'shared') throw new AppError('invalid_config', 'KMS vault unlock requires shared mode');
+  console.log(sharedVaultOwner(dataDirectory()));
+});
 auth.command('vault-exists').description('Report whether encrypted credentials exist').action(async () => {
   const vault = await configuredVault(dataDirectory());
   if (!vault) throw new AppError('vault_unconfigured', 'Use the Compose launcher for encrypted container storage');
-  console.log(await vault.exists() || await (await configuredVault(dataDirectory(), 'claude'))!.exists() ? 'yes' : 'no');
+  console.log(await vaultMaterialExists(dataDirectory(), vault.runtimeDir) ? 'yes' : 'no');
 });
-auth.command('unlock').description('Unlock the memory-backed runtime using a key from stdin').action(async () => {
+auth.command('unlock').description('Unlock the memory-backed runtime using a key from stdin').option('--kms-owner <id>', 'Bind a KMS-protected vault to its workspace owner').action(async (opts: { kmsOwner?: string }) => {
   const vault = await configuredVault(dataDirectory());
   if (!vault) throw new AppError('vault_unconfigured', 'Use the Compose launcher for encrypted container storage');
   let input = '';
@@ -386,6 +443,8 @@ auth.command('unlock').description('Unlock the memory-backed runtime using a key
     input += chunk.toString();
     if (input.length > 128) throw new AppError('invalid_master_key', 'Invalid OS credential-store input');
   }
+  if (opts.kmsOwner && loginConfig().mode !== 'shared') throw new AppError('invalid_config', 'KMS vault unlock requires shared mode');
+  await verifyVaultBinding(dataDirectory(), vault.runtimeDir, input.trim(), opts.kmsOwner);
   await vault.unlock(input.trim());
   await (await configuredVault(dataDirectory(), 'claude'))!.unlock(input.trim());
   // Admission opens only after both vaults have restored their private runtime files.

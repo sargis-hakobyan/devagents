@@ -1,17 +1,16 @@
 import { taskExecution } from '../domain/execution.js';
 import { taskUsage } from '../domain/usage.js';
 import type { SetupAuth } from '../setup/auth.js';
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises';
-import { join } from 'node:path';
+import { createServer, type ServerResponse } from 'node:http';
 import { z, ZodError } from 'zod';
 import type { TaskService } from '../orchestration/service.js';
 import { AppError } from '../domain/errors.js';
 import { ProjectId, State, TeamId } from '../domain/schemas.js';
 import { environmentSecrets, redactValues, log } from '../telemetry/redact.js';
-import { BrowserSessions, SESSION_COOKIE, parseCookies, sessionCookie, clearedSessionCookie, type BrowserSession } from './session.js';
-import { securityHeaders, serveUi } from './static.js';
+import { createBrowserAccess, type BrowserAccessOptions } from './browser-access.js';
+import { runtimeAccess } from './workspace-gateway.js';
+import { body } from './http-body.js';
+import { securityHeaders } from './static.js';
 import { evidenceMetadata } from './evidence.js';
 import type { ProjectIntegrationService } from '../integrations/service.js';
 import type { PullRequestService } from '../integrations/pull-requests.js';
@@ -21,27 +20,6 @@ import { availableTickets } from '../integrations/available.js';
 import { readTicket } from '../integrations/tickets.js';
 import { ticketPicture } from '../integrations/ticket-files.js';
 
-export async function accessToken(dataDir: string): Promise<string> {
-  await mkdir(dataDir, { recursive: true, mode: 0o700 });
-  // A pre-existing, more permissive data directory is tightened on every start; the token inside is 0600.
-  await chmod(dataDir, 0o700);
-  const path = join(dataDir, 'api-token');
-  try { await writeFile(path, randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 }); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
-  await chmod(path, 0o600);
-  return (await readFile(path, 'utf8')).trim();
-}
-async function body(req: IncomingMessage, limit = 256 * 1024): Promise<unknown> {
-  if (!req.headers['content-type']?.startsWith('application/json')) throw new AppError('invalid_content_type', 'Use application/json', 415);
-  let size = 0; const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > limit) throw new AppError('body_too_large', 'Request exceeds the allowed size', 413);
-    chunks.push(chunk as Buffer);
-  }
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
-  catch { throw new AppError('invalid_json', 'Invalid JSON request'); }
-}
 /** A picture from a ticket is remote content: it is sent as the checked image type only, never sniffed, cached or allowed to run anything. */
 function picture(res: ServerResponse, file: { type: string; bytes: Buffer }): void {
   res.writeHead(200, { ...securityHeaders, 'content-type': file.type, 'content-length': String(file.bytes.byteLength), 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox", 'content-disposition': 'inline' });
@@ -61,20 +39,13 @@ function boundEvidence(entry: { sequence: number; kind: string; at: string; data
 }
 const integer = (value: string | null, fallback: number) => { const n = Number(value ?? fallback); return Number.isInteger(n) && n >= 0 ? n : fallback; };
 
-export type ApiOptions = {
+export type ApiOptions = BrowserAccessOptions & {
+  workspaceOwnerId?: string;
+  privateRuntimeOwner?: string;
   setupAuth?: SetupAuth;
   claudeAuth?: SetupAuth;
   assertSetupIdle?: () => void;
-  sessions?: BrowserSessions;
-  uiRoot?: string | undefined;
   status?: () => Promise<unknown>;
-  secureCookies?: boolean;
-  /**
-   * The port the browser reaches the service on. In Docker the service listens on 4310 but Compose
-   * publishes a host port, so the Host allowlist and sign-in links must use the published one.
-   * Defaults to the listening port.
-   */
-  publicPort?: number | undefined;
   /** Per-project GitHub and Jira connections; absent on services that do not configure a secret store. */
   integrations?: ProjectIntegrationService;
   pullRequests?: PullRequestService;
@@ -82,76 +53,34 @@ export type ApiOptions = {
   trackers?: TrackerService;
   /** Model lists read from the engines on request; absent where no engine can be asked. */
   models?: ModelCatalogService;
-  /** Host header values that may carry a browser session; defaults to loopback names on the public port. */
-  allowedHosts?: (port: number) => string[];
 };
-type Principal = { kind: 'bearer' } | { kind: 'session'; session: BrowserSession };
 
-export function createApi(service: TaskService, token: string, options: ApiOptions = {}) {
+export function createApi(application: TaskService, token: string, options: ApiOptions = {}) {
   let maintenanceUntil = 0;
-  const sessions = options.sessions ?? new BrowserSessions();
+  const workspaceFor = application.workspaceFor(options.privateRuntimeOwner || options.sharedLogin ? { ownerId: options.privateRuntimeOwner ?? options.workspaceOwnerId } : 'local');
   // Responses use the store's secret list (environment heuristic plus configured provider keys), the same list applied at rest.
-  const secrets = [...new Set([...environmentSecrets(), ...service.store.secrets])];
+  const secrets = [...new Set([...environmentSecrets(), ...application.store.secrets])];
   const send = (res: ServerResponse, code: number, data: unknown, extra: Record<string, string> = {}) => respond(res, code, data, extra, secrets);
-  const allowedHosts = (port: number) => (options.allowedHosts ?? (p => ['127.0.0.1', 'localhost', '[::1]'].map(h => `${h}:${p}`)))(port);
-  const publicPort = (req: IncomingMessage) => options.publicPort ?? req.socket.localPort ?? 0;
-  /**
-   * Bearer requests keep the original contract: any Origin header is refused, so the CLI path never
-   * serves a browser. Cookie requests must come from the same origin on an allowed loopback host and,
-   * for state-changing methods, carry the session's CSRF token.
-   */
-  const authenticate = (req: IncomingMessage): Principal => {
-    if (req.headers.authorization !== undefined) {
-      if (req.headers.origin) throw new AppError('forbidden_origin', 'Browser requests are not enabled on the bearer path', 403);
-      const supplied = Buffer.from(req.headers.authorization); const expected = Buffer.from(`Bearer ${token}`);
-      if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) throw new AppError('unauthorized', 'Use the local CLI or a valid bearer token', 401);
-      return { kind: 'bearer' };
-    }
-    const cookie = parseCookies(req.headers.cookie).get(SESSION_COOKIE);
-    if (!cookie) throw new AppError('unauthorized', 'Sign in to the browser UI with the link from: devagents ui', 401);
-    const host = (req.headers.host ?? '').toLowerCase();
-    if (!allowedHosts(publicPort(req)).includes(host)) throw new AppError('forbidden_host', 'Browser sessions are only accepted on the local loopback host and published port', 403);
-    if (req.headers.origin !== undefined && req.headers.origin !== `http://${host}` && req.headers.origin !== `https://${host}`) throw new AppError('forbidden_origin', 'Cross-origin browser requests are not allowed', 403);
-    const site = req.headers['sec-fetch-site'];
-    if (typeof site === 'string' && site !== 'same-origin' && site !== 'none') throw new AppError('forbidden_origin', 'Cross-site browser requests are not allowed', 403);
-    const session = sessions.get(cookie);
-    if (!session) throw new AppError('session_expired', 'Your browser session has ended; create a new link with: devagents ui', 401);
-    if (!['GET', 'HEAD'].includes(req.method ?? '') && !sessions.verifyCsrf(session, req.headers['x-csrf-token'] as string | undefined)) throw new AppError('csrf_required', 'State-changing requests need the session CSRF token', 403);
-    return { kind: 'session', session };
+  const endSetup = async (sessionId: string) => {
+    await Promise.allSettled([options.setupAuth?.cancel(sessionId), options.claudeAuth?.cancel(sessionId)]);
   };
-  /** Tasks store the project ID; the name is added on the way out because it can change. */
-  const projectNames = () => new Map(service.store.projects().map(p => [p.id, p.name ?? p.id]));
-  const named = <T extends { projectId: string }>(task: T, names = projectNames()) => ({ ...task, projectName: names.get(task.projectId) ?? task.projectId });
+  const browserAccess = createBrowserAccess(token, options, send, endSetup);
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', 'http://localhost'); const path = url.pathname;
-      if (req.method === 'GET' && path === '/health') return send(res, 200, { status: 'ok', milestone: 'M3', ui: Boolean(options.uiRoot), executionEnabled: service.executionEnabled });
+      if (req.method === 'GET' && path === '/health') return send(res, 200, { status: 'ok', milestone: 'M3', ui: Boolean(options.uiRoot), executionEnabled: application.executionEnabled });
       if (req.method === 'GET' && path === '/') { res.writeHead(302, { ...securityHeaders, location: '/ui/' }); return res.end(); }
-      if (req.method === 'GET' && path === '/ui/login') {
-        const session = sessions.exchange(url.searchParams.get('code') ?? '');
-        if (!session) throw new AppError('invalid_login_code', 'This sign-in link is invalid, expired or already used; create a new one with: devagents ui', 403);
-        res.writeHead(303, { ...securityHeaders, 'set-cookie': sessionCookie(session.id, Boolean(options.secureCookies), sessions.cookieMaxAgeSeconds), location: url.searchParams.get('next') === 'setup' ? '/ui/settings/setup' : '/ui/', 'cache-control': 'no-store' }); return res.end();
+      const access = options.privateRuntimeOwner ? runtimeAccess(req, options.privateRuntimeOwner) : await browserAccess(req, res, url);
+      if (!access) return;
+      const { actor, setupOwner: owner } = access;
+      const service = workspaceFor(actor);
+      if (options.privateRuntimeOwner && req.method === 'POST' && path === '/internal/session-ended') {
+        await endSetup(owner);
+        return send(res, 200, { ended: true });
       }
-      if (req.method === 'GET' && (path === '/ui' || (path.startsWith('/ui/') && !['/ui/session', '/ui/logout', '/ui/bootstrap'].includes(path)))) return serveUi(options.uiRoot, path, res);
-      const principal = authenticate(req);
-      if (path === '/ui/bootstrap' && req.method === 'POST') {
-        if (principal.kind !== 'bearer') throw new AppError('bearer_required', 'Sign-in links are created through the CLI', 403);
-        const input = z.object({ setup: z.boolean().optional() }).strict().parse(await body(req));
-        return send(res, 201, { url: `http://127.0.0.1:${publicPort(req)}/ui/login?code=${sessions.mintCode()}${input.setup ? '&next=setup' : ''}`, expiresInSeconds: 600, singleUse: true });
-      }
-      if (path === '/ui/session' && req.method === 'GET') {
-        if (principal.kind !== 'session') throw new AppError('session_required', 'Only browser sessions have a CSRF token', 403);
-        const expires = sessions.expiresAt(principal.session);
-        return send(res, 200, { authenticated: true, csrfToken: principal.session.csrfToken, expiresAt: expires === undefined ? null : new Date(expires).toISOString() });
-      }
-      if (path === '/ui/logout' && req.method === 'POST') {
-        if (principal.kind !== 'session') throw new AppError('session_required', 'Only browser sessions can sign out', 403);
-        if (options.setupAuth) await options.setupAuth.cancel(principal.session.id).catch(() => {});
-        if (options.claudeAuth) await options.claudeAuth.cancel(principal.session.id).catch(() => {});
-        sessions.destroy(principal.session.id);
-        return send(res, 200, { signedOut: true }, { 'set-cookie': clearedSessionCookie(Boolean(options.secureCookies)) });
-      }
-      const owner = principal.kind === 'session' ? principal.session.id : 'terminal';
+      /** Tasks store the project ID; the name is added on the way out because it can change. */
+      const projectNames = () => new Map(service.store.projects().map(p => [p.id, p.name ?? p.id]));
+      const named = <T extends { projectId: string }>(task: T, names = projectNames()) => ({ ...task, projectName: names.get(task.projectId) ?? task.projectId });
       const authController = path.startsWith('/setup/claude-auth') ? options.claudeAuth : options.setupAuth;
       const authPath = path.replace('/setup/claude-auth', '/setup/auth');
       if (authPath === '/setup/auth' && req.method === 'GET') return send(res, 200, authController ? await authController.status(owner) : { available: false, busy: false, connection: { saved: false } });
@@ -167,11 +96,11 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
         return send(res, 200, await authController.cancel(owner));
       }
       if (path === '/setup/maintenance/release' && req.method === 'POST') {
-        if (principal.kind !== 'bearer') throw new AppError('bearer_required', 'Project mounts are managed by the local launcher.', 403);
+        if (actor.kind !== 'operator') throw new AppError('bearer_required', 'Project mounts are managed by the local launcher.', 403);
         maintenanceUntil = 0; return send(res, 200, { ready: true });
       }
       if (path === '/setup/maintenance' && req.method === 'POST') {
-        if (principal.kind !== 'bearer') throw new AppError('bearer_required', 'Project mounts are managed by the local launcher.', 403);
+        if (actor.kind !== 'operator') throw new AppError('bearer_required', 'Project mounts are managed by the local launcher.', 403);
         options.assertSetupIdle?.();
         if (options.setupAuth?.busy || options.claudeAuth?.busy || service.store.summaries({ states: ['planning', 'ready', 'running', 'validating', 'reviewing', 'repairing', 'committing'], limit: 1 }).tasks.length) throw new AppError('setup_busy', 'Finish or cancel active work and sign-in before changing project mounts.', 409);
         maintenanceUntil = Date.now() + 120000;
@@ -185,7 +114,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
         return send(res, 200, service.store.projects().filter(p => filter === 'all' || Boolean(p.archivedAt) === (filter === 'archived')));
       }
       if (req.method === 'PUT' && path === '/projects/host-folders') {
-        if (principal.kind !== 'bearer') throw new AppError('bearer_required', 'Project folders are reported by the local launcher.', 403);
+        if (actor.kind !== 'operator') throw new AppError('bearer_required', 'Project folders are reported by the local launcher.', 403);
         const input = z.strictObject({ folders: z.record(z.string().min(1).max(4096), z.string().min(1).max(4096)) }).parse(await body(req));
         if (Object.keys(input.folders).length > 500) throw new AppError('invalid_request', 'Too many folders');
         return send(res, 200, { updated: service.store.setProjectHostPaths(input.folders) });
@@ -320,7 +249,7 @@ export function createApi(service: TaskService, token: string, options: ApiOptio
       if (req.method === 'GET' && path === '/scheduler') return send(res, 200, service.scheduling());
       if (req.method === 'GET' && path === '/status') {
         if (!options.status) throw new AppError('not_found', 'Status reporting is not configured', 404);
-        return send(res, 200, { ...await options.status() as object, scheduler: service.scheduling() });
+        return send(res, 200, { ...await options.status() as object, ...(options.privateRuntimeOwner ? { privateWorkspace: true } : {}), scheduler: service.scheduling() });
       }
       if (req.method === 'GET' && path === '/storage') return send(res, 200, await service.storageStatus());
       // Tickets that match a project's rule and have no task yet. Read only; starting one is a normal task submission.

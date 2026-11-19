@@ -14,6 +14,10 @@ DevAgents coordinates agents that plan changes, write code, run checks, and inde
 
 Choose each member's role, coding engine, and model. DevAgents handles delegation, isolated worktrees, integration, and bounded repair loops while keeping the plan, execution history, and validation evidence together.
 
+Shared mode supports password login to an owner-bound workspace and optional KMS unlock for a fresh Docker vault. Local mode remains the default. Try [two private workspaces on one machine](docs/SETUP.md#two-private-workspaces-on-one-server), or see [single-runtime setup](docs/SETUP.md#shared-server-login-foundation).
+
+Open **Settings → Claude connection → Set up / change Claude connection** for the [Claude setup flow](docs/SETUP.md#claude).
+
 ## Quickstart
 
 **Requires:** Git and Docker with Compose on macOS or desktop Linux. Linux also needs `openssl`, `secret-tool`, and an unlocked desktop keyring. No host Node.js installation is needed for Docker.
@@ -69,7 +73,7 @@ The starter team includes a **Tech Lead**, **Frontend Developer**, **Backend Dev
 | **Claude** | Implemented with deterministic adapter and UI checks. Authenticated execution and account model access remain unverified. See [connection options and limits](docs/SETUP.md#claude). |
 | **Local models** | Planned; no execution adapter yet. |
 
-Model choices do not guarantee account access or quota. DevAgents stores task state locally; configured coding engines communicate with their model providers.
+Settings shows separate **Codex connection** and **Claude connection** cards side by side on wide screens and stacked on smaller screens, each with its own status and setup link. Model choices do not guarantee account access or quota. DevAgents stores task state locally; configured coding engines communicate with their model providers.
 
 ## Execution boundaries
 

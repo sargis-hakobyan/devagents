@@ -7,9 +7,19 @@ export class SignedOutError extends ApiError {
   constructor(message: string) { super(401, 'session_expired', message); }
 }
 let csrfToken: string | undefined;
+let viewer: string | undefined;
+const sessionChange = 'devagents.session.changed';
+if (typeof window !== 'undefined') window.addEventListener('storage', event => {
+  if (event.key === sessionChange) location.reload();
+});
+function notifyOtherTabs() {
+  try { localStorage.setItem(sessionChange, crypto.randomUUID()); } catch { /* Server checks remain authoritative. */ }
+}
+
 export async function api<T>(path: string, init: { method?: string; body?: unknown; idempotencyKey?: string; timeoutMs?: number } = {}): Promise<T> {
   const method = init.method ?? 'GET';
   const headers: Record<string, string> = { accept: 'application/json' };
+  if (viewer) headers['x-devagents-viewer'] = viewer;
   if (init.idempotencyKey) headers['idempotency-key'] = init.idempotencyKey;
   if (init.body !== undefined) headers['content-type'] = 'application/json';
   if (method !== 'GET') {
@@ -24,12 +34,32 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   if (!res.ok) { const e = data as { error?: string; message?: string } | undefined; throw new ApiError(res.status, e?.error ?? 'request_failed', e?.message ?? `Request failed (${res.status})`); }
   return data as T;
 }
-export async function session(): Promise<{ authenticated: boolean; csrfToken: string; expiresAt: string | null }> {
-  const s = await api<{ authenticated: boolean; csrfToken: string; expiresAt: string | null }>('/ui/session');
+export type BrowserIdentity = { authenticated: boolean; csrfToken: string; expiresAt: string | null; method: 'local' | 'password'; user: { id: string; name: string; role: 'admin' } };
+function clearPrivateDrafts() {
+  sessionStorage.removeItem('devagents.submission.v1');
+  sessionStorage.removeItem('devagents.submit.ticket');
+}
+export async function session(): Promise<BrowserIdentity> {
+  const s = await api<BrowserIdentity>('/ui/session');
+  if (s.method === 'password') {
+    viewer = s.user.id;
+    if (sessionStorage.getItem('devagents.draft-owner') !== viewer) {
+      clearPrivateDrafts();
+      sessionStorage.setItem('devagents.draft-owner', viewer);
+    }
+  }
   csrfToken = s.csrfToken; return s;
 }
+/** Password sign-in has no authenticated session yet; the server checks its exact Origin. */
+export async function login(username: string, password: string): Promise<void> {
+  const res = await fetch('/ui/login', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }), signal: AbortSignal.timeout(30000) });
+  const data = await res.json() as { error?: string; message?: string };
+  if (!res.ok) throw new ApiError(res.status, data.error ?? 'login_failed', data.message ?? 'Sign-in failed');
+  csrfToken = undefined;
+  notifyOtherTabs();
+}
 export async function logout(): Promise<void> {
-  try { await api('/ui/logout', { method: 'POST', body: {} }); } finally { csrfToken = undefined; }
+  try { await api('/ui/logout', { method: 'POST', body: {} }); } finally { csrfToken = undefined; if (viewer) { clearPrivateDrafts(); notifyOtherTabs(); } }
 }
 
 export type TaskState = 'draft' | 'awaiting_mode' | 'planning' | 'awaiting_plan_approval' | 'ready' | 'running' | 'validating' | 'reviewing' | 'committing' | 'repairing' | 'awaiting_external_approval' | 'completed' | 'failed' | 'cancelled';
@@ -59,6 +89,7 @@ export type ProjectSkills = { skills: { name: string; description: string; path:
 export type ModelCatalog = { engine: string; models: { id: string; name: string }[]; loadedAt: string; newIds: string[] };
 export type TeamOptions = { platform: string; defaults: { devagentsRules: boolean; engine: string; provider: string; model: string | null }; capabilities: string[]; engines: { id: string; executable: boolean; reason: string | null }[]; providers: { id: string; kind: string; auth: string; engines?: string[]; executable: boolean; reason: string | null }[]; limits: { members: number; instructions: number; instructionBytes: number; capabilities: number } };
 export type Status = {
+  privateWorkspace?: boolean;
   scheduler?: SchedulerStatus;
   service: { version: string; host: string; port: number; platform: string; node: string; dataDir: string; executionEnabled: boolean; startedAt: string; checkedAt: string };
   codex: { installed: boolean; version?: string; signedIn: boolean; credentialStore: 'keyring' | 'file'; vaultLocked: boolean; modelAccessVerified: false };

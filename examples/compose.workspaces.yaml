@@ -1,0 +1,81 @@
+name: devagents-private-preview
+x-image: &image
+  image: devagents-private-preview:local
+  build:
+    context: ..
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+x-runtime: &runtime
+  <<: *image
+  cpus: 2
+  mem_limit: 4g
+  pids_limit: 512
+  tmpfs:
+    - /tmp:size=128m,mode=1777
+    - /run/devagents-auth:size=64m,mode=0700,uid=1000,gid=1000,exec
+  security_opt: ["no-new-privileges:true", "systempaths=unconfined"]
+  environment:
+    DEVAGENTS_MODE: shared
+    DEVAGENTS_PUBLIC_ORIGIN: http://127.0.0.1:${DEVAGENTS_PREVIEW_PORT:-4312}
+    DEVAGENTS_CREDENTIAL_RUNTIME: /run/devagents-auth
+  healthcheck:
+    test: ["CMD", "node", "-e", "require('http').get({socketPath:'/run/devagents-workspace/api.sock',path:'/health'}, r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+    interval: 5s
+    timeout: 4s
+    retries: 10
+services:
+  # This one-shot development fixture seeds only the example's dedicated login volume.
+  demo-accounts:
+    <<: *image
+    network_mode: none
+    command: ["node", "/demo/seed.mjs"]
+    volumes:
+      - gateway-data:/data
+      - ./workspace-demo-accounts.mjs:/demo/seed.mjs:ro
+  alice:
+    <<: *runtime
+    command: ["sh", "/demo/start.sh", "11111111-1111-4111-8111-111111111111"]
+    volumes:
+      - ./start-demo-workspace.sh:/demo/start.sh:ro
+      - alice-data:/data
+      - alice-socket:/run/devagents-workspace
+      - alice-repos:/projects
+    networks: [alice-network]
+  bob:
+    <<: *runtime
+    command: ["sh", "/demo/start.sh", "22222222-2222-4222-8222-222222222222"]
+    volumes:
+      - ./start-demo-workspace.sh:/demo/start.sh:ro
+      - bob-data:/data
+      - bob-socket:/run/devagents-workspace
+      - bob-repos:/projects
+    networks: [bob-network]
+  gateway:
+    <<: *image
+    command: ["node", "dist/cli/main.js", "gateway", "/run/workspaces"]
+    depends_on:
+      demo-accounts: {condition: service_completed_successfully}
+      alice: {condition: service_healthy}
+      bob: {condition: service_healthy}
+    environment:
+      DEVAGENTS_MODE: shared
+      DEVAGENTS_PUBLIC_ORIGIN: http://127.0.0.1:${DEVAGENTS_PREVIEW_PORT:-4312}
+    ports: ["127.0.0.1:${DEVAGENTS_PREVIEW_PORT:-4312}:4310"]
+    volumes:
+      - gateway-data:/data
+      - alice-socket:/run/workspaces/11111111-1111-4111-8111-111111111111:ro
+      - bob-socket:/run/workspaces/22222222-2222-4222-8222-222222222222:ro
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+volumes:
+  gateway-data:
+  alice-data:
+  bob-data:
+  alice-repos:
+  bob-repos:
+  alice-socket:
+  bob-socket:
+networks:
+  alice-network:
+  bob-network:

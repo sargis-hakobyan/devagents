@@ -1,5 +1,57 @@
 # Setup
 
+## Two private workspaces on one server
+
+The local Docker example runs a shared login gateway and two owner runtimes on one machine. Start it from the repository root:
+
+```sh
+docker compose -f examples/compose.workspaces.yaml build gateway
+docker compose -f examples/compose.workspaces.yaml up -d --no-build
+```
+
+Open **http://127.0.0.1:4312/ui/** in separate browser profiles for the two fixture accounts: `alice` / `demo-alice` and `bob` / `demo-bob`. The example binds to loopback and stores fixture data in dedicated Docker volumes. Each person can register their own `/projects/example` repository through **Projects → Register repository**. To try provider setup, first unlock the selected workspace using the host OS keychain:
+
+```sh
+scripts/unlock-workspace.sh examples/compose.workspaces.yaml alice
+scripts/unlock-workspace.sh examples/compose.workspaces.yaml bob
+```
+
+Then open **Settings → Guided setup** in that person's browser. A saved connection belongs to that runtime. The example uses the real engine adapters; running a model task requires that user's provider connection. For a different local port, export `DEVAGENTS_PREVIEW_PORT` before starting Compose. To stop the example and retain the workspaces, run `docker compose -f examples/compose.workspaces.yaml down`.
+
+For existing application identities, omit the example account seeder. Start `gateway <absolute-socket-directory>` in shared mode with the login database and session volume. The operator can look up an existing username with `auth account-id <username>` inside the gateway. Provision one container per internal UUID, running `serve --workspace-owner <uuid> --socket-directory /run/devagents-workspace`. Give it a dedicated data volume, private tmpfs credential runtime, repository clone/mount, resource limits and socket volume. Mount only that socket volume into the gateway at `<socket-directory>/<uuid>` read-only. Use separate clones even when users work against the same GitHub repository. The example shows the wiring. The gateway and runtimes use the same container UID.
+
+Each runtime resumes its own persisted queue when restarted. Workspaces have independent concurrency settings. Additional users need a provisioned runtime and an existing identity. The KMS procedure below also works with `scripts/unlock-workspace.sh` when `DEVAGENTS_KMS_KEY_ARN` is exported. Keep the trusted gateway and its socket directory inaccessible to workers belonging to other users.
+
+## Shared-server login foundation
+
+Local mode remains the default: the existing launcher, one-time browser links and engine credentials work as before. The single-runtime shared configuration adds **one administrator login**, not private multi-user execution. See the two-workspace configuration above for multiple users. Existing projects, teams and tasks remain in the same workspace, accessible to this administrator.
+
+To try the password flow on a native service after `npm run build`:
+
+```sh
+DEVAGENTS_MODE=shared DEVAGENTS_PUBLIC_ORIGIN=http://127.0.0.1:4310 npm start
+```
+
+Open `http://127.0.0.1:4310/ui/`. The explicitly requested initial username/password is `admin` / `admin`. The service creates it only when no administrator password account exists, stores a salted scrypt hash, and keeps the same internal user ID and credential on restart. This bootstrap is for the first login increment; account management remains deferred.
+
+`DEVAGENTS_AUTH_PROVIDER=password` is optional in shared mode. Unknown providers and `DEVAGENTS_AUTH_PROVIDER=none` are rejected rather than disabling authentication. Organization SSO will be implemented only when separately requested.
+
+`DEVAGENTS_PUBLIC_ORIGIN` is mandatory in shared mode and must be the exact browser origin, with no path. HTTPS is required except for loopback development. HTTPS origins use Secure cookies. Forwarded headers never select the trusted origin or user. A reverse proxy must preserve the public Host header; configuring an origin does not install a proxy, expose a port or deploy to AWS.
+
+Compose forwards these three variables as well. Docker uses the OS keychain by default. Shared Docker deployments can select the KMS unlock procedure below. `devagents ui` returns the ordinary shared URL and still requires password login. In local mode it retains the existing one-time link behavior. To return to local mode, unset the three variables and restart; the two modes keep separate session files and cannot reuse each other's cookies.
+
+Shared browser sessions default to one hour idle and twelve hours total. Positive `DEVAGENTS_SESSION_IDLE_HOURS` and `DEVAGENTS_SESSION_MAX_HOURS` values override these durations; local mode still has no automatic expiry by default. Login attempts are limited to ten per minute across the service, with at most two password checks in flight. All existing browser CSRF protections and the operator CLI bearer authentication remain in place.
+
+### Unlock a shared Docker workspace with KMS
+
+For a fresh vault, set `DEVAGENTS_MODE=shared`, the public origin and `DEVAGENTS_KMS_KEY_ARN` in the **launcher shell**. Supply the full ARN of an existing symmetric key in your AWS environment. Run `./devagents start --later`. The host needs Python 3 and AWS CLI v2 with permission to call `kms:GenerateDataKeyWithoutPlaintext` and `kms:Decrypt` on that key. Scope the KMS role to the launcher host. Agent containers must be isolated from the host's AWS credential and instance metadata endpoints.
+
+The first unlock creates a 256-bit data key for the workspace owner. The launcher saves the KMS-encrypted copy under `.devagents/kms/<owner-id>.wrapped`. On subsequent starts the launcher decrypts it with the same KMS key and owner context and pipes it to the Docker vault. The existing engine and integration vaults use that data key. The container keeps the decrypted key on its private memory-backed mount. Keep the wrapped file with the workspace when moving the deployment or testing a restore.
+
+The data volume records the owner and a fingerprint of its KMS-protected key. Missing wrapped files, different owners, and attempts to replace a key protecting existing vault contents fail closed. Existing keychain-backed credentials still require their original key. Each runtime serves a single workspace owner. Use the loopback preview while the bootstrap password is in use.
+
+## Local startup
+
 DevAgents currently runs on macOS or desktop Linux with Docker Compose. Install and start Docker first. Credential encryption uses macOS Keychain, or Linux `openssl`, `secret-tool` and an unlocked desktop Secret Service. There is no plaintext fallback on headless Linux.
 
 From the cloned DevAgents folder:
@@ -113,7 +165,7 @@ Completed, failed and cancelled tasks automatically compact regenerable dependen
 
 Connect Claude before submitting work to a team with enabled Claude members. DevAgents checks each enabled member's engine/provider prerequisites before planning or creating a worktree. Disabled members and globally disabled QA are skipped. If a task already failed for missing sign-in, connect the provider and submit a new task; the failed task and its evidence are preserved. An idle Ready task does not block sign-in, but queued or running work does. Saved credentials do not guarantee model access or quota.
 
-Open **Settings → Setup → Connect Claude**. Choose an Anthropic API key, or choose **Use my Claude subscription** for your personal local connection. Generate a subscription token with the official `claude setup-token` command on your computer, then paste it into the password field. Never paste credentials into task descriptions, chat, YAML or source files. The generated token may expire; replace it through the same form when necessary. There is no automatic browser OAuth flow or token refresh in DevAgents.
+Open **Settings → Claude connection → Set up / change Claude connection** to open the Claude form directly at `/ui/settings/claude`. A shared-workspace login returns you to that page. Claude has its own Settings card, separate from Codex, showing its runtime, connection status and credential-storage requirements. The two cards sit side by side when space allows and stack on smaller screens. Choose an Anthropic API key, or choose **Use my Claude subscription** for your personal local connection. Generate a subscription token with the official `claude setup-token` command on your computer, then paste it into the password field. Never paste credentials into task descriptions, chat, YAML or source files. The generated token may expire; replace it through the same form when necessary. There is no automatic browser OAuth flow or token refresh in DevAgents.
 
 The Docker service encrypts both credential types using a separate Claude vault and the existing OS-keychain master key. Plaintext exists only in the private tmpfs runtime. Native services can receive `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` through their environment; browser credential saving currently requires the Docker vault. Environment API keys take precedence over subscription tokens. API-key providers with an explicit `apiKeyEnv` require that variable and never fall back to subscription billing.
 

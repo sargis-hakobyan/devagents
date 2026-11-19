@@ -1,6 +1,6 @@
 import type { ComponentChildren } from 'preact';
 import { useLocation } from 'preact-iso';
-import { logout, resources } from '../api';
+import { logout, resources, session } from '../api';
 import { relative, attentionStates } from '../format';
 import { retryNow, useConnection, useNow, usePoll } from '../state';
 
@@ -16,8 +16,9 @@ const icons = {
 export const Spark = ({ size = 22 }: { size?: number }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="#FFB703" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z" /></svg>;
 
 export function Shell({ children, context }: { children: ComponentChildren; context?: { kicker: string; title: string } }) {
-  const { path, route } = useLocation(); const connection = useConnection(); const now = useNow();
+  const { path } = useLocation(); const connection = useConnection(); const now = useNow();
   const status = usePoll(resources.status.key, resources.status.load, resources.status.intervalMs).data;
+  const identity = usePoll('session', session, 5 * 60 * 1000).data;
   const overview = usePoll(resources.overview.key, resources.overview.load, resources.overview.intervalMs).data;
   const attention = overview ? overview.attention.filter(t => attentionStates.includes(t.state)).length : 0;
   const nav = [['/ui/', 'Overview', icons.overview], ['/ui/tasks', 'Tasks', icons.tasks], ['/ui/teams', 'Teams', icons.teams], ['/ui/projects', 'Projects', icons.projects], ['/ui/tools', 'Tools', icons.tools], ['/ui/settings', 'Settings', icons.settings]] as const;
@@ -29,7 +30,7 @@ export function Shell({ children, context }: { children: ComponentChildren; cont
       <div class="brand">
         <a class="brand-name" href="/ui/"><Spark />devagents</a>
         <div class="brand-sep" />
-        <div class="brand-ctx"><small>{context?.kicker ?? 'Local workspace'}</small><span>{context?.title ?? (status ? `${status.service.host}:${status.service.port} · ${status.service.platform}` : '…')}</span></div>
+        <div class="brand-ctx"><small>{context?.kicker ?? (identity?.method === 'password' ? 'Shared server' : 'Local workspace')}</small><span>{context?.title ?? (identity?.method === 'password' ? identity.user.name : status ? `${status.service.host}:${status.service.port} · ${status.service.platform}` : '…')}</span></div>
       </div>
       <div class="band-right">
         <span class="chip" title={connection.lastUpdate ? `Last update ${connection.lastUpdate.toLocaleTimeString()}` : 'No update yet'}>
@@ -40,7 +41,7 @@ export function Shell({ children, context }: { children: ComponentChildren; cont
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={codex.signedIn ? '#FFD166' : '#FF8A8A'} stroke-width="3" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16h.01" /></svg>
           {codex.vaultLocked ? 'Codex credentials locked' : codex.signedIn ? 'Codex signed in · model access not verified' : codex.installed ? 'Codex not signed in' : 'Codex not installed'}
         </span>}
-        <button type="button" class="btn" onClick={() => { void logout().finally(() => route('/ui/signed-out')); }}>Sign out</button>
+        <button type="button" class="btn" onClick={() => { void logout().finally(() => location.replace('/ui/signed-out')); }}>Sign out</button>
       </div>
     </header>
     {status?.fixture && <div class="banner fixture" role="note"><span><b>Development fixture.</b> {status.fixture.label}</span></div>}

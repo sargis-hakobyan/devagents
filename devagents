@@ -57,6 +57,12 @@ compose() {
 cli() { compose exec -T devagents node dist/cli/main.js "$@"; }
 unlock() {
   vault_exists=$(cli auth vault-exists)
+  if [ -n "${DEVAGENTS_KMS_KEY_ARN:-}" ]; then
+    owner=$(cli auth vault-owner)
+    python3 scripts/kms-vault-key.py "$DEVAGENTS_KMS_KEY_ARN" "$owner" "$vault_exists" |
+      cli auth unlock --kms-owner "$owner"
+    return
+  fi
   vault_id="devagents-vault-$(printf '%s' "$PWD" | openssl dgst -sha256 | awk '{print $NF}')"
   if master=$(./scripts/vault-key.sh "$vault_id" "$vault_exists"); then
     printf '%s\n' "$master" | compose exec -T devagents node dist/cli/main.js auth unlock

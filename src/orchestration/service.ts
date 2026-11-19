@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { join } from 'node:path';
 import { readFile, realpath, rm } from 'node:fs/promises';
 import type { SavedTicketFile, TicketFiles } from '../domain/tickets.js';
+import { WorkspaceAccess, type Actor } from '../domain/identity.js';
 import { Store } from '../persistence/store.js';
 import { Config, Mode, ProjectName, TaskInput, TeamInput, newProjectId, TEAM_INSTRUCTION_BYTES, type AgentDefinition, type AppConfig, type Task, type TaskTeam, type TeamMember, type TeamRecord, type TeamReadiness, type TeamSummary } from '../domain/schemas.js';
 import { terminalStates } from '../domain/lifecycle.js';
@@ -30,6 +31,16 @@ export type TicketFileLoader = (task: Task, directory: string) => Promise<Ticket
 /** What every engine call of a ticket task receives besides its prompt. */
 export type TicketMaterial = { images: { path: string; mediaType: string }[]; text: string };
 export class TaskService {
+  /** Resolve the service only after the caller is authorized for this workspace. */
+  workspaceFor(mode: 'local' | { ownerId: string | undefined }): (actor: Actor) => TaskService {
+    const access = mode === 'local' ? WorkspaceAccess.local() : WorkspaceAccess.shared(mode.ownerId);
+    if (mode !== 'local') this.store.bindWorkspaceOwner(access.ownerId);
+    return actor => {
+      access.authorize(actor);
+      return this;
+    };
+  }
+
   private runner?: Runner;
   private ticketLoader?: TicketFileLoader;
   private readonly removingTicketFiles = new Map<string, Promise<void>>();

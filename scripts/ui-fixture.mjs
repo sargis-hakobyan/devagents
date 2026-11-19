@@ -11,9 +11,12 @@ import { Store } from '../dist/persistence/store.js';
 import { TaskService } from '../dist/orchestration/service.js';
 import { TaskRunner } from '../dist/orchestration/runner.js';
 import { Config } from '../dist/domain/schemas.js';
-import { createApi, accessToken } from '../dist/api/server.js';
+import { accessToken } from '../dist/auth/operator-token.js';
+import { createApi } from '../dist/api/server.js';
 import { statusLimits } from '../dist/api/status.js';
 import { BrowserSessions } from '../dist/api/session.js';
+import { LoginAccounts } from '../dist/persistence/login-accounts.js';
+import { PasswordLogin } from '../dist/auth/password.js';
 import { runProcess } from '../dist/engines/process.js';
 import { git } from '../dist/workspace/git.js';
 import { ProjectIntegrationService } from '../dist/integrations/service.js';
@@ -26,6 +29,7 @@ import { fakeTracker } from './fake-tracker.mjs';
 
 const arg = (name, fallback) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : fallback; };
 const port = Number(arg('port', 4399)); const holdMs = Number(arg('hold', 0));
+const sharedPort = Number(arg('shared-port', 0));
 const data = arg('data') ? resolve(arg('data')) : await mkdtemp(join(tmpdir(), 'devagents-ui-fixture-'));
 await rm(data, { recursive: true, force: true }); await mkdir(data, { recursive: true, mode: 0o700 });
 const root = await mkdtemp(join(tmpdir(), 'devagents-ui-repos-'));
@@ -175,6 +179,13 @@ const token = await accessToken(data); const sessions = new BrowserSessions();
 // Synthetic availability only: browser tests never inspect a host credential store or runtime login.
 const status = { service: { version: '0.1.0-fixture', host: '127.0.0.1', port, platform: process.platform, node: process.version, dataDir: data, executionEnabled: true, startedAt: new Date().toISOString(), checkedAt: new Date().toISOString() }, codex: { installed: true, version: 'fixture', signedIn: false, credentialStore: 'file', vaultLocked: false, modelAccessVerified: false }, claude: { installed: false, enabled: false, note: 'Adapter planned for M4' }, defaults: { devagentsRules: config.devagentsRules, engine: 'codex', provider: 'openai', model: null, providers: [{ id: 'openai', kind: 'openai', auth: 'login', apiKeyConfigured: null, executable: true }] }, limits: statusLimits(config), fixture: { label } };
 const server = createApi(service, token, { sessions, uiRoot: resolve('dist/ui'), status: async () => status, integrations, pullRequests, trackers, models });
+// Optional second entry point exercises the real password provider with this same disposable fixture.
+const accounts = sharedPort ? new LoginAccounts(join(data, 'devagents.db')) : undefined;
+const sharedServer = accounts ? createApi(service, token, {
+  sharedLogin: { provider: await PasswordLogin.create(accounts), users: accounts, publicOrigin: `http://127.0.0.1:${sharedPort}` },
+  workspaceOwnerId: accounts.passwordAccount('admin').user.id,
+  uiRoot: resolve('dist/ui'), status: async () => status, integrations, pullRequests, trackers, models,
+}) : undefined;
 
 // Representative tasks. Each completes (or stops) through the real orchestrator against real Git worktrees.
 // The service starts listening only after they exist, so /health means the fixture is complete.
@@ -189,10 +200,11 @@ submit('fixture', 'Document the release process'); // no mode: awaits the blocki
 if (holdMs > 0) submit('fixture', 'Long-running fixture task [hold]', { mode: 'autonomous' });
 
 await new Promise((ok, fail) => { server.once('error', fail); server.listen(port, '127.0.0.1', ok); });
+if (sharedServer) await new Promise((ok, fail) => { sharedServer.once('error', fail); sharedServer.listen(sharedPort, '127.0.0.1', ok); });
 await writeFile(join(data, 'ui-fixture.json'), JSON.stringify({ port, dataDir: data, tokenPath: join(data, 'api-token'), holdFile }));
 const link = `http://127.0.0.1:${port}/ui/login?code=${sessions.mintCode()}`;
 console.log(JSON.stringify({ ready: true, fixture: true, port, dataDir: data, login: link }));
 console.error(`DEVELOPMENT FIXTURE at http://127.0.0.1:${port}/ui/ — ${label}\nSign in once with: ${link}`);
-const shutdown = async () => { await runner.stop(); server.closeAllConnections(); server.close(); store.close(); await rm(root, { recursive: true, force: true }); process.exit(0); };
+const shutdown = async () => { await runner.stop(); sharedServer?.closeAllConnections(); sharedServer?.close(); accounts?.close(); server.closeAllConnections(); server.close(); store.close(); await rm(root, { recursive: true, force: true }); process.exit(0); };
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
 void readFile; // keep the import list aligned with optional diagnostics

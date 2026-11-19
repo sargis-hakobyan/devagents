@@ -4,6 +4,14 @@ import { usePoll } from '../state';
 import { CopyCommand } from './RegisterProject';
 import { SetupConnection } from '../components/SetupConnection';
 import { SetupTeam } from '../components/SetupTeam';
+export function ClaudeConnectionPage() {
+  const status = usePoll(resources.status.key, resources.status.load, resources.status.intervalMs);
+  if (!status.data) return status.error ? <ErrorNote message={status.error} /> : <Skeleton label="Loading Claude connection" />;
+  return <>
+    <div class="page-head"><h1>Claude connection</h1><a href="/ui/settings">All settings</a></div>
+    <SetupConnection engine="claude" locked={status.data.codex.vaultLocked} installed={status.data.codex.installed && status.data.claude.installed} />
+  </>;
+}
 export function SetupPage() {
   const status = usePoll(resources.status.key, resources.status.load, resources.status.intervalMs);
   const projects = usePoll(resources.projects.key, resources.projects.load, resources.projects.intervalMs);

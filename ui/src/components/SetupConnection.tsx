@@ -28,7 +28,7 @@ export function SetupConnection({ locked, installed, engine = 'codex' }: { locke
   };
   return <Card title={claude ? 'Connect Claude' : '1 · Connect Codex'} right={<Chip tone={locked || state?.locked ? 'warn' : state?.connection.saved ? 'ok' : 'neutral'}>{locked || state?.locked ? 'Credentials locked' : state?.connection.saved ? 'Connection saved' : 'Not connected'}</Chip>}><div class="form-stack">
     <b>{claude ? 'Claude · Anthropic' : 'Codex · OpenAI'}</b><span>{claude ? 'Use an Anthropic API key or connect your personal subscription token. Saved credentials do not verify model access or quota.' : 'Use your ChatGPT account or an OpenAI API key. Sign-in and model access are separate; no paid test runs here.'}</span>
-    {(locked || state?.locked) && <div class="note warn">Run <code>./devagents start</code> to unlock the encrypted vault using your OS credential store.</div>}
+    {(locked || state?.locked) && <div class="note warn">{status.data?.privateWorkspace ? 'Ask the server operator to unlock your workspace vault before connecting.' : <>Run <code>./devagents start</code> to unlock the encrypted vault using your OS credential store.</>}</div>}
     {(!installed || state?.unavailable) && <div class="note warn">{!installed && <b>✕ Not installed · </b>}Check the coding runtime and OS credential store. Start or rebuild with <code>./devagents start --build</code>.</div>}
     {!state?.available && <div class="note info">Browser sign-in is unavailable on this service. Use terminal setup below.</div>}
     {state?.connection.saved && <span>Saved method: {state.connection.method}. Future starts reuse this connection. Starting another sign-in replaces it.</span>}
@@ -40,6 +40,6 @@ export function SetupConnection({ locked, installed, engine = 'codex' }: { locke
     {!claude && <span>Device sign-in may need enabling in <a href="https://chatgpt.com/#settings/Security" target="_blank" rel="noopener noreferrer">ChatGPT Security settings</a>.</span>}
     <div class="actions"><button class="btn" disabled title="Local model execution is not available yet">Local / other models · coming later</button></div>
     {claude && <p class="hint">Personal local connection. Anthropic requires approval for third-party products offering subscription login; a subscription alone is not that approval.</p>}
-    <details><summary>Continue in your terminal</summary><CopyCommand command={claude ? "docker compose exec devagents node dist/cli/main.js auth claude --method api-key" : "./devagents setup --terminal"} /><CopyCommand command={claude ? "docker compose exec devagents node dist/cli/main.js auth claude --method subscription" : "npm run cli -- auth setup"} /></details>
+    {!status.data?.privateWorkspace && <details><summary>Continue in your terminal</summary><CopyCommand command={claude ? "docker compose exec devagents node dist/cli/main.js auth claude --method api-key" : "./devagents setup --terminal"} /><CopyCommand command={claude ? "docker compose exec devagents node dist/cli/main.js auth claude --method subscription" : "npm run cli -- auth setup"} /></details>}
   </div></Card>;
 }
